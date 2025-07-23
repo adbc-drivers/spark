@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/adbc-drivers/apache/spark/internal/hiveserver2"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
@@ -110,35 +109,17 @@ func (st *statementImpl) SetSqlQuery(query string) error {
 }
 
 func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, int64, error) {
-	req := &hiveserver2.TExecuteStatementReq{
-		SessionHandle: st.cnxn.session,
-		Statement:     st.query,
-	}
-	rdr, err := newRecordReader(context.Background(), st.cnxn.Alloc, st.cnxn.client, req)
-	if err != nil {
-		return nil, -1, err
-	}
-	return rdr, -1, nil
+	return st.cnxn.client.executeQuery(ctx, queryContext{
+		mem:   st.cnxn.Alloc,
+		query: st.query,
+	})
 }
 
 func (st *statementImpl) ExecuteUpdate(ctx context.Context) (int64, error) {
-	req := &hiveserver2.TExecuteStatementReq{
-		SessionHandle: st.cnxn.session,
-		Statement:     st.query,
-	}
-	resp, err := driverbase.WithShared(st.cnxn.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TExecuteStatementResp, error) {
-		return client.ExecuteStatement(ctx, req)
+	return st.cnxn.client.executeUpdate(ctx, queryContext{
+		mem:   st.cnxn.Alloc,
+		query: st.query,
 	})
-	if err != nil {
-		return -1, errToAdbcErr(adbc.StatusIO, err, "execute statement")
-	} else if err = statusToAdbcErr(resp.Status, "execute statement"); err != nil {
-		return -1, err
-	}
-	// TODO: if HasResultSet, do we have to explicitly free it?
-	if resp.OperationHandle.ModifiedRowCount == nil {
-		return -1, nil
-	}
-	return int64(*resp.OperationHandle.ModifiedRowCount), nil
 }
 
 func (st *statementImpl) ExecuteSchema(ctx context.Context) (*arrow.Schema, error) {

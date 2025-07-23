@@ -16,78 +16,37 @@ package spark
 
 import (
 	"context"
-	"net/url"
 
-	"github.com/adbc-drivers/apache/spark/internal/hiveserver2"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
-	"github.com/apache/thrift/lib/go/thrift"
 )
 
 type connectionImpl struct {
 	driverbase.ConnectionImplBase
 
-	transport thrift.TTransport
-	// TODO: this will need more abstraction so that we can also support
-	// Spark Connect and Livy.  Also in theory I think the lock is
-	// unnecessary unless it is Thrift-over-TCP.
-	client  *driverbase.Shared[hiveserver2.TCLIServiceClient]
-	session *hiveserver2.TSessionHandle
+	client sparkClient
 }
 
 type nilCloser struct{}
 
 func (nilCloser) Close() error { return nil }
 
-func (c *connectionImpl) Init(ctx context.Context, uri *url.URL) error {
-	cfg := &thrift.TConfiguration{}
-	// c.transport = thrift.NewTSocketConf(uri.Host, cfg)
-
-	// if err := c.transport.Open(); err != nil {
-	// 	return errToAdbcErr(adbc.StatusIO, err, "open thrift transport")
-	// }
-
-	var err error
-	c.transport, err = thrift.NewTHttpClient("http://localhost:10001/cliservice")
-	if err != nil {
-		return errToAdbcErr(adbc.StatusIO, err, "open Thrift client")
-	}
-	c.transport.(*thrift.THttpClient).SetHeader("authorization", "Basic dXNlcjo=")
-
-	factory := thrift.NewTBinaryProtocolFactoryConf(cfg)
-	iprot := factory.GetProtocol(c.transport)
-	oprot := factory.GetProtocol(c.transport)
-
-	client := hiveserver2.NewTCLIServiceClient(thrift.NewTStandardClient(iprot, oprot))
-
-	req := &hiveserver2.TOpenSessionReq{}
-	resp, err := client.OpenSession(ctx, req)
-	if err != nil {
-		return errToAdbcErr(adbc.StatusIO, err, "open HiveServer2 session")
-	} else if err = statusToAdbcErr(resp.Status, "open HiveServer2 session"); err != nil {
-		return err
-	}
-	c.client = driverbase.NewShared(client, nilCloser{})
-	c.session = resp.SessionHandle
+func (c *connectionImpl) Init(client sparkClient) error {
+	c.client = client
 	return nil
 }
 
 func (c *connectionImpl) Close() error {
-	if c.transport == nil {
-		return adbc.Error{
-			Code: adbc.StatusInvalidState,
-			Msg:  "[spark] connection not initialized or already closed",
-		}
+	if c.client == nil {
+		return c.ErrorHelper.Errorf(adbc.StatusInvalidState, "connection not initialized or already closed")
 	}
 
-	// TODO: close session
-
-	if err := c.transport.Close(); err != nil {
-		return errToAdbcErr(adbc.StatusIO, err, "close thrift transport")
+	if err := c.client.Close(); err != nil {
+		return err
 	}
-	c.transport = nil
+	c.client = nil
 	return nil
 }
 

@@ -23,7 +23,10 @@ import (
 	"github.com/apache/arrow-adbc/go/adbc"
 )
 
-var errTBD = errors.New("[spark] not implemented")
+var errTBD = adbc.Error{
+	Code: adbc.StatusNotImplemented,
+	Msg:  "[spark] TBD",
+}
 
 // errToAdbcErr converts an error to an ADBC error.
 func errToAdbcErr(defaultStatus adbc.Status, err error, context string, contextArgs ...any) error {

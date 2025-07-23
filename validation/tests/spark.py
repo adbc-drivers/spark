@@ -20,7 +20,7 @@ from adbc_drivers_validation import model, quirks
 class SparkThriftHttpQuirks(model.DriverQuirks):
     name = "spark_thrift_http"
     driver = "columnar_driver_spark"
-    driver_name = "Columnar ADBC Driver for Apache Spark"
+    driver_name = "ADBC Driver for Apache Spark"
     vendor_name = "Apache Spark"
     features = model.DriverFeatures(
         # connection_get_table_schema=True,
@@ -28,25 +28,20 @@ class SparkThriftHttpQuirks(model.DriverQuirks):
         # get_objects_constraints_foreign=True,
         # get_objects_constraints_primary=True,
         # get_objects_constraints_unique=True,
+        statement_bind=False,
         # statement_bulk_ingest=True,
         # statement_bulk_ingest_catalog=True,
         # statement_bulk_ingest_schema=True,
         # statement_bulk_ingest_temporary=True,
         # statement_execute_schema=True,
         # statement_get_parameter_schema=True,
+        statement_prepare=False,
         current_catalog="dev",
         current_schema="public",
         # secondary_schema=model.FromEnv("REDSHIFT_SECONDARY_SCHEMA"),
         # secondary_catalog=model.FromEnv("REDSHIFT_SECONDARY_CATALOG"),
         # secondary_catalog_schema=model.FromEnv("REDSHIFT_SECONDARY_CATALOG_SCHEMA"),
-        # supported_xdbc_fields=[
-        #     # "remarks" should work but can be null
-        #     "xdbc_type_name",
-        #     # "xdbc_num_prec_radix" should work but can be null
-        #     "xdbc_nullable",
-        #     "xdbc_is_nullable",
-        #     # "xdbc_column_def" should work but can be null
-        # ],
+        supported_xdbc_fields=[],
     )
     setup = model.DriverSetup(
         database={
