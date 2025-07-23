@@ -17,8 +17,8 @@ from adbc_drivers_validation.tests.ingest import (
     generate_tests,
 )
 
-from .spark import SparkThriftQuirks
+from .spark import SparkThriftHttpQuirks
 
 
 def pytest_generate_tests(metafunc) -> None:
-    return generate_tests(SparkThriftQuirks(), metafunc)
+    return generate_tests(SparkThriftHttpQuirks(), metafunc)

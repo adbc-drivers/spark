@@ -1,0 +1,1 @@
+SELECT 3.14F AS res
