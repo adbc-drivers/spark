@@ -18,12 +18,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/adbc-drivers/apache/spark/internal/hiveserver2"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
@@ -56,43 +58,91 @@ func (rr *recordReaderImpl) AppendRow(builder *array.RecordBuilder) error {
 	}
 	row := rr.results.Results.Rows[rr.nextRowIdx]
 	for i, col := range row.ColVals {
+		b := builder.Field(i)
 		switch {
 		case col.IsSetBoolVal():
 			if col.BoolVal.Value == nil {
-				builder.Field(i).AppendNull()
+				b.AppendNull()
 			} else {
-				builder.Field(i).(*array.BooleanBuilder).Append(*col.BoolVal.Value)
+				b.(*array.BooleanBuilder).Append(*col.BoolVal.Value)
+			}
+
+		case col.IsSetByteVal():
+			if col.ByteVal.Value == nil {
+				b.AppendNull()
+			} else {
+				b.(*array.Int8Builder).Append(*col.ByteVal.Value)
+			}
+
+		case col.IsSetDoubleVal():
+			if col.DoubleVal.Value == nil {
+				b.AppendNull()
+			} else if b.Type().ID() == arrow.FLOAT32 {
+				b.(*array.Float32Builder).Append(float32(*col.DoubleVal.Value))
+			} else {
+				b.(*array.Float64Builder).Append(*col.DoubleVal.Value)
 			}
 
 		case col.IsSetI16Val():
 			if col.I16Val.Value == nil {
-				builder.Field(i).AppendNull()
+				b.AppendNull()
 			} else {
-				builder.Field(i).(*array.Int16Builder).Append(*col.I16Val.Value)
+				b.(*array.Int16Builder).Append(*col.I16Val.Value)
 			}
 
 		case col.IsSetI32Val():
 			if col.I32Val.Value == nil {
-				builder.Field(i).AppendNull()
+				b.AppendNull()
 			} else {
-				// TODO: i8
-				builder.Field(i).(*array.Int32Builder).Append(*col.I32Val.Value)
+				b.(*array.Int32Builder).Append(*col.I32Val.Value)
 			}
 
 		case col.IsSetI64Val():
 			if col.I64Val.Value == nil {
-				builder.Field(i).AppendNull()
+				b.AppendNull()
 			} else {
-				builder.Field(i).(*array.Int64Builder).Append(*col.I64Val.Value)
+				b.(*array.Int64Builder).Append(*col.I64Val.Value)
 			}
 
 		case col.IsSetStringVal():
-			if col.StringVal.Value == nil {
-				builder.Field(i).AppendNull()
-			} else {
-				builder.Field(i).(*array.StringBuilder).Append(*col.StringVal.Value)
+			switch {
+			case col.StringVal.Value == nil:
+				b.AppendNull()
+			case b.Type().ID() == arrow.BINARY:
+				// TODO(lidavidm): check that the protocol passes binary data correctly
+				b.(*array.BinaryBuilder).Append([]byte(*col.StringVal.Value))
+			case b.Type().ID() == arrow.DATE32:
+				// YYYY-MM-DD
+				t, err := time.Parse("2006-01-02", *col.StringVal.Value)
+				if err != nil {
+					return adbc.Error{
+						Code: adbc.StatusInternal,
+						Msg:  fmt.Sprintf("[spark] Invalid date value %s: %v", *col.StringVal.Value, err),
+					}
+				}
+				b.(*array.Date32Builder).Append(arrow.Date32FromTime(t))
+			case b.Type().ID() == arrow.DECIMAL128:
+				ty := b.Type().(*arrow.Decimal128Type)
+				d, err := decimal128.FromString(*col.StringVal.Value, ty.Precision, ty.Scale)
+				if err != nil {
+					return adbc.Error{
+						Code: adbc.StatusInternal,
+						Msg:  fmt.Sprintf("[spark] Invalid decimal value %s: %v", *col.StringVal.Value, err),
+					}
+				}
+				b.(*array.Decimal128Builder).Append(d)
+			case b.Type().ID() == arrow.TIMESTAMP:
+				ts, err := arrow.TimestampFromString(*col.StringVal.Value, arrow.Microsecond)
+				if err != nil {
+					return adbc.Error{
+						Code: adbc.StatusInternal,
+						Msg:  fmt.Sprintf("[spark] Invalid timestamp value %s: %v", *col.StringVal.Value, err),
+					}
+				}
+				b.(*array.TimestampBuilder).Append(ts)
+			default:
+				b.(*array.StringBuilder).Append(*col.StringVal.Value)
 			}
-
 		default:
 			return adbc.Error{
 				Code: adbc.StatusNotImplemented,
@@ -136,8 +186,22 @@ func (rr *recordReaderImpl) NextResultSet(ctx context.Context, rec arrow.Record,
 			// so TypeDesc is instead a flattened tree.  Nested
 			// types contain indices to their child types
 
+			if len(col.TypeDesc.Types) != 1 {
+				return nil, adbc.Error{
+					Code: adbc.StatusNotImplemented,
+					Msg:  fmt.Sprintf("[spark] Unsupported type %s", col.TypeDesc),
+				}
+			}
+			desc := col.TypeDesc.Types[0]
+			if !desc.IsSetPrimitiveEntry() {
+				return nil, adbc.Error{
+					Code: adbc.StatusNotImplemented,
+					Msg:  fmt.Sprintf("[spark] Unsupported type %s", desc),
+				}
+			}
+
 			var ty arrow.DataType
-			switch col.TypeDesc.Types[0].PrimitiveEntry.Type {
+			switch desc.PrimitiveEntry.Type {
 			case hiveserver2.TTypeId_BOOLEAN_TYPE:
 				ty = arrow.FixedWidthTypes.Boolean
 			case hiveserver2.TTypeId_TINYINT_TYPE:
@@ -154,12 +218,31 @@ func (rr *recordReaderImpl) NextResultSet(ctx context.Context, rec arrow.Record,
 				ty = arrow.PrimitiveTypes.Float64
 			case hiveserver2.TTypeId_STRING_TYPE:
 				ty = arrow.BinaryTypes.String
+			case hiveserver2.TTypeId_TIMESTAMP_TYPE:
+				ty = arrow.FixedWidthTypes.Timestamp_us
+			case hiveserver2.TTypeId_BINARY_TYPE:
+				ty = arrow.BinaryTypes.Binary
+			case hiveserver2.TTypeId_DECIMAL_TYPE:
+				precision := desc.PrimitiveEntry.TypeQualifiers.Qualifiers[hiveserver2.PRECISION]
+				scale := desc.PrimitiveEntry.TypeQualifiers.Qualifiers[hiveserver2.SCALE]
+				if precision == nil || scale == nil {
+					return nil, adbc.Error{
+						Code: adbc.StatusInternal,
+						Msg:  fmt.Sprintf("[spark] Decimal type is missing precision/scale: %s", desc),
+					}
+				}
+				ty = &arrow.Decimal128Type{
+					Precision: precision.GetI32Value(),
+					Scale:     scale.GetI32Value(),
+				}
+			case hiveserver2.TTypeId_DATE_TYPE:
+				ty = arrow.FixedWidthTypes.Date32
 			case hiveserver2.TTypeId_VARCHAR_TYPE:
 				ty = arrow.BinaryTypes.String
 			default:
 				return nil, adbc.Error{
 					Code: adbc.StatusNotImplemented,
-					Msg:  fmt.Sprintf("[spark] Unsupported type %s", col.TypeDesc.Types[0].PrimitiveEntry.Type),
+					Msg:  fmt.Sprintf("[spark] Unsupported type %s", desc.PrimitiveEntry.Type),
 				}
 			}
 			fields[i] = arrow.Field{

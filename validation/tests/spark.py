@@ -17,8 +17,8 @@ from pathlib import Path
 from adbc_drivers_validation import model, quirks
 
 
-class SparkThriftQuirks(model.DriverQuirks):
-    name = "spark_thrift"
+class SparkThriftHttpQuirks(model.DriverQuirks):
+    name = "spark_thrift_http"
     driver = "columnar_driver_spark"
     driver_name = "Columnar ADBC Driver for Apache Spark"
     vendor_name = "Apache Spark"

@@ -23,14 +23,14 @@ from adbc_drivers_validation.tests.conftest import (  # noqa: F401
     pytest_collection_modifyitems,
 )
 
-from .spark import SparkThriftQuirks
+from .spark import SparkThriftHttpQuirks
 
 
 @pytest.fixture(scope="session")
 def driver(request) -> adbc_drivers_validation.model.DriverQuirks:
     driver = request.param
-    assert driver == "spark_thrift"
-    return SparkThriftQuirks()
+    assert driver == "spark_thrift_http"
+    return SparkThriftHttpQuirks()
 
 
 @pytest.fixture(scope="session")

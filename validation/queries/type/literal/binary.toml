@@ -12,13 +12,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from adbc_drivers_validation.tests.statement import (
-    TestStatement,  # noqa: F401
-    generate_tests,
-)
-
-from .spark import SparkThriftHttpQuirks
-
-
-def pytest_generate_tests(metafunc) -> None:
-    return generate_tests(SparkThriftHttpQuirks(), metafunc)
+[tags]
+sql-type-name = "BINARY"
