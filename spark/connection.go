@@ -29,10 +29,6 @@ type connectionImpl struct {
 	client sparkClient
 }
 
-type nilCloser struct{}
-
-func (nilCloser) Close() error { return nil }
-
 func (c *connectionImpl) Init(client sparkClient) error {
 	c.client = client
 	return nil
@@ -58,8 +54,16 @@ func (c *connectionImpl) PrepareDriverInfo(ctx context.Context, infoCodes []adbc
 }
 
 func (*connectionImpl) ListTableTypes(ctx context.Context) ([]string, error) {
-	// TODO:
-	return []string{"TABLE", "VIEW"}, nil
+	return []string{
+		"VIEW",
+		"FOREIGN",
+		"MANAGED",
+		"STREAMING_TABLE",
+		"MATERIALIZED_VIEW",
+		"EXTERNAL",
+		"MANAGED_SHALLOW_CLONE",
+		"EXTERNAL_SHALLOW_CLONE",
+	}, nil
 }
 
 func (c *connectionImpl) GetCurrentCatalog() (string, error) {
