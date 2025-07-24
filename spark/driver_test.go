@@ -243,7 +243,7 @@ func (suite *DriverTests) TestSelect() {
 		},
 		{
 			name:  "float32",
-			query: "SELECT CAST(3.25 AS REAL) AS value",
+			query: "SELECT 3.25F AS value",
 			schema: arrow.NewSchema([]arrow.Field{
 				{
 					Name:     "value",
@@ -255,7 +255,7 @@ func (suite *DriverTests) TestSelect() {
 		},
 		{
 			name:  "float64",
-			query: "SELECT CAST(3.25 AS FLOAT) AS value",
+			query: "SELECT 3.25D AS value",
 			schema: arrow.NewSchema([]arrow.Field{
 				{
 					Name:     "value",
@@ -303,19 +303,7 @@ func (suite *DriverTests) TestSelect() {
 		},
 		{
 			name:  "string",
-			query: "SELECT 'hello world'::TEXT AS greeting",
-			schema: arrow.NewSchema([]arrow.Field{
-				{
-					Name:     "greeting",
-					Type:     arrow.BinaryTypes.String,
-					Nullable: true,
-				},
-			}, nil),
-			expected: `[{"greeting": "hello world"}]`,
-		},
-		{
-			name:  "char",
-			query: "SELECT 'hello world'::CHAR(11) AS greeting",
+			query: "SELECT 'hello world' AS greeting",
 			schema: arrow.NewSchema([]arrow.Field{
 				{
 					Name:     "greeting",
@@ -327,7 +315,7 @@ func (suite *DriverTests) TestSelect() {
 		},
 		{
 			name:  "blob",
-			query: "SELECT from_hex('e38193e38293e381abe381a1e381afe38081e4b896e7958cefbc81') AS greeting",
+			query: "SELECT X'e38193e38293e381abe381a1e381afe38081e4b896e7958cefbc81' AS greeting",
 			schema: arrow.NewSchema([]arrow.Field{
 				{
 					Name:     "greeting",
@@ -350,34 +338,8 @@ func (suite *DriverTests) TestSelect() {
 			expected: `[{"date": "2025-01-01"}]`,
 		},
 		{
-			name:  "time",
-			query: "SELECT TIME '13:42:12.345678' AS time",
-			schema: arrow.NewSchema([]arrow.Field{
-				{
-					Name:     "time",
-					Type:     arrow.FixedWidthTypes.Time64us,
-					Nullable: true,
-				},
-			}, nil),
-			expected: `[{"time": "13:42:12.345678"}]`,
-		},
-		{
 			name:  "timestamp",
-			query: "SELECT TIMESTAMP '1971-01-02 01:02:03.456789' AS time",
-			schema: arrow.NewSchema([]arrow.Field{
-				{
-					Name: "time",
-					Type: &arrow.TimestampType{
-						Unit: arrow.Microsecond,
-					},
-					Nullable: true,
-				},
-			}, nil),
-			expected: `[{"time": "1971-01-02 01:02:03.456789"}]`,
-		},
-		{
-			name:  "timestamptz",
-			query: "SELECT TIMESTAMP WITH TIME ZONE '1971-01-02 01:02:03.456789' AS time",
+			query: "SELECT TIMESTAMP_NTZ '1971-01-02 01:02:03.456789' AS time",
 			schema: arrow.NewSchema([]arrow.Field{
 				{
 					Name: "time",
@@ -391,28 +353,19 @@ func (suite *DriverTests) TestSelect() {
 			expected: `[{"time": "1971-01-02 01:02:03.456789"}]`,
 		},
 		{
-			name:  "interval_year_month",
-			query: "SELECT INTERVAL '1-2' MONTH AS interval",
+			name:  "timestamptz",
+			query: "SELECT TIMESTAMP '1971-01-02 01:02:03.456789' AS time",
 			schema: arrow.NewSchema([]arrow.Field{
 				{
-					Name:     "interval",
-					Type:     arrow.FixedWidthTypes.MonthDayNanoInterval,
+					Name: "time",
+					Type: &arrow.TimestampType{
+						Unit:     arrow.Microsecond,
+						TimeZone: "UTC",
+					},
 					Nullable: true,
 				},
 			}, nil),
-			expected: `[{"interval": {"months": 14}}]`,
-		},
-		{
-			name:  "interval_month_day_nano",
-			query: "SELECT INTERVAL '2 days 1:1:1.123456' DAY TO SECOND AS interval",
-			schema: arrow.NewSchema([]arrow.Field{
-				{
-					Name:     "interval",
-					Type:     arrow.FixedWidthTypes.MonthDayNanoInterval,
-					Nullable: true,
-				},
-			}, nil),
-			expected: `[{"interval": {"days": 2, "nanoseconds": 3661123456000}}]`,
+			expected: `[{"time": "1971-01-02 01:02:03.456789"}]`,
 		},
 	} {
 		suite.Run(testCase.name, func() {
@@ -449,7 +402,15 @@ func (suite *DriverTests) TestSelectNoResult() {
 	suite.NoError(err)
 	defer rdr.Release()
 
-	schema := arrow.NewSchema([]arrow.Field{}, nil)
+	// TODO(lidavidm): move this to validation suite
+	// XXX: Spark is weird and apparently returns a field
+	schema := arrow.NewSchema([]arrow.Field{
+		{
+			Name:     "Result",
+			Type:     arrow.BinaryTypes.String,
+			Nullable: true,
+		},
+	}, nil)
 	suite.Truef(schema.Equal(rdr.Schema()), "expected: %s\ngot: %s", schema, rdr.Schema())
 	suite.Equal(int64(-1), rows)
 	suite.False(rdr.Next())

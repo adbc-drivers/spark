@@ -44,3 +44,30 @@ services:
       timeout: 10s
       retries: 10
       start_period: 5s
+
+  spark-thrift:
+    image: apache/spark:latest
+    command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh; env SPARK_NO_DAEMONIZE=true /opt/spark/sbin/start-thriftserver.sh"]
+    depends_on:
+      spark-thrift-worker:
+        condition: service_started
+    healthcheck:
+      test: "bash -c 'exec 6<> /dev/tcp/localhost/10000'"
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+    ports:
+      - 20000:10000
+
+  spark-thrift-worker:
+    image: apache/spark:latest
+    command: ["/opt/spark/sbin/start-worker.sh", "spark://spark-thrift:7077"]
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+    healthcheck:
+      test: curl --fail http://localhost:8081
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s

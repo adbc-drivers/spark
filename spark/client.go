@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/thrift/lib/go/thrift"
+	"github.com/columnar-tech/sasl-go"
 )
 
 type queryContext struct {
@@ -50,15 +51,7 @@ type thriftClient struct {
 	session *hiveserver2.TSessionHandle
 }
 
-func newThriftClient(ctx context.Context, uri string) (sparkClient, error) {
-	cfg := &thrift.TConfiguration{}
-
-	transport, err := thrift.NewTHttpClient(uri)
-	if err != nil {
-		return nil, errToAdbcErr(adbc.StatusIO, err, "open Thrift client")
-	}
-	transport.(*thrift.THttpClient).SetHeader("authorization", "Basic dXNlcjo=")
-
+func wrapThriftTransport(ctx context.Context, cfg *thrift.TConfiguration, transport thrift.TTransport) (sparkClient, error) {
 	factory := thrift.NewTBinaryProtocolFactoryConf(cfg)
 	iprot := factory.GetProtocol(transport)
 	oprot := factory.GetProtocol(transport)
@@ -75,6 +68,35 @@ func newThriftClient(ctx context.Context, uri string) (sparkClient, error) {
 		client:    driverbase.NewShared(client, nilCloser{}),
 		session:   resp.SessionHandle,
 	}, nil
+}
+
+func newThriftHttpClient(ctx context.Context, uri string) (sparkClient, error) {
+	cfg := &thrift.TConfiguration{}
+
+	transport, err := thrift.NewTHttpClient(uri)
+	if err != nil {
+		return nil, errToAdbcErr(adbc.StatusIO, err, "open Thrift client")
+	}
+	transport.(*thrift.THttpClient).SetHeader("authorization", "Basic dXNlcjo=")
+
+	return wrapThriftTransport(ctx, cfg, transport)
+}
+
+func newThriftTcpClient(ctx context.Context, hostPort string) (sparkClient, error) {
+	cfg := &thrift.TConfiguration{}
+
+	var transport thrift.TTransport
+
+	transport = thrift.NewTSocketConf(hostPort, cfg)
+	transport = sasl.WrapTransport(transport, "localhost", &sasl.PlainMechanism{
+		Username: "u",
+		Password: "p",
+	})
+	if err := transport.Open(); err != nil {
+		return nil, errToAdbcErr(adbc.StatusIO, err, "open Thrift client")
+	}
+
+	return wrapThriftTransport(ctx, cfg, transport)
 }
 
 func (c *thriftClient) Close() error {
@@ -139,27 +161,33 @@ func newSparkClientFactory(options map[string]string) (func(context.Context) (sp
 	}
 	delete(options, adbc.OptionKeyURI)
 
-	connectionType, ok := options[DatabaseOptionConnectionType]
-	if !ok {
-		connectionType = DatabaseOptionValueConnectionTypeThrift
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return nil, errToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
 	}
 
-	switch connectionType {
-	case DatabaseOptionValueConnectionTypeSparkConnect:
-	case DatabaseOptionValueConnectionTypeThrift:
-		parsed, err := url.Parse(uri)
-		if err != nil {
-			return nil, errToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
+	switch parsed.Scheme {
+	case "grpc":
+		return nil, adbc.Error{
+			Code: adbc.StatusNotImplemented,
+			Msg:  fmt.Sprintf("[spark] Spark Connect not yet supported: %s", uri),
 		}
 
+	case "http":
 		baseURI := fmt.Sprintf("http://%s/cliservice", parsed.Host)
 		return func(ctx context.Context) (sparkClient, error) {
-			return newThriftClient(ctx, baseURI)
+			return newThriftHttpClient(ctx, baseURI)
 		}, nil
+
+	case "thrift":
+		return func(ctx context.Context) (sparkClient, error) {
+			return newThriftTcpClient(ctx, parsed.Host)
+		}, nil
+
 	}
 	return nil, adbc.Error{
 		Code: adbc.StatusInvalidArgument,
-		Msg:  fmt.Sprintf("[spark] unknown connection type '%s'", connectionType),
+		Msg:  fmt.Sprintf("[spark] unknown connection type: %s", uri),
 	}
 }
 
