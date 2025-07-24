@@ -58,5 +58,7 @@ func NewDriver(alloc memory.Allocator) adbc.Driver {
 	// 		panic(err)
 	// 	}
 	// }
-	return &driverImpl{DriverImplBase: driverbase.NewDriverImplBase(info, alloc)}
+	base := driverbase.NewDriverImplBase(info, alloc)
+	base.ErrorHelper.DriverName = "spark"
+	return &driverImpl{DriverImplBase: base}
 }
