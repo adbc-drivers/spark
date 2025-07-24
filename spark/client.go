@@ -152,7 +152,7 @@ func newSparkClientFactory(options map[string]string) (func(context.Context) (sp
 			return nil, errToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
 		}
 
-		baseURI := fmt.Sprintf("%s://%s/cliservice", parsed.Scheme, parsed.Host)
+		baseURI := fmt.Sprintf("http://%s/cliservice", parsed.Host)
 		return func(ctx context.Context) (sparkClient, error) {
 			return newThriftClient(ctx, baseURI)
 		}, nil
