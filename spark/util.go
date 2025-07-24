@@ -93,10 +93,9 @@ func toAdbcErr(defaultStatus adbc.Status, err error, status getStatus, context s
 	return nil
 }
 
-// func quoteIdentifier(ident string) string {
-// 	// TODO:
-// 	return fmt.Sprintf(`"%s"`, strings.ReplaceAll(ident, `"`, `""`))
-// }
+func quoteIdentifier(ident string) string {
+	return fmt.Sprintf("`%s`", strings.ReplaceAll(ident, "`", "``"))
+}
 
 func quoteString(value string) string {
 	return fmt.Sprintf(`'%s'`, strings.ReplaceAll(strings.ReplaceAll(value, `\`, `\\`), `'`, `\'`))
