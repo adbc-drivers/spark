@@ -47,7 +47,7 @@ func (rr *recordReaderImpl) AppendRow(builder *array.RecordBuilder) error {
 				MaxRows:         65536,
 			})
 		})
-		if err = toAdbcErr(adbc.StatusIO, err, rr.results.Status, "fetch results"); err != nil {
+		if err = toAdbcErr(adbc.StatusIO, err, rr.results, "fetch results"); err != nil {
 			return err
 		}
 		rr.nextRowIdx = 0
@@ -162,7 +162,7 @@ func (rr *recordReaderImpl) NextResultSet(ctx context.Context, rec arrow.Record,
 	var schema *arrow.Schema
 	resp, err := driverbase.WithShared(rr.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TExecuteStatementResp, error) {
 		resp, err := client.ExecuteStatement(ctx, rr.req)
-		if err = toAdbcErr(adbc.StatusIO, err, resp.Status, "execute statement"); err != nil {
+		if err = toAdbcErr(adbc.StatusIO, err, resp, "execute statement"); err != nil {
 			return nil, err
 		}
 

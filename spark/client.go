@@ -67,7 +67,7 @@ func newThriftClient(ctx context.Context, uri string) (sparkClient, error) {
 
 	req := &hiveserver2.TOpenSessionReq{}
 	resp, err := client.OpenSession(ctx, req)
-	if err = toAdbcErr(adbc.StatusIO, err, resp.Status, "open HiveServer2 session"); err != nil {
+	if err = toAdbcErr(adbc.StatusIO, err, resp, "open HiveServer2 session"); err != nil {
 		return nil, errors.Join(err, transport.Close())
 	}
 	return &thriftClient{
