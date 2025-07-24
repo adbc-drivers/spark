@@ -63,11 +63,11 @@ func (*connectionImpl) ListTableTypes(ctx context.Context) ([]string, error) {
 }
 
 func (c *connectionImpl) GetCurrentCatalog() (string, error) {
-	return "", errTBD
+	return c.client.currentCatalog(context.Background())
 }
 
 func (c *connectionImpl) GetCurrentDbSchema() (string, error) {
-	return "", errTBD
+	return c.client.currentSchema(context.Background())
 }
 
 func (c *connectionImpl) SetCurrentCatalog(value string) error {
@@ -93,11 +93,17 @@ func (c *connectionImpl) GetTableSchema(ctx context.Context, catalog *string, db
 }
 
 func (c *connectionImpl) Commit(ctx context.Context) error {
-	return errTBD
+	return adbc.Error{
+		Code: adbc.StatusNotImplemented,
+		Msg:  "[spark] Transactions not supported",
+	}
 }
 
 func (c *connectionImpl) Rollback(ctx context.Context) error {
-	return errTBD
+	return adbc.Error{
+		Code: adbc.StatusNotImplemented,
+		Msg:  "[spark] Transactions not supported",
+	}
 }
 
 func (c *connectionImpl) NewStatement() (adbc.Statement, error) {
