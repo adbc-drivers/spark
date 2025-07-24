@@ -17,7 +17,6 @@ package spark
 import (
 	"context"
 	"fmt"
-	"net/url"
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
@@ -26,7 +25,7 @@ import (
 type databaseImpl struct {
 	driverbase.DatabaseImplBase
 
-	uri *url.URL
+	clientFactory sparkClientFactory
 }
 
 func (d *databaseImpl) GetOption(key string) (string, error) {
@@ -34,13 +33,10 @@ func (d *databaseImpl) GetOption(key string) (string, error) {
 }
 
 func (d *databaseImpl) SetOptions(options map[string]string) error {
-	if uri, ok := options[adbc.OptionKeyURI]; ok {
-		parsedURI, err := url.Parse(uri)
-		if err != nil {
-			return errToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
-		}
-		d.uri = parsedURI
-		delete(options, adbc.OptionKeyURI)
+	var err error
+	d.clientFactory, err = newSparkClientFactory(options)
+	if err != nil {
+		return err
 	}
 
 	for key := range options {
@@ -58,7 +54,12 @@ func (d *databaseImpl) Open(ctx context.Context) (adbc.Connection, error) {
 		ConnectionImplBase: driverbase.NewConnectionImplBase(&d.DatabaseImplBase),
 	}
 
-	if err := conn.Init(ctx, d.uri); err != nil {
+	client, err := d.clientFactory(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := conn.Init(client); err != nil {
 		return nil, err
 	}
 

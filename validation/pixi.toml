@@ -26,4 +26,4 @@ test = "pytest -vvs --junit-xml=validation-report.xml -rfEsxX tests/"
 python = ">=3.13,<4"
 
 [pypi-dependencies]
-adbc-drivers-validation = { git = "ssh://git@github.com/adbc-drivers/validation", rev = "72424c79000aa1f9253fe7bfadc201bef5c002e7" }
+adbc-drivers-validation = { git = "ssh://git@github.com/adbc-drivers/validation", rev = "d16222c8a323b6d98288d3ebfea778aa01c3ee30" }

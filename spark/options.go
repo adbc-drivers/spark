@@ -13,3 +13,9 @@
 // limitations under the License.
 
 package spark
+
+const (
+	DatabaseOptionConnectionType                  = "spark.connection_type"
+	DatabaseOptionValueConnectionTypeSparkConnect = "sparkconnect"
+	DatabaseOptionValueConnectionTypeThrift       = "thrift"
+)

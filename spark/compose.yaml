@@ -15,31 +15,32 @@
 services:
   test-service:
     image: apache/spark:latest
-    command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh; env SPARK_NO_DAEMONIZE=true /opt/spark/sbin/start-thriftserver.sh --conf spark.hadoop.hive.server2.transport.mode=http --conf spark.hadoop.hive.server2.authentication=NOSASL"]
+    command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh; /opt/spark/sbin/start-connect-server.sh; env SPARK_NO_DAEMONIZE=true /opt/spark/sbin/start-thriftserver.sh --conf spark.hadoop.hive.server2.transport.mode=http --conf spark.hadoop.hive.server2.authentication=NOSASL"]
     depends_on:
       spark-worker:
         condition: service_started
     healthcheck:
       # test: "bash -c 'exec 6<> /dev/tcp/localhost/10000'"
       test: curl -I http://localhost:10001
-      interval: 10s
+      interval: 5s
       timeout: 10s
       retries: 10
-      start_period: 10s
+      start_period: 5s
     ports:
       - 7077:7077
       - 8080:8080
       - 10000:10000
       - 10001:10001
+      - 15002:15002
 
   spark-worker:
     image: apache/spark:latest
-    command: ["/opt/spark/sbin/start-worker.sh", "spark://spark-master:7077"]
+    command: ["/opt/spark/sbin/start-worker.sh", "spark://test-service:7077"]
     environment:
       SPARK_NO_DAEMONIZE: "true"
     healthcheck:
       test: curl --fail http://localhost:8081
-      interval: 10s
+      interval: 5s
       timeout: 10s
       retries: 10
-      start_period: 10s
+      start_period: 5s

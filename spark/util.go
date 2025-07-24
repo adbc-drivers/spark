@@ -23,7 +23,10 @@ import (
 	"github.com/apache/arrow-adbc/go/adbc"
 )
 
-var errTBD = errors.New("[spark] not implemented")
+var errTBD = adbc.Error{
+	Code: adbc.StatusNotImplemented,
+	Msg:  "[spark] TBD",
+}
 
 // errToAdbcErr converts an error to an ADBC error.
 func errToAdbcErr(defaultStatus adbc.Status, err error, context string, contextArgs ...any) error {
@@ -77,11 +80,15 @@ func statusToAdbcErr(status *hiveserver2.TStatus, context string, contextArgs ..
 	}
 }
 
-func toAdbcErr(defaultStatus adbc.Status, err error, status *hiveserver2.TStatus, context string, contextArgs ...any) error {
+type getStatus interface {
+	GetStatus() *hiveserver2.TStatus
+}
+
+func toAdbcErr(defaultStatus adbc.Status, err error, status getStatus, context string, contextArgs ...any) error {
 	if err != nil {
 		return errToAdbcErr(defaultStatus, err, context, contextArgs...)
 	} else if status != nil {
-		return statusToAdbcErr(status, context, contextArgs...)
+		return statusToAdbcErr(status.GetStatus(), context, contextArgs...)
 	}
 	return nil
 }
