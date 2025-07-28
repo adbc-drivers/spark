@@ -29,6 +29,11 @@ updates:
     commit-message:
       prefix: "chore: "
     groups:
+      awssdk:
+        applies-to: version-updates
+        patterns:
+          - "github.com/aws/aws-sdk-go-v2"
+          - "github.com/aws/aws-sdk-go-v2/*"
       "golang.org/x":
         applies-to: version-updates
         patterns:

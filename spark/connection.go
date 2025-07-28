@@ -114,6 +114,9 @@ func (c *connectionImpl) NewStatement() (adbc.Statement, error) {
 	return &statementImpl{
 		StatementImplBase: driverbase.NewStatementImplBase(&c.ConnectionImplBase, c.ErrorHelper),
 		cnxn:              c,
+		ingest: bulkIngestOptions{
+			BulkIngestOptions: driverbase.NewBulkIngestOptions(),
+		},
 	}, nil
 }
 
