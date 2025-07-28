@@ -29,7 +29,7 @@ class SparkThriftHttpQuirks(model.DriverQuirks):
         # get_objects_constraints_primary=True,
         # get_objects_constraints_unique=True,
         statement_bind=False,
-        # statement_bulk_ingest=True,
+        statement_bulk_ingest=True,
         # statement_bulk_ingest_catalog=True,
         # statement_bulk_ingest_schema=True,
         # statement_bulk_ingest_temporary=True,
@@ -48,7 +48,9 @@ class SparkThriftHttpQuirks(model.DriverQuirks):
             "uri": model.FromEnv("SPARK_URI"),
         },
         connection={},
-        statement={},
+        statement={
+            "spark.ingest.staging_area_uri": "s3://test/temporary",
+        },
     )
 
     @property
@@ -84,7 +86,7 @@ class SparkThriftHttpQuirks(model.DriverQuirks):
         )
 
     def is_table_not_found(self, table_name: str, error: Exception) -> bool:
-        raise error
+        return "TABLE_OR_VIEW_NOT_FOUND" in str(error) and table_name in str(error)
 
     # def qualify_temp_table(
     #     self, cursor: adbc_driver_manager.dbapi.Cursor, name: str

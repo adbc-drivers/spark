@@ -14,9 +14,13 @@
 
 services:
   test-service:
-    image: apache/spark:latest
-    command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh; /opt/spark/sbin/start-connect-server.sh; env SPARK_NO_DAEMONIZE=true /opt/spark/sbin/start-thriftserver.sh --conf spark.hadoop.hive.server2.transport.mode=http --conf spark.hadoop.hive.server2.authentication=NOSASL"]
+    build:
+      context: ./ci/docker
+      dockerfile: spark.dockerfile
+    command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh; /opt/spark/sbin/start-connect-server.sh; env SPARK_NO_DAEMONIZE=true /opt/spark/sbin/start-thriftserver.sh --conf spark.hadoop.hive.server2.transport.mode=http --conf spark.hadoop.hive.server2.authentication=NOSASL --conf spark.hadoop.fs.s3a.access.key=admin --conf spark.hadoop.fs.s3a.secret.key=password --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 --conf spark.hadoop.fs.s3a.path.style.access=true"]
     depends_on:
+      minio:
+        condition: service_started
       spark-worker:
         condition: service_started
     healthcheck:
@@ -71,3 +75,19 @@ services:
       timeout: 10s
       retries: 10
       start_period: 5s
+
+  minio:
+    image: quay.io/minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+    healthcheck:
+      test: "mc ready local"
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+    ports:
+      - 9000:9000
+      - 9001:9001
