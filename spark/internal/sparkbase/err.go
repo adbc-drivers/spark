@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package spark
+package sparkbase
 
 import (
 	"errors"
@@ -23,13 +23,13 @@ import (
 	"github.com/apache/arrow-adbc/go/adbc"
 )
 
-var errTBD = adbc.Error{
+var ErrTBD = adbc.Error{
 	Code: adbc.StatusNotImplemented,
 	Msg:  "[spark] TBD",
 }
 
 // errToAdbcErr converts an error to an ADBC error.
-func errToAdbcErr(defaultStatus adbc.Status, err error, context string, contextArgs ...any) error {
+func ErrToAdbcErr(defaultStatus adbc.Status, err error, context string, contextArgs ...any) error {
 	var adbcError adbc.Error
 	if errors.As(err, &adbcError) {
 		return err
@@ -65,7 +65,7 @@ func errToAdbcErr(defaultStatus adbc.Status, err error, context string, contextA
 	}
 }
 
-func statusToAdbcErr(status *hiveserver2.TStatus, context string, contextArgs ...any) error {
+func StatusToAdbcErr(status *hiveserver2.TStatus, context string, contextArgs ...any) error {
 	switch status.StatusCode {
 	case hiveserver2.TStatusCode_SUCCESS_STATUS:
 		return nil
@@ -80,23 +80,39 @@ func statusToAdbcErr(status *hiveserver2.TStatus, context string, contextArgs ..
 	}
 }
 
-type getStatus interface {
+type GetStatus interface {
 	GetStatus() *hiveserver2.TStatus
 }
 
-func toAdbcErr(defaultStatus adbc.Status, err error, status getStatus, context string, contextArgs ...any) error {
+func QuoteIdentifier(ident string) string {
+	return fmt.Sprintf("`%s`", strings.ReplaceAll(ident, "`", "``"))
+}
+
+func QuoteString(value string) string {
+	return fmt.Sprintf(`'%s'`, strings.ReplaceAll(strings.ReplaceAll(value, `\`, `\\`), `'`, `\'`))
+}
+
+
+func InvalidOptionErr(option string, value string) error {
+	return adbc.Error{
+		Code: adbc.StatusInvalidArgument,
+		Msg:  fmt.Sprintf("[spark] invalid option value '%s' for option %s", value, option),
+	}
+}
+
+func MissingRequiredOptionErr(option string) error {
+	return adbc.Error{
+		Code: adbc.StatusInvalidArgument,
+		Msg:  "[spark] missing required option: " + option,
+	}
+}
+
+func ToAdbcErr(defaultStatus adbc.Status, err error, status GetStatus, context string, contextArgs ...any) error {
 	if err != nil {
-		return errToAdbcErr(defaultStatus, err, context, contextArgs...)
+		return ErrToAdbcErr(defaultStatus, err, context, contextArgs...)
 	} else if status != nil {
-		return statusToAdbcErr(status.GetStatus(), context, contextArgs...)
+		return StatusToAdbcErr(status.GetStatus(), context, contextArgs...)
 	}
 	return nil
 }
 
-func quoteIdentifier(ident string) string {
-	return fmt.Sprintf("`%s`", strings.ReplaceAll(ident, "`", "``"))
-}
-
-func quoteString(value string) string {
-	return fmt.Sprintf(`'%s'`, strings.ReplaceAll(strings.ReplaceAll(value, `\`, `\\`), `'`, `\'`))
-}

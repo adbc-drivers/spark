@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package spark
+package thriftimpl
 
 import (
 	"context"
@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/adbc-drivers/apache/spark/internal/hiveserver2"
+	"github.com/adbc-drivers/apache/spark/internal/sparkbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
@@ -29,7 +30,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
-type recordReaderImpl struct {
+type thriftRecordReader struct {
 	client     *driverbase.Shared[hiveserver2.TCLIServiceClient]
 	req        *hiveserver2.TExecuteStatementReq
 	handle     *hiveserver2.TOperationHandle
@@ -37,7 +38,7 @@ type recordReaderImpl struct {
 	nextRowIdx int
 }
 
-func (rr *recordReaderImpl) AppendRow(builder *array.RecordBuilder) error {
+func (rr *thriftRecordReader) AppendRow(builder *array.RecordBuilder) error {
 	for rr.results == nil || (rr.results.HasMoreRows != nil && *rr.results.HasMoreRows && rr.nextRowIdx >= len(rr.results.Results.Rows)) {
 		var err error
 		rr.results, err = driverbase.WithShared(rr.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TFetchResultsResp, error) {
@@ -47,7 +48,7 @@ func (rr *recordReaderImpl) AppendRow(builder *array.RecordBuilder) error {
 				MaxRows:         65536,
 			})
 		})
-		if err = toAdbcErr(adbc.StatusIO, err, rr.results, "fetch results"); err != nil {
+		if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, rr.results, "fetch results"); err != nil {
 			return err
 		}
 		rr.nextRowIdx = 0
@@ -154,29 +155,29 @@ func (rr *recordReaderImpl) AppendRow(builder *array.RecordBuilder) error {
 	return nil
 }
 
-func (rr *recordReaderImpl) BeginAppending(builder *array.RecordBuilder) error {
+func (rr *thriftRecordReader) BeginAppending(builder *array.RecordBuilder) error {
 	return nil
 }
 
-func (rr *recordReaderImpl) NextResultSet(ctx context.Context, rec arrow.Record, rowIdx int) (*arrow.Schema, error) {
+func (rr *thriftRecordReader) NextResultSet(ctx context.Context, rec arrow.Record, rowIdx int) (*arrow.Schema, error) {
 	var schema *arrow.Schema
 	resp, err := driverbase.WithShared(rr.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TExecuteStatementResp, error) {
 		resp, err := client.ExecuteStatement(ctx, rr.req)
-		if err = toAdbcErr(adbc.StatusIO, err, resp, "execute statement"); err != nil {
+		if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, resp, "execute statement"); err != nil {
 			return nil, err
 		}
 
 		if !resp.OperationHandle.HasResultSet {
 			// TODO:
-			return nil, errTBD
+			return nil, sparkbase.ErrTBD
 		}
 
 		meta, err := client.GetResultSetMetadata(ctx, &hiveserver2.TGetResultSetMetadataReq{
 			OperationHandle: resp.OperationHandle,
 		})
 		if err != nil {
-			return nil, errToAdbcErr(adbc.StatusIO, err, "execute statement")
-		} else if err = statusToAdbcErr(meta.Status, "execute statement"); err != nil {
+			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute statement")
+		} else if err = sparkbase.StatusToAdbcErr(meta.Status, "execute statement"); err != nil {
 			return nil, err
 		}
 
@@ -263,12 +264,12 @@ func (rr *recordReaderImpl) NextResultSet(ctx context.Context, rec arrow.Record,
 	return schema, nil
 }
 
-func (rr *recordReaderImpl) Close() error {
+func (rr *thriftRecordReader) Close() error {
 	return nil
 }
 
-func newRecordReader(ctx context.Context, mem memory.Allocator, client *driverbase.Shared[hiveserver2.TCLIServiceClient], req *hiveserver2.TExecuteStatementReq) (array.RecordReader, error) {
-	impl := &recordReaderImpl{
+func newThriftRecordReader(ctx context.Context, mem memory.Allocator, client *driverbase.Shared[hiveserver2.TCLIServiceClient], req *hiveserver2.TExecuteStatementReq) (array.RecordReader, error) {
+	impl := &thriftRecordReader{
 		client: client,
 		req:    req,
 	}

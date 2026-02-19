@@ -17,6 +17,7 @@ package spark
 import (
 	"context"
 
+	"github.com/adbc-drivers/apache/spark/internal/sparkbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
@@ -26,10 +27,10 @@ import (
 type connectionImpl struct {
 	driverbase.ConnectionImplBase
 
-	client sparkClient
+	client sparkbase.SparkClient
 }
 
-func (c *connectionImpl) Init(client sparkClient) error {
+func (c *connectionImpl) Init(client sparkbase.SparkClient) error {
 	c.client = client
 	return nil
 }
@@ -67,19 +68,19 @@ func (*connectionImpl) ListTableTypes(ctx context.Context) ([]string, error) {
 }
 
 func (c *connectionImpl) GetCurrentCatalog() (string, error) {
-	return c.client.currentCatalog(context.Background())
+	return c.client.CurrentCatalog(context.Background(), c.Alloc)
 }
 
 func (c *connectionImpl) GetCurrentDbSchema() (string, error) {
-	return c.client.currentSchema(context.Background())
+	return c.client.CurrentSchema(context.Background(), c.Alloc)
 }
 
 func (c *connectionImpl) SetCurrentCatalog(value string) error {
-	return errTBD
+	return c.client.SetCurrentCatalog(context.Background(), c.Alloc, value)
 }
 
 func (c *connectionImpl) SetCurrentDbSchema(value string) error {
-	return errTBD
+	return c.client.SetCurrentSchema(context.Background(), c.Alloc, value)
 }
 
 func (c *connectionImpl) SetAutocommit(enabled bool) error {
@@ -93,7 +94,7 @@ func (c *connectionImpl) SetAutocommit(enabled bool) error {
 }
 
 func (c *connectionImpl) GetTableSchema(ctx context.Context, catalog *string, dbSchema *string, tableName string) (*arrow.Schema, error) {
-	return nil, errTBD
+	return nil, sparkbase.ErrTBD
 }
 
 func (c *connectionImpl) Commit(ctx context.Context) error {

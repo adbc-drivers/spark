@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/adbc-drivers/apache/spark/internal/sparkbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
@@ -59,7 +60,7 @@ func (pendingCopy *bulkIngestPendingCopy) String() string {
 type bulkIngestImpl struct {
 	logger   *slog.Logger
 	mem      memory.Allocator
-	client   sparkClient
+	client   sparkbase.SparkClient
 	s3Client *s3.Client
 	uploader *manager.Uploader
 	options  bulkIngestOptions
@@ -81,17 +82,17 @@ func (bi *bulkIngestImpl) Copy(ctx context.Context, chunk driverbase.BulkIngestP
 	var query strings.Builder
 	query.WriteString("INSERT INTO ")
 	// TODO(lidavidm): catalog, schema
-	query.WriteString(quoteIdentifier(bi.options.TableName))
+	query.WriteString(sparkbase.QuoteIdentifier(bi.options.TableName))
 	query.WriteString(" SELECT * FROM parquet.`")
 	query.WriteString(chunk.(*bulkIngestPendingCopy).String())
 	query.WriteString("`")
 
-	_, err := bi.client.executeUpdate(ctx, queryContext{
-		mem:   bi.mem,
-		query: query.String(),
+	_, err := bi.client.ExecuteUpdate(ctx, sparkbase.QueryContext{
+		Mem:   bi.mem,
+		Query: query.String(),
 	})
 	if err != nil {
-		return errToAdbcErr(adbc.StatusInternal, err, "INSERT")
+		return sparkbase.ErrToAdbcErr(adbc.StatusInternal, err, "INSERT")
 	}
 	return nil
 }
@@ -106,12 +107,12 @@ func (bi *bulkIngestImpl) CreateTable(ctx context.Context, schema *arrow.Schema,
 	} else if stmts != nil {
 		bi.logger.Debug("creating table", "table", bi.options.TableName, "stmt", stmts)
 		for _, stmt := range stmts {
-			_, err := bi.client.executeUpdate(ctx, queryContext{
-				mem:   bi.mem,
-				query: stmt,
+			_, err := bi.client.ExecuteUpdate(ctx, sparkbase.QueryContext{
+				Mem:   bi.mem,
+				Query: stmt,
 			})
 			if err != nil {
-				return errToAdbcErr(adbc.StatusInternal, err, "CREATE TABLE")
+				return sparkbase.ErrToAdbcErr(adbc.StatusInternal, err, "CREATE TABLE")
 			}
 		}
 		bi.logger.Debug("created table", "table", bi.options.TableName)
@@ -134,7 +135,7 @@ func (bi *bulkIngestImpl) Upload(ctx context.Context, chunk driverbase.BulkInges
 	bi.logger.Debug("uploaded data to S3", "bucket", bi.bucket, "key", key, "err", err)
 	if err != nil {
 		// TODO(lidavidm): separate error handler for S3
-		return nil, errToAdbcErr(adbc.StatusInternal, err, "upload data to S3")
+		return nil, sparkbase.ErrToAdbcErr(adbc.StatusInternal, err, "upload data to S3")
 	}
 
 	return &bulkIngestPendingCopy{
@@ -151,7 +152,7 @@ func (bi *bulkIngestImpl) Delete(ctx context.Context, chunk driverbase.BulkInges
 		Key:    &pendingFile.key,
 	})
 	if err != nil {
-		return errToAdbcErr(adbc.StatusInternal, err, "delete temporary S3 object")
+		return sparkbase.ErrToAdbcErr(adbc.StatusInternal, err, "delete temporary S3 object")
 	}
 	return nil
 }
@@ -173,7 +174,7 @@ func (bi *bulkIngestImpl) createTableStatement(schema *arrow.Schema, ifTableExis
 		// }
 		// b.WriteString(quoteIdentifier(bi.schema))
 		// b.WriteString(".")
-		b.WriteString(quoteIdentifier(bi.options.TableName))
+		b.WriteString(sparkbase.QuoteIdentifier(bi.options.TableName))
 		stmts = append(stmts, b.String())
 		b.Reset()
 	}
@@ -201,7 +202,7 @@ func (bi *bulkIngestImpl) createTableStatement(schema *arrow.Schema, ifTableExis
 		// 	b.WriteString(".")
 		// }
 
-		b.WriteString(quoteIdentifier(bi.options.TableName))
+		b.WriteString(sparkbase.QuoteIdentifier(bi.options.TableName))
 		b.WriteString(" (")
 
 		for i, field := range schema.Fields() {
@@ -209,7 +210,7 @@ func (bi *bulkIngestImpl) createTableStatement(schema *arrow.Schema, ifTableExis
 				b.WriteString(", ")
 			}
 
-			b.WriteString(quoteIdentifier(field.Name))
+			b.WriteString(sparkbase.QuoteIdentifier(field.Name))
 
 			switch field.Type.ID() {
 			case arrow.BINARY:

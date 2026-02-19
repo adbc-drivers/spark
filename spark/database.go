@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/adbc-drivers/apache/spark/internal/sparkbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 )
@@ -25,7 +26,7 @@ import (
 type databaseImpl struct {
 	driverbase.DatabaseImplBase
 
-	clientFactory sparkClientFactory
+	clientFactory sparkbase.SparkClientFactory
 }
 
 func (d *databaseImpl) GetOption(key string) (string, error) {
