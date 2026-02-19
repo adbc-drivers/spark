@@ -28,6 +28,32 @@ import (
 	"github.com/columnar-tech/sasl-go"
 )
 
+type transportType int
+
+const (
+	http transportType = iota
+	binary
+)
+
+type authType int
+
+const (
+	noSasl authType = iota
+	plain
+)
+
+type thriftConnectionOpts struct {
+	transport transportType
+	auth      authType
+
+	catalog string
+
+	username string
+	password string
+
+	host string
+}
+
 type thriftClient struct {
 	transport thrift.TTransport
 	// TODO(lidavidm): do we need the lock if we're using the HTTP client?
@@ -58,34 +84,48 @@ func wrapThriftTransport(ctx context.Context, cfg *thrift.TConfiguration, transp
 	}, nil
 }
 
-func newThriftHttpClient(ctx context.Context, uri string) (sparkClient, error) {
+func newThriftClient(ctx context.Context, opts thriftConnectionOpts) (sparkClient, error) {
+	var (
+		transport thrift.TTransport
+		err       error
+	)
 	cfg := &thrift.TConfiguration{}
 
-	transport, err := thrift.NewTHttpClient(uri)
-	if err != nil {
-		return nil, errToAdbcErr(adbc.StatusIO, err, "open Thrift client")
-	}
-	// Without further configuration, it seems Spark expects the header
-	// but does not do anything with it
-	transport.(*thrift.THttpClient).SetHeader("authorization", "Basic dXNlcjo=")
+	switch opts.transport {
+	case http:
+		uri := fmt.Sprintf("http://%s", opts.host)
+		transport, err = thrift.NewTHttpClient(uri)
+		if err != nil {
+			return nil, errToAdbcErr(adbc.StatusIO, err, "could not open HTTP thrift client")
+		}
 
-	return wrapThriftTransport(ctx, cfg, transport)
-}
+		switch opts.auth {
+		case noSasl:
+			// It seems Spark expects the header but does not do anything with it
+			transport.(*thrift.THttpClient).SetHeader("Authorization", "Basic DummyToken")
+		case plain:
+			transport.(*thrift.THttpClient).SetHeader("Authorization", fmt.Sprintf("Basic %s:%s", opts.username, opts.password))
+		}
+	case binary:
+		transport = thrift.NewTSocketConf(opts.host, cfg)
+		if err := transport.Open(); err != nil {
+			return nil, errToAdbcErr(adbc.StatusIO, err, "could not open binary thrift client")
+		}
 
-func newThriftTcpClient(ctx context.Context, hostPort string) (sparkClient, error) {
-	cfg := &thrift.TConfiguration{}
+		switch opts.auth {
+		case noSasl:
+		case plain:
+			// It seems Spark expects the password to be non-empty
+			password := opts.password
+			if password == "" {
+				password = "x"
+			}
 
-	var transport thrift.TTransport
-
-	transport = thrift.NewTSocketConf(hostPort, cfg)
-	// Without further configuration, it seems Spark expects a user/pass
-	// but does not do anything with it
-	transport = sasl.WrapTransport(transport, "localhost", &sasl.PlainMechanism{
-		Username: "u",
-		Password: "p",
-	})
-	if err := transport.Open(); err != nil {
-		return nil, errToAdbcErr(adbc.StatusIO, err, "open Thrift client")
+			transport = sasl.WrapTransport(transport, opts.host, &sasl.PlainMechanism{
+				Username: opts.username,
+				Password: password,
+			})
+		}
 	}
 
 	return wrapThriftTransport(ctx, cfg, transport)
