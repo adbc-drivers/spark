@@ -21,7 +21,9 @@ require (
 	github.com/apache/arrow-adbc/go/adbc v1.7.0
 	github.com/apache/arrow-go/v18 v18.4.0
 	github.com/apache/thrift v0.22.0
+	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/config v1.29.14
+	github.com/aws/aws-sdk-go-v2/credentials v1.17.67
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.76
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.79.4
 	github.com/columnar-tech/sasl-go v0.0.0-20250724020720-f4c83c9f790b
@@ -32,9 +34,7 @@ require (
 require (
 	github.com/adbc-drivers/driverbase-go/testutil v0.0.0-20250725073059-22a3157e4024 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.36.3 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.10 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.17.67 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.30 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.34 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.34 // indirect

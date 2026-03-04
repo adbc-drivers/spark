@@ -17,13 +17,19 @@ package spark
 import (
 	"context"
 	"fmt"
+	"github.com/adbc-drivers/apache/spark/internal/livyimpl"
 	"github.com/adbc-drivers/apache/spark/internal/sparkbase"
 	"github.com/adbc-drivers/apache/spark/internal/thriftimpl"
 	"github.com/apache/arrow-adbc/go/adbc"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	awscredentials "github.com/aws/aws-sdk-go-v2/credentials"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
+// Parse named options from an URI. Does not validate whether those options make sense or belong together.
 func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 	split := strings.Split(uri.Host, ":")
 	switch len(split) {
@@ -60,6 +66,156 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 	return nil
 }
 
+func parseHostPortFromOptions(options map[string]string) (string, error) {
+	host, ok := options[OptionHost]
+	if !ok {
+		return "", sparkbase.MissingRequiredOptionErr(OptionHost)
+	}
+	delete(options, OptionHost)
+
+	if port, hasPort := options[OptionPort]; hasPort {
+		delete(options, OptionPort)
+		host = fmt.Sprintf("%s:%s", host, port)
+	}
+	return host, nil
+}
+
+func parseIntegerOption(key string, options map[string]string, defaultValue uint16) (uint16, error) {
+	opt, ok := options[key]
+	if !ok {
+		return defaultValue, nil
+	}
+	delete(options, key)
+
+	intOpt, err := strconv.ParseUint(opt, 10, 16)
+	if err != nil {
+		return 0, sparkbase.InvalidOptionErr(key, opt)
+	}
+
+	return uint16(intOpt), nil
+}
+
+// initializeAws sets up AWS configuration for SigV4 authentication
+func awsConfigFromOptions(ctx context.Context, options map[string]string) (aws.Config, error) {
+	cfg := aws.Config{}
+
+	region, ok := options[OptionLivyAWSRegion]
+	if !ok {
+		return cfg, sparkbase.MissingRequiredOptionErr(OptionLivyAWSRegion)
+	}
+	delete(options, OptionLivyAWSRegion)
+
+	// Check if explicit credentials are provided
+	accessKey := options[OptionLivyAWSAccessKeyID]
+	secretKey := options[OptionLivyAWSSecretAccessKey]
+	sessionToken := options[OptionLivyAWSSessionToken]
+	delete(options, OptionLivyAWSAccessKeyID)
+	delete(options, OptionLivyAWSSecretAccessKey)
+	delete(options, OptionLivyAWSSessionToken)
+
+	var loadOpts []func(*awsconfig.LoadOptions) error
+
+	// Set region
+	loadOpts = append(loadOpts, awsconfig.WithRegion(region))
+
+	// Set profile if specified
+	if profile := options[OptionLivyAWSProfile]; profile != "" {
+		loadOpts = append(loadOpts, awsconfig.WithSharedConfigProfile(profile))
+	}
+
+	// Use explicit credentials if provided
+	if accessKey != "" && secretKey != "" {
+		credProvider := awscredentials.NewStaticCredentialsProvider(accessKey, secretKey, sessionToken)
+		loadOpts = append(loadOpts, awsconfig.WithCredentialsProvider(credProvider))
+	}
+
+	// Load AWS config
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
+	if err != nil {
+		return cfg, adbc.Error{
+			Code: adbc.StatusInvalidState,
+			Msg:  fmt.Sprintf("failed to load AWS config: %v", err),
+		}
+	}
+
+	return cfg, nil
+}
+
+func livyOptsFromOptions(options map[string]string) (livyimpl.ConnectionOpts, error) {
+	livyOpts := livyimpl.ConnectionOpts{}
+
+	host, err := parseHostPortFromOptions(options)
+	if err != nil {
+		return livyOpts, err
+	}
+
+	// Allow explicit http://
+	if !strings.Contains(host, "://") {
+		host = fmt.Sprintf("https://%s", host)
+	}
+	livyOpts.BaseURL = host
+
+	timeout, err := parseIntegerOption(OptionLivyTimeout, options, 0)
+	if err != nil {
+		return livyOpts, err
+	}
+	livyOpts.HttpTimeoutSeconds = uint(timeout)
+	// TODO(serramatutu): query timeout
+	livyOpts.QueryTimeoutSeconds = 0
+
+	if sessionTtl, ok := options[OptionLivySessionTTL]; ok {
+		delete(options, OptionLivySessionTTL)
+		livyOpts.SessionTtl = sessionTtl
+	}
+
+	sessionKind, ok := options[OptionLivySessionKind]
+	if !ok {
+		return livyOpts, sparkbase.MissingRequiredOptionErr(OptionLivySessionKind)
+	}
+	delete(options, OptionLivySessionKind)
+	switch sessionKind {
+	case OptionValueSessionKindSql, OptionValueSessionKindSpark, OptionValueSessionKindPySpark:
+		livyOpts.SessionKind = livyimpl.SessionKind(sessionKind)
+	default:
+		return livyOpts, sparkbase.InvalidOptionErr(OptionLivySessionKind, sessionKind)
+	}
+
+	authType, ok := options[OptionAuthType]
+	if !ok {
+		return livyOpts, sparkbase.MissingRequiredOptionErr(OptionAuthType)
+	}
+	delete(options, OptionAuthType)
+	switch authType {
+	case OptionValueAuthTypeBasic:
+		livyOpts.AuthType = livyimpl.AuthTypeBasic
+	case OptionValueAuthTypeAwsSigv4:
+		livyOpts.AuthType = livyimpl.AuthTypeAwsSigV4
+		cfg, err := awsConfigFromOptions(context.Background(), options)
+		if err != nil {
+			return livyOpts, err
+		}
+		livyOpts.AwsConfig = cfg
+	default:
+		return livyOpts, sparkbase.InvalidOptionErr(OptionAuthType, authType)
+	}
+
+	username, _ := options[adbc.OptionKeyUsername]
+	livyOpts.Username = username
+	delete(options, adbc.OptionKeyUsername)
+
+	password, _ := options[adbc.OptionKeyPassword]
+	livyOpts.Password = password
+	delete(options, adbc.OptionKeyPassword)
+
+	// AWS-specific options
+	if executionRole, ok := options[OptionLivyAWSExecutionRoleArn]; ok {
+		delete(options, OptionLivyAWSExecutionRoleArn)
+		options[OptionSparkConfigPrefix+"emr-serverless.session.executionRoleArn"] = executionRole
+	}
+
+	return livyOpts, nil
+}
+
 func thriftOptsFromOptions(options map[string]string) (thriftimpl.ConnectionOpts, error) {
 	thriftOpts := thriftimpl.ConnectionOpts{}
 
@@ -69,19 +225,11 @@ func thriftOptsFromOptions(options map[string]string) (thriftimpl.ConnectionOpts
 	}
 	delete(options, OptionAuthType)
 
-	host, ok := options[OptionHost]
-	if !ok {
-		return thriftOpts, sparkbase.MissingRequiredOptionErr(OptionHost)
+	host, err := parseHostPortFromOptions(options)
+	if err != nil {
+		return thriftOpts, err
 	}
-	delete(options, OptionHost)
 	thriftOpts.Host = host
-
-	if port, hasPort := options[OptionPort]; hasPort {
-		delete(options, OptionPort)
-		thriftOpts.Host = fmt.Sprintf("%s:%s", host, port)
-	} else {
-		thriftOpts.Host = host
-	}
 
 	switch authType {
 	case OptionValueAuthTypeNoSasl:
@@ -149,10 +297,23 @@ func newSparkClientFactory(options map[string]string) (func(context.Context) (sp
 		}, nil
 
 	case OptionValueApiLivy:
-		return nil, adbc.Error{
-			Code: adbc.StatusInvalidArgument,
-			Msg:  "[spark] Livy is not supported yet",
+		livyOpts, err := livyOptsFromOptions(options)
+		if err != nil {
+			return nil, err
 		}
+
+		sessionOptions := make(map[string]string)
+		for k, v := range options {
+			if strings.HasPrefix(k, OptionSparkConfigPrefix) {
+				trimmedKey := strings.TrimPrefix(k, OptionSparkConfigPrefix)
+				sessionOptions[trimmedKey] = v
+				delete(options, k)
+			}
+		}
+
+		return func(ctx context.Context) (sparkbase.SparkClient, error) {
+			return livyimpl.NewClient(ctx, livyOpts, sessionOptions)
+		}, nil
 
 	default:
 		return nil, sparkbase.InvalidOptionErr(OptionApi, api)

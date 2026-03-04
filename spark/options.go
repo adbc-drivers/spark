@@ -38,6 +38,11 @@ const (
 	// OptionSchema specifies the default schema to connect to
 	OptionSchema = "spark.schema"
 
+	// Spark Configuration Prefix
+	// Options starting with this prefix are passed to the Spark session configuration
+	// Example: spark.opt.executor.memory=4g -> spark.executor.memory=4g
+	OptionSparkConfigPrefix = "spark.opt."
+
 	// Ingest options
 
 	// Kerberos-specific options
@@ -57,15 +62,10 @@ const (
 
 	// OptionLivySessionTTL specifies the session time-to-live (e.g., "2h", "30m")
 	// Available in EMR 7.8.0+
-	OptionLivySessionTTL = "spark.livy.ttl"
+	OptionLivySessionTTL = "spark.livy.session_ttl"
 
 	// OptionHeartbeatTimeout specifies the Livy session heartbeat timeout in seconds
 	OptionLivyHeartbeatTimeout = "spark.livy.heartbeat_timeout"
-
-	// Spark Configuration Prefix
-	// Options starting with this prefix are passed to the Livy session as Spark configuration
-	// Example: spark.livy.opt.executor.memory=4g -> spark.executor.memory=4g
-	OptionLivySparkConfigPrefix = "spark.livy.opt."
 
 	// Basic Authentication Options (when auth_type=basic)
 	// These use the standard ADBC `username` and `password`
@@ -91,7 +91,7 @@ const (
 
 	// OptionLivyAWSEMRExecutionRoleArn specifies the AWS EMR Serverless execution role ARN
 	// This is required when connecting to AWS EMR Serverless
-	OptionLivyAWSEMRExecutionRoleArn = "spark.livy.aws.emr_serverless.execution_role_arn"
+	OptionLivyAWSExecutionRoleArn = "spark.livy.aws.emr_serverless.execution_role_arn"
 
 	// OPTION VALUES
 
@@ -106,6 +106,7 @@ const (
 
 	// Spark Thrift auth types
 
+	OptionValueAuthTypeNone     = "none"
 	OptionValueAuthTypeKerberos = "kerberos"
 	OptionValueAuthTypeLdap     = "ldap"
 	OptionValueAuthTypeNoSasl   = "nosasl"
@@ -113,13 +114,13 @@ const (
 
 	// Spark Livy auth types
 
-	OptionValueAuthTypeNone     = "none"
 	OptionValueAuthTypeBasic    = "basic"
-	OptionValueAuthTypeAWSSigv4 = "aws_sigv4"
+	OptionValueAuthTypeAwsSigv4 = "aws_sigv4"
 
 	// OptionLivySessionKind
 
 	// Livy-specific values
+	OptionValueSessionKindSql     = "sql"
 	OptionValueSessionKindSpark   = "spark"
 	OptionValueSessionKindPySpark = "pyspark"
 )
