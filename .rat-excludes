@@ -15,6 +15,7 @@
 go/go.sum
 go/internal/hiveserver2/hiveserver2*.go
 go/license.tpl
+go/pixi.lock
 go/validation/pixi.lock
 go/validation/queries/*/*.json
 go/validation/queries/*/*.sql
