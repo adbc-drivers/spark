@@ -95,7 +95,7 @@ func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient,
 
 	switch opts.Transport {
 	case Http:
-		uri := fmt.Sprintf("http://%s", opts.Host)
+		uri := opts.Host
 		transport, err = thrift.NewTHttpClient(uri)
 		if err != nil {
 			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "could not open HTTP thrift client")
@@ -219,7 +219,7 @@ func (c *thriftClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryC
 	})
 	if err != nil {
 		return -1, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute statement")
-	} 
+	}
 	if err = sparkbase.StatusToAdbcErr(resp.Status, "execute statement"); err != nil {
 		return -1, err
 	}
