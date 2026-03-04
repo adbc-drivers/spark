@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Columnar Technologies, Inc.
+# Copyright (c) 2025-2026 ADBC Drivers Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,9 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Copyright (c) 2025 Columnar Technologies Inc.  All rights reserved.
+
 repos:
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: 8a948e557ca98afa9489998ad0b85515964df9c4  # v0.12.0
+  rev: a27a2e47c7751b639d2b5badf0ef6ff11fee893f  # frozen: v0.15.4
   hooks:
     - id: ruff-check
       name: "ruff check (isort)"
@@ -30,20 +32,18 @@ repos:
     exclude: >
         (?x)^(
             .*go\.sum|
-            spark/LICENSE\.txt|
-            spark/hiveserver2.thrift
+            go/hiveserver2\.thrift
         )$
 
 - repo: https://github.com/golangci/golangci-lint
-  rev: 00a561d9a79578a2800dece2f04c60ad479a3798  # v2.1.2
+  rev: 5d1e709b7be35cb2025444e19de266b056b7b7ee  # frozen: v2.10.1
   hooks:
   - id: golangci-lint
-    name: lint Spark
-    entry: bash -c 'cd spark && golangci-lint run --fix --timeout 5m'
+    entry: bash -c 'cd go && golangci-lint run --fix --timeout 5m'
     types_or: [go, go-mod]
 
 - repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b  # v5.0.0
+  rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
   hooks:
   - id: check-added-large-files
   - id: check-case-conflict
@@ -56,7 +56,16 @@ repos:
     exclude: '\.bat$'
   - id: trailing-whitespace
 
-- repo: git@github.com:adbc-drivers/dev
-  rev: f5779f2109f177f7da6394d3427589a3a84eb521
+- repo: https://github.com/adbc-drivers/dev
+  rev: 73c9830244696953e6f5a820ac55e0800177cc99
   hooks:
   - id: rat
+
+- repo: local
+  hooks:
+  - id: gofix
+    name: go fix
+    language: system
+    types: [go]
+    entry: bash -c 'cd go && go fix'
+    pass_filenames: false

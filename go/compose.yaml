@@ -1,0 +1,93 @@
+# Copyright (c) 2025 ADBC Drivers Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+services:
+  test-service:
+    build:
+      context: ./ci/docker
+      dockerfile: spark.dockerfile
+    command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh; /opt/spark/sbin/start-connect-server.sh; env SPARK_NO_DAEMONIZE=true /opt/spark/sbin/start-thriftserver.sh --conf spark.hadoop.hive.server2.transport.mode=http --conf spark.hadoop.hive.server2.authentication=NOSASL --conf spark.hadoop.fs.s3a.access.key=admin --conf spark.hadoop.fs.s3a.secret.key=password --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 --conf spark.hadoop.fs.s3a.path.style.access=true"]
+    depends_on:
+      minio:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+    healthcheck:
+      # test: "bash -c 'exec 6<> /dev/tcp/localhost/10000'"
+      test: curl -I http://localhost:10001
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+    ports:
+      - 7077:7077
+      - 8080:8080
+      - 10000:10000
+      - 10001:10001
+      - 15002:15002
+
+  spark-worker:
+    image: apache/spark:latest
+    command: ["/opt/spark/sbin/start-worker.sh", "spark://test-service:7077"]
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+    healthcheck:
+      test: curl --fail http://localhost:8081
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+
+  spark-thrift:
+    image: apache/spark:latest
+    command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh; env SPARK_NO_DAEMONIZE=true /opt/spark/sbin/start-thriftserver.sh"]
+    depends_on:
+      spark-thrift-worker:
+        condition: service_started
+    healthcheck:
+      test: "bash -c 'exec 6<> /dev/tcp/localhost/10000'"
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+    ports:
+      - 20000:10000
+
+  spark-thrift-worker:
+    image: apache/spark:latest
+    command: ["/opt/spark/sbin/start-worker.sh", "spark://spark-thrift:7077"]
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+    healthcheck:
+      test: curl --fail http://localhost:8081
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    image: quay.io/minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+    healthcheck:
+      test: "mc ready local"
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+    ports:
+      - 9000:9000
+      - 9001:9001

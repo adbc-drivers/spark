@@ -12,9 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-go/go.sum
-go/internal/hiveserver2/hiveserver2*.go
-go/license.tpl
-go/validation/pixi.lock
-go/validation/queries/*/*.json
-go/validation/queries/*/*.sql
+[workspace]
+authors = ["David Li <li.davidm96@gmail.com>"]
+channels = ["conda-forge"]
+name = "validation"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+test = "pytest -vvs --junit-xml=validation-report.xml -rfEsxX tests/"
+
+[dependencies]
+python = ">=3.13,<4"
+
+[pypi-dependencies]
+adbc-drivers-validation = { git = "ssh://git@github.com/adbc-drivers/validation", rev = "d16222c8a323b6d98288d3ebfea778aa01c3ee30" }
