@@ -17,48 +17,12 @@ package spark
 import (
 	"context"
 	"fmt"
-	"io"
+	"github.com/adbc-drivers/apache/spark/internal/sparkbase"
+	"github.com/adbc-drivers/apache/spark/internal/thriftimpl"
+	"github.com/apache/arrow-adbc/go/adbc"
 	"net/url"
 	"strings"
-
-	"github.com/adbc-drivers/driverbase-go/driverbase"
-	"github.com/apache/arrow-adbc/go/adbc"
-	"github.com/apache/arrow-go/v18/arrow/array"
-	"github.com/apache/arrow-go/v18/arrow/memory"
 )
-
-type queryContext struct {
-	mem   memory.Allocator
-	query string
-}
-
-type sparkClient interface {
-	io.Closer
-	driverbase.DbObjectsEnumerator
-
-	currentCatalog(ctx context.Context) (string, error)
-	currentSchema(ctx context.Context) (string, error)
-	executeQuery(ctx context.Context, query queryContext) (array.RecordReader, int64, error)
-	executeUpdate(ctx context.Context, query queryContext) (int64, error)
-	setCurrentCatalog(ctx context.Context, catalog string) error
-	setCurrentSchema(ctx context.Context, schema string) error
-}
-
-type sparkClientFactory func(context.Context) (sparkClient, error)
-
-func invalidOptionErr(option string, value string) error {
-	return adbc.Error{
-		Code: adbc.StatusInvalidArgument,
-		Msg:  fmt.Sprintf("[spark] invalid option value '%s' for option %s", value, option),
-	}
-}
-
-func missingRequiredOptionErr(option string) error {
-	return adbc.Error{
-		Code: adbc.StatusInvalidArgument,
-		Msg:  "[spark] missing required option: " + option,
-	}
-}
 
 func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 	split := strings.Split(uri.Host, ":")
@@ -77,7 +41,7 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 
 	queryValues, err := url.ParseQuery(uri.RawQuery)
 	if err != nil {
-		return errToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI query")
+		return sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI query")
 	}
 
 	for key, values := range queryValues {
@@ -96,41 +60,41 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 	return nil
 }
 
-func thriftOptsFromOptions(options map[string]string) (thriftConnectionOpts, error) {
-	thriftOpts := thriftConnectionOpts{}
+func thriftOptsFromOptions(options map[string]string) (thriftimpl.ConnectionOpts, error) {
+	thriftOpts := thriftimpl.ConnectionOpts{}
 
 	authType, ok := options[OptionAuthType]
 	if !ok {
-		return thriftOpts, missingRequiredOptionErr(OptionAuthType)
+		return thriftOpts, sparkbase.MissingRequiredOptionErr(OptionAuthType)
 	}
 	delete(options, OptionAuthType)
 
 	host, ok := options[OptionHost]
 	if !ok {
-		return thriftOpts, missingRequiredOptionErr(OptionHost)
+		return thriftOpts, sparkbase.MissingRequiredOptionErr(OptionHost)
 	}
 	delete(options, OptionHost)
-	thriftOpts.host = host
+	thriftOpts.Host = host
 
 	if port, hasPort := options[OptionPort]; hasPort {
 		delete(options, OptionPort)
-		thriftOpts.host = fmt.Sprintf("%s:%s", host, port)
+		thriftOpts.Host = fmt.Sprintf("%s:%s", host, port)
 	} else {
-		thriftOpts.host = host
+		thriftOpts.Host = host
 	}
 
 	switch authType {
 	case OptionValueAuthTypeNoSasl:
-		thriftOpts.auth = noSasl
+		thriftOpts.Auth = thriftimpl.NoSasl
 	case OptionValueAuthTypePlain:
-		thriftOpts.auth = plain
+		thriftOpts.Auth = thriftimpl.Plain
 
 		username, _ := options[adbc.OptionKeyUsername]
-		thriftOpts.username = username
+		thriftOpts.Username = username
 		delete(options, adbc.OptionKeyUsername)
 
 		password, _ := options[adbc.OptionKeyPassword]
-		thriftOpts.password = password
+		thriftOpts.Password = password
 		delete(options, adbc.OptionKeyPassword)
 
 	case OptionValueAuthTypeLdap, OptionValueAuthTypeKerberos:
@@ -139,23 +103,23 @@ func thriftOptsFromOptions(options map[string]string) (thriftConnectionOpts, err
 			Msg:  fmt.Sprintf("[spark] auth type '%s' has not been implemented yet", authType),
 		}
 	default:
-		return thriftOpts, invalidOptionErr(OptionAuthType, authType)
+		return thriftOpts, sparkbase.InvalidOptionErr(OptionAuthType, authType)
 	}
 
 	return thriftOpts, nil
 }
 
-func newSparkClientFactory(options map[string]string) (func(context.Context) (sparkClient, error), error) {
+func newSparkClientFactory(options map[string]string) (func(context.Context) (sparkbase.SparkClient, error), error) {
 	uri, ok := options[adbc.OptionKeyURI]
 	if ok {
 		parsed, err := url.Parse(uri)
 		if err != nil {
-			return nil, errToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
+			return nil, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
 		}
 
 		err = parseOptionsFromUri(parsed, options)
 		if err != nil {
-			return nil, errToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
+			return nil, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
 		}
 
 		delete(options, adbc.OptionKeyURI)
@@ -163,7 +127,7 @@ func newSparkClientFactory(options map[string]string) (func(context.Context) (sp
 
 	api, ok := options[OptionApi]
 	if !ok {
-		return nil, missingRequiredOptionErr(OptionApi)
+		return nil, sparkbase.MissingRequiredOptionErr(OptionApi)
 	}
 	delete(options, OptionApi)
 
@@ -175,13 +139,13 @@ func newSparkClientFactory(options map[string]string) (func(context.Context) (sp
 		}
 
 		if api == OptionValueApiThriftBinary {
-			thriftOpts.transport = binary
+			thriftOpts.Transport = thriftimpl.Binary
 		} else {
-			thriftOpts.transport = http
+			thriftOpts.Transport = thriftimpl.Http
 		}
 
-		return func(ctx context.Context) (sparkClient, error) {
-			return newThriftClient(ctx, thriftOpts)
+		return func(ctx context.Context) (sparkbase.SparkClient, error) {
+			return thriftimpl.NewClient(ctx, thriftOpts)
 		}, nil
 
 	case OptionValueApiLivy:
@@ -191,6 +155,6 @@ func newSparkClientFactory(options map[string]string) (func(context.Context) (sp
 		}
 
 	default:
-		return nil, invalidOptionErr(OptionApi, api)
+		return nil, sparkbase.InvalidOptionErr(OptionApi, api)
 	}
 }

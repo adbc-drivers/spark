@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package spark
+package thriftimpl
 
 import (
 	"context"
@@ -21,37 +21,39 @@ import (
 	"strings"
 
 	"github.com/adbc-drivers/apache/spark/internal/hiveserver2"
+	"github.com/adbc-drivers/apache/spark/internal/sparkbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/columnar-tech/sasl-go"
 )
 
-type transportType int
+type Transport int
 
 const (
-	http transportType = iota
-	binary
+	Http Transport = iota
+	Binary
 )
 
-type authType int
+type ThriftAuth int
 
 const (
-	noSasl authType = iota
-	plain
+	NoSasl ThriftAuth = iota
+	Plain
 )
 
-type thriftConnectionOpts struct {
-	transport transportType
-	auth      authType
+type ConnectionOpts struct {
+	Transport Transport
+	Auth      ThriftAuth
 
-	catalog string
+	Catalog string
 
-	username string
-	password string
+	Username string
+	Password string
 
-	host string
+	Host string
 }
 
 type thriftClient struct {
@@ -65,7 +67,7 @@ type nilCloser struct{}
 
 func (nilCloser) Close() error { return nil }
 
-func wrapThriftTransport(ctx context.Context, cfg *thrift.TConfiguration, transport thrift.TTransport) (sparkClient, error) {
+func wrapThriftTransport(ctx context.Context, cfg *thrift.TConfiguration, transport thrift.TTransport) (sparkbase.SparkClient, error) {
 	factory := thrift.NewTBinaryProtocolFactoryConf(cfg)
 	iprot := factory.GetProtocol(transport)
 	oprot := factory.GetProtocol(transport)
@@ -74,7 +76,7 @@ func wrapThriftTransport(ctx context.Context, cfg *thrift.TConfiguration, transp
 
 	req := &hiveserver2.TOpenSessionReq{}
 	resp, err := client.OpenSession(ctx, req)
-	if err = toAdbcErr(adbc.StatusIO, err, resp, "open HiveServer2 session"); err != nil {
+	if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, resp, "open HiveServer2 session"); err != nil {
 		return nil, errors.Join(err, transport.Close())
 	}
 	return &thriftClient{
@@ -84,45 +86,45 @@ func wrapThriftTransport(ctx context.Context, cfg *thrift.TConfiguration, transp
 	}, nil
 }
 
-func newThriftClient(ctx context.Context, opts thriftConnectionOpts) (sparkClient, error) {
+func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient, error) {
 	var (
 		transport thrift.TTransport
 		err       error
 	)
 	cfg := &thrift.TConfiguration{}
 
-	switch opts.transport {
-	case http:
-		uri := fmt.Sprintf("http://%s", opts.host)
+	switch opts.Transport {
+	case Http:
+		uri := fmt.Sprintf("http://%s", opts.Host)
 		transport, err = thrift.NewTHttpClient(uri)
 		if err != nil {
-			return nil, errToAdbcErr(adbc.StatusIO, err, "could not open HTTP thrift client")
+			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "could not open HTTP thrift client")
 		}
 
-		switch opts.auth {
-		case noSasl:
+		switch opts.Auth {
+		case NoSasl:
 			// It seems Spark expects the header but does not do anything with it
 			transport.(*thrift.THttpClient).SetHeader("Authorization", "Basic DummyToken")
-		case plain:
-			transport.(*thrift.THttpClient).SetHeader("Authorization", fmt.Sprintf("Basic %s:%s", opts.username, opts.password))
+		case Plain:
+			transport.(*thrift.THttpClient).SetHeader("Authorization", fmt.Sprintf("Basic %s:%s", opts.Username, opts.Password))
 		}
-	case binary:
-		transport = thrift.NewTSocketConf(opts.host, cfg)
+	case Binary:
+		transport = thrift.NewTSocketConf(opts.Host, cfg)
 		if err := transport.Open(); err != nil {
-			return nil, errToAdbcErr(adbc.StatusIO, err, "could not open binary thrift client")
+			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "could not open binary thrift client")
 		}
 
-		switch opts.auth {
-		case noSasl:
-		case plain:
+		switch opts.Auth {
+		case NoSasl:
+		case Plain:
 			// It seems Spark expects the password to be non-empty
-			password := opts.password
+			password := opts.Password
 			if password == "" {
 				password = "x"
 			}
 
-			transport = sasl.WrapTransport(transport, opts.host, &sasl.PlainMechanism{
-				Username: opts.username,
+			transport = sasl.WrapTransport(transport, opts.Host, &sasl.PlainMechanism{
+				Username: opts.Username,
 				Password: password,
 			})
 		}
@@ -144,7 +146,7 @@ func (c *thriftClient) Close() error {
 	c.client = nil
 
 	if err := c.transport.Close(); err != nil {
-		return errToAdbcErr(adbc.StatusIO, err, "close thrift transport")
+		return sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "close thrift transport")
 	}
 	c.transport = nil
 
@@ -158,7 +160,7 @@ func (c *thriftClient) simpleQuery(ctx context.Context, query string, context st
 	}
 	return driverbase.WithShared(c.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TFetchResultsResp, error) {
 		resp, err := client.ExecuteStatement(ctx, req)
-		if err = toAdbcErr(adbc.StatusIO, err, resp, "%s", context); err != nil {
+		if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, resp, "%s", context); err != nil {
 			return nil, err
 		}
 
@@ -171,7 +173,7 @@ func (c *thriftClient) simpleQuery(ctx context.Context, query string, context st
 			Orientation:     hiveserver2.TFetchOrientation_FETCH_FIRST,
 			MaxRows:         1,
 		})
-		if err = toAdbcErr(adbc.StatusIO, err, resp, "%s", context); err != nil {
+		if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, resp, "%s", context); err != nil {
 			return nil, err
 		}
 
@@ -179,73 +181,46 @@ func (c *thriftClient) simpleQuery(ctx context.Context, query string, context st
 	})
 }
 
-func (c *thriftClient) currentCatalog(ctx context.Context) (string, error) {
-	query := "SELECT current_catalog()"
-	rs, err := c.simpleQuery(ctx, query, "get current catalog")
-	if err != nil {
-		return "", err
-	} else if rs == nil {
-		return "", adbc.Error{
-			Code: adbc.StatusInternal,
-			Msg:  fmt.Sprintf("[spark] `%s` did not return a result set", query),
-		}
-	}
-
-	if len(rs.Results.Rows) != 1 {
-		return "", adbc.Error{
-			Code: adbc.StatusInternal,
-			Msg:  fmt.Sprintf("[spark] `%s` did not return a single row", query),
-		}
-	}
-
-	return *rs.Results.Rows[0].ColVals[0].GetStringVal().Value, nil
+func (c *thriftClient) CurrentCatalog(ctx context.Context, mem memory.Allocator) (string, error) {
+	return sparkbase.DefaultCurrentCatalogImpl(c, ctx, mem)
 }
 
-func (c *thriftClient) currentSchema(ctx context.Context) (string, error) {
-	query := "SELECT current_schema()"
-	rs, err := c.simpleQuery(ctx, query, "get current schema")
-	if err != nil {
-		return "", err
-	} else if rs == nil {
-		return "", adbc.Error{
-			Code: adbc.StatusInternal,
-			Msg:  fmt.Sprintf("[spark] `%s` did not return a result set", query),
-		}
-	}
-
-	if len(rs.Results.Rows) != 1 {
-		return "", adbc.Error{
-			Code: adbc.StatusInternal,
-			Msg:  fmt.Sprintf("[spark] `%s` did not return a single row", query),
-		}
-	}
-
-	return *rs.Results.Rows[0].ColVals[0].GetStringVal().Value, nil
+func (c *thriftClient) CurrentSchema(ctx context.Context, mem memory.Allocator) (string, error) {
+	return sparkbase.DefaultCurrentCatalogImpl(c, ctx, mem)
 }
 
-func (c *thriftClient) executeQuery(ctx context.Context, query queryContext) (array.RecordReader, int64, error) {
+func (c *thriftClient) SetCurrentCatalog(ctx context.Context, mem memory.Allocator, catalog string) error {
+	return sparkbase.DefaultSetCurrentCatalogImpl(c, ctx, mem, catalog)
+}
+
+func (c *thriftClient) SetCurrentSchema(ctx context.Context, mem memory.Allocator, schema string) error {
+	return sparkbase.DefaultSetCurrentSchemaImpl(c, ctx, mem, schema)
+}
+
+func (c *thriftClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryContext) (array.RecordReader, int64, error) {
 	req := &hiveserver2.TExecuteStatementReq{
 		SessionHandle: c.session,
-		Statement:     query.query,
+		Statement:     query.Query,
 	}
-	rdr, err := newRecordReader(ctx, query.mem, c.client, req)
+	rdr, err := newThriftRecordReader(ctx, query.Mem, c.client, req)
 	if err != nil {
 		return nil, -1, err
 	}
 	return rdr, -1, nil
 }
 
-func (c *thriftClient) executeUpdate(ctx context.Context, query queryContext) (int64, error) {
+func (c *thriftClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryContext) (int64, error) {
 	req := &hiveserver2.TExecuteStatementReq{
 		SessionHandle: c.session,
-		Statement:     query.query,
+		Statement:     query.Query,
 	}
 	resp, err := driverbase.WithShared(c.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TExecuteStatementResp, error) {
 		return client.ExecuteStatement(ctx, req)
 	})
 	if err != nil {
-		return -1, errToAdbcErr(adbc.StatusIO, err, "execute statement")
-	} else if err = statusToAdbcErr(resp.Status, "execute statement"); err != nil {
+		return -1, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute statement")
+	} 
+	if err = sparkbase.StatusToAdbcErr(resp.Status, "execute statement"); err != nil {
 		return -1, err
 	}
 	// TODO: if HasResultSet, do we have to explicitly free it?
@@ -255,31 +230,13 @@ func (c *thriftClient) executeUpdate(ctx context.Context, query queryContext) (i
 	return int64(*resp.OperationHandle.ModifiedRowCount), nil
 }
 
-func (c *thriftClient) setCurrentCatalog(ctx context.Context, catalog string) error {
-	query := fmt.Sprintf("USE CATALOG %s", quoteString(catalog))
-	_, err := c.simpleQuery(ctx, query, "set current catalog")
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *thriftClient) setCurrentSchema(ctx context.Context, schema string) error {
-	query := fmt.Sprintf("USE SCHEMA %s", quoteString(schema))
-	_, err := c.simpleQuery(ctx, query, "set current catalog")
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (c *thriftClient) GetCatalogs(ctx context.Context, catalogFilter *string) ([]string, error) {
 	var query strings.Builder
 	query.WriteString("SHOW CATALOGS")
 	if catalogFilter != nil && *catalogFilter != "" {
 		query.WriteString(" LIKE ")
 		// TODO(lidavidm): need to translate the filter to a regex for Spark
-		query.WriteString(quoteString(*catalogFilter))
+		query.WriteString(sparkbase.QuoteString(*catalogFilter))
 	}
 	resp, err := c.simpleQuery(ctx, query.String(), "get catalogs")
 	if err != nil {
@@ -301,11 +258,11 @@ func (c *thriftClient) GetCatalogs(ctx context.Context, catalogFilter *string) (
 func (c *thriftClient) GetDBSchemasForCatalog(ctx context.Context, catalog string, schemaFilter *string) ([]string, error) {
 	var query strings.Builder
 	query.WriteString("SHOW SCHEMAS IN ")
-	query.WriteString(quoteIdentifier(catalog))
+	query.WriteString(sparkbase.QuoteIdentifier(catalog))
 	if schemaFilter != nil && *schemaFilter != "" {
 		query.WriteString(" LIKE ")
 		// TODO(lidavidm): need to translate the filter to a regex for Spark
-		query.WriteString(quoteString(*schemaFilter))
+		query.WriteString(sparkbase.QuoteString(*schemaFilter))
 	}
 	resp, err := c.simpleQuery(ctx, query.String(), "get schemas")
 	if err != nil {
@@ -339,7 +296,7 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 		}
 		resp, err := driverbase.WithShared(c.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TFetchResultsResp, error) {
 			resp, err := client.GetTables(ctx, req)
-			if err = toAdbcErr(adbc.StatusIO, err, resp, "get tables for %s.%s", catalog, schema); err != nil {
+			if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, resp, "get tables for %s.%s", catalog, schema); err != nil {
 				return nil, err
 			}
 
@@ -356,7 +313,7 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 				Orientation:     hiveserver2.TFetchOrientation_FETCH_FIRST,
 				MaxRows:         65536,
 			})
-			if err = toAdbcErr(adbc.StatusIO, err, rs, "get tables for %s.%s", catalog, schema); err != nil {
+			if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, rs, "get tables for %s.%s", catalog, schema); err != nil {
 				return nil, err
 			}
 			return rs, nil
@@ -368,9 +325,9 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 
 		// var query strings.Builder
 		// query.WriteString("SELECT table_name, table_type FROM information_schema.tables WHERE table_catalog = ")
-		// query.WriteString(quoteString(catalog))
+		// query.WriteString(sparkbase.QuoteString(catalog))
 		// query.WriteString(" AND table_schema = ")
-		// query.WriteString(quoteString(schema))
+		// query.WriteString(sparkbase.QuoteString(schema))
 
 		// resp, err := c.simpleQuery(ctx, query.String(), "get schemas")
 		// if err != nil {
@@ -396,4 +353,4 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 	return tables, nil
 }
 
-var _ sparkClient = (*thriftClient)(nil)
+var _ sparkbase.SparkClient = (*thriftClient)(nil)

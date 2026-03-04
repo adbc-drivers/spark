@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/adbc-drivers/apache/spark/internal/sparkbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase/arrowext"
 	"github.com/apache/arrow-adbc/go/adbc"
@@ -98,7 +99,7 @@ func (st *statementImpl) SetOption(key string, val string) error {
 	case StatementOptionIngestStagingAreaURI:
 		parsed, err := url.Parse(val)
 		if err != nil {
-			return errToAdbcErr(adbc.StatusInternal, err, "parse staging area URI `%s`", val)
+			return sparkbase.ErrToAdbcErr(adbc.StatusInternal, err, "parse staging area URI `%s`", val)
 		}
 		st.clearQueryState()
 		st.ingest.staging = parsed
@@ -143,9 +144,9 @@ func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, 
 		n, err := st.executeIngest(ctx)
 		return arrowext.EmptyReader{}, n, err
 	}
-	return st.cnxn.client.executeQuery(ctx, queryContext{
-		mem:   st.cnxn.Alloc,
-		query: st.query,
+	return st.cnxn.client.ExecuteQuery(ctx, sparkbase.QueryContext{
+		Mem:   st.cnxn.Alloc,
+		Query: st.query,
 	})
 }
 
@@ -153,18 +154,18 @@ func (st *statementImpl) ExecuteUpdate(ctx context.Context) (int64, error) {
 	if st.ingest.IsSet() {
 		return st.executeIngest(ctx)
 	}
-	return st.cnxn.client.executeUpdate(ctx, queryContext{
-		mem:   st.cnxn.Alloc,
-		query: st.query,
+	return st.cnxn.client.ExecuteUpdate(ctx, sparkbase.QueryContext{
+		Mem:   st.cnxn.Alloc,
+		Query: st.query,
 	})
 }
 
 func (st *statementImpl) ExecuteSchema(ctx context.Context) (*arrow.Schema, error) {
-	return nil, errTBD
+	return nil, sparkbase.ErrTBD
 }
 
 func (st *statementImpl) Prepare(ctx context.Context) error {
-	return errTBD
+	return sparkbase.ErrTBD
 }
 
 func (st *statementImpl) SetSubstraitPlan(plan []byte) error {
@@ -198,7 +199,7 @@ func (st *statementImpl) BindStream(_ context.Context, stream array.RecordReader
 }
 
 func (st *statementImpl) GetParameterSchema() (*arrow.Schema, error) {
-	return nil, errTBD
+	return nil, sparkbase.ErrTBD
 }
 
 func (st *statementImpl) ExecutePartitions(ctx context.Context) (*arrow.Schema, adbc.Partitions, int64, error) {
@@ -220,7 +221,7 @@ func (st *statementImpl) executeIngest(ctx context.Context) (int64, error) {
 	provider := awscredentials.NewStaticCredentialsProvider("admin", "password", "")
 	sdkConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithCredentialsProvider(provider))
 	if err != nil {
-		return -1, errToAdbcErr(adbc.StatusInternal, err, "load AWS SDK config")
+		return -1, sparkbase.ErrToAdbcErr(adbc.StatusInternal, err, "load AWS SDK config")
 	}
 
 	logger := st.cnxn.Logger.With("op", "bulkingest")
