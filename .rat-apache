@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-go/go.sum
-go/internal/hiveserver2/hiveserver2*.go
-go/license.tpl
-go/validation/pixi.lock
-go/validation/queries/*/*.json
-go/validation/queries/*/*.sql
+.github/workflows/dev_issues.yaml
+go/hiveserver2.thrift
+go/pkg/adbc.h
+go/pkg/driver.go
+go/pkg/utils.c
+go/pkg/utils.h

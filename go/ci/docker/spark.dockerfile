@@ -12,9 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-go/go.sum
-go/internal/hiveserver2/hiveserver2*.go
-go/license.tpl
-go/validation/pixi.lock
-go/validation/queries/*/*.json
-go/validation/queries/*/*.sql
+FROM apache/spark:4.0.0
+
+RUN wget -P /opt/spark/jars https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.4.1/hadoop-aws-3.4.1.jar
+RUN wget -P /opt/spark/jars https://repo1.maven.org/maven2/org/wildfly/openssl/wildfly-openssl/1.1.3.Final/wildfly-openssl-1.1.3.Final.jar
+RUN wget -P /opt/spark/jars https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/2.24.6/bundle-2.24.6.jar

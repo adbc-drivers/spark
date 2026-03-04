@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-go/go.sum
-go/internal/hiveserver2/hiveserver2*.go
-go/license.tpl
-go/validation/pixi.lock
-go/validation/queries/*/*.json
-go/validation/queries/*/*.sql
+from adbc_drivers_validation.tests.ingest import (
+    TestIngest,  # noqa: F401
+    generate_tests,
+)
+
+from .spark import SparkThriftHttpQuirks
+
+
+def pytest_generate_tests(metafunc) -> None:
+    return generate_tests(SparkThriftHttpQuirks(), metafunc)

@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Copyright (c) 2025 ADBC Drivers Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,9 +13,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-go/go.sum
-go/internal/hiveserver2/hiveserver2*.go
-go/license.tpl
-go/validation/pixi.lock
-go/validation/queries/*/*.json
-go/validation/queries/*/*.sql
+/opt/spark/sbin/start-master.sh
+/opt/spark/sbin/start-thriftserver.sh
