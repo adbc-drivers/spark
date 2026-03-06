@@ -22,12 +22,12 @@ import (
 
 	"github.com/adbc-drivers/apache/go/internal/hiveserver2"
 	"github.com/adbc-drivers/apache/go/internal/sparkbase"
+	"github.com/adbc-drivers/apache/go/internal/sasl"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/thrift/lib/go/thrift"
-	"github.com/columnar-tech/sasl-go"
 )
 
 type Transport int
