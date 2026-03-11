@@ -26,8 +26,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.67
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.76
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.79.4
-	github.com/columnar-tech/sasl-go v0.0.0-20250724020720-f4c83c9f790b
 	github.com/google/uuid v1.6.0
+	github.com/jcmturner/gokrb5/v8 v8.4.4
 	github.com/stretchr/testify v1.10.0
 )
 
@@ -62,7 +62,6 @@ require (
 	github.com/jcmturner/dnsutils/v2 v2.0.0 // indirect
 	github.com/jcmturner/gofork v1.7.6 // indirect
 	github.com/jcmturner/goidentity/v6 v6.0.1 // indirect
-	github.com/jcmturner/gokrb5/v8 v8.4.4 // indirect
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
