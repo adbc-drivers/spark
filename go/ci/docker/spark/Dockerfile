@@ -8,7 +8,7 @@ ARG SCALA_VERSION=2.12
 USER root
 
 RUN apt-get update && apt-get install -y \
-    curl wget unzip \
+    curl wget unzip krb5-user \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /opt/spark-data/warehouse && chmod 777 /opt/spark-data/warehouse
@@ -43,9 +43,7 @@ RUN wget https://archive.apache.org/dist/incubator/livy/${LIVY_VERSION}/${LIVY_N
 
 RUN mkdir -p ${LIVY_HOME}/logs ${LIVY_HOME}/conf
 
-COPY conf/livy.conf ${LIVY_HOME}/conf/livy.conf
-COPY conf/spark-defaults.conf ${LIVY_HOME}/conf/spark-defaults.conf
-COPY conf/log4j.properties ${LIVY_HOME}/conf/log4j.properties
+COPY spark/conf/ ${LIVY_HOME}/conf/
 
 EXPOSE 8998
 WORKDIR ${LIVY_HOME}
@@ -61,7 +59,15 @@ CMD ["/bin/bash", "-c", "$LIVY_HOME/bin/livy-server"]
 FROM base AS thrift
 
 COPY --from=base ${SPARK_HOME} ${SPARK_HOME}
+COPY hive/conf/ ${SPARK_HOME}/conf/
+COPY kerberos/conf/krb5.conf /etc/krb5.conf
+COPY spark/conf/ ${SPARK_HOME}/conf/
+COPY spark/entrypoint.sh /opt/entrypoint.sh
+
+RUN chmod +x /opt/entrypoint.sh
 
 WORKDIR ${SPARK_HOME}
 
-CMD ["/bin/bash", "-c", "$SPARK_HOME/sbin/start-thriftserver.sh; tail -f $SPARK_HOME/logs/*thriftserver*.out"]
+ENV KRB5CCNAME="/tmp/krb5cc_spark"
+
+CMD ["/opt/entrypoint.sh"]
