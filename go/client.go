@@ -99,12 +99,6 @@ func parseIntegerOption(key string, options map[string]string, defaultValue uint
 func awsConfigFromOptions(ctx context.Context, options map[string]string) (aws.Config, error) {
 	cfg := aws.Config{}
 
-	region, ok := options[OptionLivyAWSRegion]
-	if !ok {
-		return cfg, sparkbase.MissingRequiredOptionErr(OptionLivyAWSRegion)
-	}
-	delete(options, OptionLivyAWSRegion)
-
 	// Check if explicit credentials are provided
 	accessKey := options[OptionLivyAWSAccessKeyID]
 	secretKey := options[OptionLivyAWSSecretAccessKey]
@@ -115,8 +109,11 @@ func awsConfigFromOptions(ctx context.Context, options map[string]string) (aws.C
 
 	var loadOpts []func(*awsconfig.LoadOptions) error
 
-	// Set region
-	loadOpts = append(loadOpts, awsconfig.WithRegion(region))
+	// Set region if provided
+	if region, ok := options[OptionLivyAWSRegion]; ok {
+		loadOpts = append(loadOpts, awsconfig.WithRegion(region))
+		delete(options, OptionLivyAWSRegion)
+	}
 
 	// Set profile if specified
 	if profile := options[OptionLivyAWSProfile]; profile != "" {
