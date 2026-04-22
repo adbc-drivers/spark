@@ -110,9 +110,6 @@ func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient,
 		}
 	case Binary:
 		transport = thrift.NewTSocketConf(opts.Host, cfg)
-		if err := transport.Open(); err != nil {
-			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "could not open binary thrift client")
-		}
 
 		switch opts.Auth {
 		case NoSasl:
@@ -128,6 +125,11 @@ func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient,
 				Password: password,
 			})
 		}
+
+		if err := transport.Open(); err != nil {
+			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "could not open binary thrift client")
+		}
+
 	}
 
 	return wrapThriftTransport(ctx, cfg, transport)
