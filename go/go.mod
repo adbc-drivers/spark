@@ -14,7 +14,7 @@
 
 module github.com/adbc-drivers/apache/go
 
-go 1.26.0
+go 1.26.1
 
 require (
 	github.com/adbc-drivers/driverbase-go/driverbase v0.0.0-20250725073059-22a3157e4024

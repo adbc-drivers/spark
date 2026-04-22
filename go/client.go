@@ -97,8 +97,6 @@ func parseIntegerOption(key string, options map[string]string, defaultValue uint
 
 // initializeAws sets up AWS configuration for SigV4 authentication
 func awsConfigFromOptions(ctx context.Context, options map[string]string) (aws.Config, error) {
-	cfg := aws.Config{}
-
 	// Check if explicit credentials are provided
 	accessKey := options[OptionLivyAWSAccessKeyID]
 	secretKey := options[OptionLivyAWSSecretAccessKey]

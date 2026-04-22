@@ -102,6 +102,9 @@ SASL_LOOP:
 				return thrift.NewTTransportExceptionFromError(err)
 			}
 			err = t.sendSaslMsg(ctx, stOK, next)
+			if err != nil {
+				return thrift.NewTTransportExceptionFromError(err)
+			}
 		case stCOMPLETE:
 			// log the payload if len > 0?
 			break SASL_LOOP

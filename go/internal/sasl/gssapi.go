@@ -158,10 +158,7 @@ func (m *GSSAPIMechanism) Step(challenge []byte) ([]byte, error) {
 		}
 
 		header := make([]byte, 4)
-		maxLength := m.serverMaxLength
-		if thrift.DEFAULT_MAX_FRAME_SIZE < m.serverMaxLength {
-			maxLength = thrift.DEFAULT_MAX_FRAME_SIZE
-		}
+		maxLength := min(thrift.DEFAULT_MAX_FRAME_SIZE, m.serverMaxLength)
 
 		headerInt := (uint(m.qop) << 24) | uint(maxLength)
 		binary.BigEndian.PutUint32(header, uint32(headerInt))

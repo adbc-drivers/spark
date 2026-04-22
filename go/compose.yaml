@@ -64,7 +64,7 @@ services:
       DB_DRIVER: postgres
       KRB5CCNAME: /tmp/krb5cc_hive
     ports:
-      - "9083:9083"  # Hive Metastore Thrift 
+      - "9083:9083"  # Hive Metastore Thrift
     volumes:
       - ./data/metastore:/opt/spark-data
       - ./data/kerberos/keytabs:/var/keytabs
@@ -82,8 +82,8 @@ services:
       - SPARK_MASTER_HOST=spark-master
       - SPARK_MASTER_PORT=7077
     ports:
-      - "8080:8080"   # Spark Master Web UI 
-      - "7077:7077"   # Spark Master Port 
+      - "8080:8080"   # Spark Master Web UI
+      - "7077:7077"   # Spark Master Port
     command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
 
   spark-worker:
