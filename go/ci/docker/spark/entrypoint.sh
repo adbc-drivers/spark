@@ -49,22 +49,27 @@ klist
 # Export environment variables for Hadoop Kerberos authentication
 export HADOOP_OPTS="-Djava.security.krb5.conf=/etc/krb5.conf -Djava.security.auth.login.config=$SPARK_HOME/conf/jaas.conf"
 
-# Start Spark Thrift Server
-echo "Starting Spark Thrift Server..."
-$SPARK_HOME/sbin/start-thriftserver.sh \
-  --properties-file $SPARK_HOME/conf/spark-defaults.conf \
-  --conf spark.yarn.keytab=/var/keytabs/hive.keytab \
-  --conf spark.yarn.principal=hiveuser/hive-metastore@KDC.LOCAL
+if [ "$SPARK_SERVER_TYPE" = "connect" ]; then
+    server_command="$SPARK_HOME/sbin/start-connect-server.sh"
+    log_pattern="*SparkConnectServer*.out"
+else
+    server_command="$SPARK_HOME/sbin/start-thriftserver.sh"
+    log_pattern="*thriftserver*.out"
+fi
 
-# Wait for log file to be created
-echo "Waiting for Thrift Server to start..."
+echo "Starting Spark server ($SPARK_SERVER_TYPE)..."
+$server_command \
+  --properties-file $SPARK_HOME/conf/spark-defaults.conf \
+  --conf spark.kerberos.keytab=/var/keytabs/hive.keytab \
+  --conf spark.kerberos.principal=hiveuser/hive-metastore@KDC.LOCAL
+
+echo "Waiting for server to start..."
 for i in {1..30}; do
-    if ls $SPARK_HOME/logs/*thriftserver*.out 2>/dev/null; then
+    if ls $SPARK_HOME/logs/$log_pattern 2>/dev/null; then
         break
     fi
     sleep 1
 done
 
-# Tail the log file to keep container running
-echo "Thrift Server started, tailing logs..."
-exec tail -f $SPARK_HOME/logs/*thriftserver*.out
+echo "Server started, tailing logs..."
+exec tail -f $SPARK_HOME/logs/$log_pattern
