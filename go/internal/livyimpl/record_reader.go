@@ -110,13 +110,13 @@ func (r *jsonRecordReader) Retain() {
 // buildRecord builds an Arrow record from JSON rows
 func (r *jsonRecordReader) buildRecord() (arrow.Record, error) {
 	// Parse all JSON rows
-	var rows []map[string]interface{}
+	var rows []map[string]any
 	for i, jsonRow := range r.jsonRows {
 		if jsonRow == "" {
 			fmt.Printf("DEBUG: Skipping empty row at index %d\n", i)
 			continue
 		}
-		var row map[string]interface{}
+		var row map[string]any
 		if err := json.Unmarshal([]byte(jsonRow), &row); err != nil {
 			return nil, fmt.Errorf("failed to parse JSON row %d (content: %q): %w", i, jsonRow, err)
 		}
@@ -145,7 +145,7 @@ func (r *jsonRecordReader) buildRecord() (arrow.Record, error) {
 }
 
 // appendValueToBuilder appends a value to an Arrow array builder
-func appendValueToBuilder(builder array.Builder, value interface{}, dataType arrow.DataType) error {
+func appendValueToBuilder(builder array.Builder, value any, dataType arrow.DataType) error {
 	if value == nil {
 		builder.AppendNull()
 		return nil
@@ -282,7 +282,7 @@ func appendValueToBuilder(builder array.Builder, value interface{}, dataType arr
 
 	case *array.ListBuilder:
 		// Handle arrays
-		if arr, ok := value.([]interface{}); ok {
+		if arr, ok := value.([]any); ok {
 			b.Append(true)
 			valueBuilder := b.ValueBuilder()
 			listType := dataType.(*arrow.ListType)
@@ -297,7 +297,7 @@ func appendValueToBuilder(builder array.Builder, value interface{}, dataType arr
 
 	case *array.MapBuilder:
 		// Handle maps
-		if m, ok := value.(map[string]interface{}); ok {
+		if m, ok := value.(map[string]any); ok {
 			b.Append(true)
 			mapType := dataType.(*arrow.MapType)
 			keyBuilder := b.KeyBuilder()
@@ -316,10 +316,10 @@ func appendValueToBuilder(builder array.Builder, value interface{}, dataType arr
 
 	case *array.StructBuilder:
 		// Handle structs
-		if m, ok := value.(map[string]interface{}); ok {
+		if m, ok := value.(map[string]any); ok {
 			b.Append(true)
 			structType := dataType.(*arrow.StructType)
-			for i := 0; i < structType.NumFields(); i++ {
+			for i := range structType.NumFields() {
 				field := structType.Field(i)
 				fieldValue := m[field.Name]
 				fieldBuilder := b.FieldBuilder(i)
@@ -339,7 +339,7 @@ func appendValueToBuilder(builder array.Builder, value interface{}, dataType arr
 }
 
 // toInt64 converts various numeric types to int64
-func toInt64(value interface{}) (int64, bool) {
+func toInt64(value any) (int64, bool) {
 	switch v := value.(type) {
 	case int:
 		return int64(v), true
@@ -371,7 +371,7 @@ func toInt64(value interface{}) (int64, bool) {
 }
 
 // toFloat64 converts various numeric types to float64
-func toFloat64(value interface{}) (float64, bool) {
+func toFloat64(value any) (float64, bool) {
 	switch v := value.(type) {
 	case int:
 		return float64(v), true

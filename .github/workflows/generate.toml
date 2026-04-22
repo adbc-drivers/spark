@@ -14,5 +14,6 @@
 # limitations under the License.
 
 driver = "spark"
+repository = "apache"
 
 [lang.go]

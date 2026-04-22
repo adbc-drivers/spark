@@ -30,10 +30,10 @@ type SparkSchema struct {
 
 // SparkField represents a field in a Spark schema
 type SparkField struct {
-	Name     string                 `json:"name"`
-	Type     interface{}            `json:"type"` // Can be string or nested struct
-	Nullable bool                   `json:"nullable"`
-	Metadata map[string]interface{} `json:"metadata"`
+	Name     string         `json:"name"`
+	Type     any            `json:"type"` // Can be string or nested struct
+	Nullable bool           `json:"nullable"`
+	Metadata map[string]any `json:"metadata"`
 }
 
 // parseSparkSchemaJSON parses a Spark schema JSON string and converts it to Arrow schema
@@ -87,12 +87,12 @@ func convertSparkFieldToArrow(sparkField SparkField) (arrow.Field, error) {
 }
 
 // convertSparkTypeToArrow converts a Spark type to an Arrow type
-func convertSparkTypeToArrow(sparkType interface{}) (arrow.DataType, error) {
+func convertSparkTypeToArrow(sparkType any) (arrow.DataType, error) {
 	switch t := sparkType.(type) {
 	case string:
 		// Simple type
 		return convertSimpleSparkType(t)
-	case map[string]interface{}:
+	case map[string]any:
 		// Complex type (struct, array, map)
 		return convertComplexSparkType(t)
 	default:
@@ -137,7 +137,7 @@ func convertSimpleSparkType(sparkType string) (arrow.DataType, error) {
 }
 
 // convertComplexSparkType converts a complex Spark type to Arrow type
-func convertComplexSparkType(typeMap map[string]interface{}) (arrow.DataType, error) {
+func convertComplexSparkType(typeMap map[string]any) (arrow.DataType, error) {
 	typeStr, ok := typeMap["type"].(string)
 	if !ok {
 		return nil, fmt.Errorf("complex type missing 'type' field")
@@ -182,14 +182,14 @@ func convertComplexSparkType(typeMap map[string]interface{}) (arrow.DataType, er
 
 	case "struct":
 		// Struct type
-		fields, ok := typeMap["fields"].([]interface{})
+		fields, ok := typeMap["fields"].([]any)
 		if !ok {
 			return nil, fmt.Errorf("struct type missing or invalid 'fields'")
 		}
 
 		arrowFields := make([]arrow.Field, len(fields))
 		for i, fieldInterface := range fields {
-			fieldMap, ok := fieldInterface.(map[string]interface{})
+			fieldMap, ok := fieldInterface.(map[string]any)
 			if !ok {
 				return nil, fmt.Errorf("invalid field format in struct")
 			}

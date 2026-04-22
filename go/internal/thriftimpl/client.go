@@ -21,8 +21,8 @@ import (
 	"strings"
 
 	"github.com/adbc-drivers/apache/go/internal/hiveserver2"
-	"github.com/adbc-drivers/apache/go/internal/sparkbase"
 	"github.com/adbc-drivers/apache/go/internal/sasl"
+	"github.com/adbc-drivers/apache/go/internal/sparkbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -293,8 +293,8 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 		// TODO: tableFilter
 		req := &hiveserver2.TGetTablesReq{
 			SessionHandle: c.session,
-			CatalogName:   hiveserver2.TPatternOrIdentifierPtr(hiveserver2.TPatternOrIdentifier(catalog)),
-			SchemaName:    hiveserver2.TPatternOrIdentifierPtr(hiveserver2.TPatternOrIdentifier(schema)),
+			CatalogName:   new(hiveserver2.TPatternOrIdentifier(catalog)),
+			SchemaName:    new(hiveserver2.TPatternOrIdentifier(schema)),
 		}
 		resp, err := driverbase.WithShared(c.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TFetchResultsResp, error) {
 			resp, err := client.GetTables(ctx, req)

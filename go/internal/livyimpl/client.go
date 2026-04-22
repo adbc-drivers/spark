@@ -70,8 +70,8 @@ type ConnectionOpts struct {
 // livyClient handles communication with the Livy REST API
 type livyClient struct {
 	sessionID int
-	catalog   string // nolint:unused
-	schema    string // nolint:unused
+	catalog   string //nolint:unused
+	schema    string //nolint:unused
 
 	sessionConfig    map[string]string
 	sessionTtl       string
@@ -113,16 +113,16 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 
 // Session represents a Livy session
 type Session struct {
-	ID                  int                    `json:"id"`
-	AppID               string                 `json:"appId"`
-	Owner               string                 `json:"owner"`
-	ProxyUser           string                 `json:"proxyUser"`
-	Kind                string                 `json:"kind"`
-	Log                 []string               `json:"log"`
-	State               string                 `json:"state"`
-	AppInfo             map[string]interface{} `json:"appInfo"`
-	HeartbeatTimeoutSec int                    `json:"heartbeatTimeoutInSecond,omitempty"`
-	TTL                 string                 `json:"ttl,omitempty"`
+	ID                  int            `json:"id"`
+	AppID               string         `json:"appId"`
+	Owner               string         `json:"owner"`
+	ProxyUser           string         `json:"proxyUser"`
+	Kind                string         `json:"kind"`
+	Log                 []string       `json:"log"`
+	State               string         `json:"state"`
+	AppInfo             map[string]any `json:"appInfo"`
+	HeartbeatTimeoutSec int            `json:"heartbeatTimeoutInSecond,omitempty"`
+	TTL                 string         `json:"ttl,omitempty"`
 }
 
 // SessionState represents possible session states
@@ -153,12 +153,12 @@ type Statement struct {
 
 // StatementOutput represents statement output
 type StatementOutput struct {
-	Status         string                 `json:"status"`
-	ExecutionCount int                    `json:"execution_count"`
-	Data           map[string]interface{} `json:"data"`
-	Ename          string                 `json:"ename"`
-	Evalue         string                 `json:"evalue"`
-	Traceback      []string               `json:"traceback"`
+	Status         string         `json:"status"`
+	ExecutionCount int            `json:"execution_count"`
+	Data           map[string]any `json:"data"`
+	Ename          string         `json:"ename"`
+	Evalue         string         `json:"evalue"`
+	Traceback      []string       `json:"traceback"`
 }
 
 // StatementState represents possible statement states
@@ -280,7 +280,7 @@ func (c *livyClient) CreateSession(ctx context.Context, req CreateSessionRequest
 		return nil, err
 	}
 	// TODO: don't swallow error
-	defer resp.Body.Close() // nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
@@ -303,7 +303,7 @@ func (c *livyClient) GetSession(ctx context.Context, sessionID int) (*Session, e
 		return nil, err
 	}
 	// TODO: don't swallow error
-	defer resp.Body.Close() // nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -326,7 +326,7 @@ func (c *livyClient) DeleteSession(ctx context.Context) error {
 		return err
 	}
 	// TODO: don't swallow error
-	defer resp.Body.Close() // nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
@@ -345,7 +345,7 @@ func (c *livyClient) Close() error {
 		return err
 	}
 	// TODO: don't swallow error
-	defer resp.Body.Close() // nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
@@ -403,7 +403,7 @@ func (c *livyClient) CreateStatement(ctx context.Context, req CreateStatementReq
 		return nil, err
 	}
 	// TODO: don't swallow error
-	defer resp.Body.Close() // nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
@@ -426,7 +426,7 @@ func (c *livyClient) GetStatement(ctx context.Context, sessionID, statementID in
 		return nil, err
 	}
 	// TODO: don't swallow error
-	defer resp.Body.Close() // nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
