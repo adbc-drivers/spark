@@ -13,62 +13,87 @@
 # limitations under the License.
 
 services:
-  test-service:
+  kerberos:
     build:
-      context: ./ci/docker
-      dockerfile: spark.dockerfile
-    command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh; /opt/spark/sbin/start-connect-server.sh; env SPARK_NO_DAEMONIZE=true /opt/spark/sbin/start-thriftserver.sh --conf spark.hadoop.hive.server2.transport.mode=http --conf spark.hadoop.hive.server2.authentication=NOSASL --conf spark.hadoop.fs.s3a.access.key=admin --conf spark.hadoop.fs.s3a.secret.key=password --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 --conf spark.hadoop.fs.s3a.path.style.access=true"]
-    depends_on:
-      minio:
-        condition: service_started
-      spark-worker:
-        condition: service_started
+      context: ./ci/docker/kerberos/
+      dockerfile: Dockerfile
+      target: kerberos
+    environment:
+      REALM: KDC.LOCAL
+      KADMIN_PRINCIPAL: kadmin/admin
+      KADMIN_PASSWORD: password
+    volumes:
+      - ./data/kerberos/keytabs:/var/keytabs
+      - /dev/urandom:/dev/random
     healthcheck:
-      # test: "bash -c 'exec 6<> /dev/tcp/localhost/10000'"
-      test: curl -I http://localhost:10001
+      test: ["CMD-SHELL", "netstat -an | grep 88 | grep LISTEN || exit 1"]
+      retries: 10
+
+  # Metastore DB (PostgreSQL for Hive Metastore)
+  metastore-db:
+    image: postgres:18-alpine
+    environment:
+      - POSTGRES_USER=hive
+      - POSTGRES_PASSWORD=hive
+      - POSTGRES_DB=metastore
+    ports:
+      - "5434:5432"
+    volumes:
+      - ./data/metastore:/var/lib/postgresql
+      - ./ci/docker/hive/conf:/opt/hive/conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hive -d metastore"]
       interval: 5s
-      timeout: 10s
+      timeout: 5s
+      retries: 5
+
+  # Hive Metastore (catalog backend for Iceberg)
+  hive-metastore:
+    build:
+      context: ./ci/docker/
+      dockerfile: hive/Dockerfile
+      target: hive
+    depends_on:
+      metastore-db:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
+    environment:
+      IS_RESUME: true
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      KRB5CCNAME: /tmp/krb5cc_hive
+    ports:
+      - "9083:9083"  # Hive Metastore Thrift 
+    volumes:
+      - ./data/metastore:/opt/spark-data
+      - ./data/kerberos/keytabs:/var/keytabs
+    healthcheck:
+      test: ["CMD-SHELL", "netstat -an | grep 9083 | grep LISTEN || exit 1"]
+      interval: 10s
+      timeout: 5s
       retries: 10
       start_period: 5s
+
+  spark-master:
+    image: apache/spark:3.5.0
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
     ports:
-      - 7077:7077
-      - 8080:8080
-      - 10000:10000
-      - 10001:10001
-      - 15002:15002
+      - "8080:8080"   # Spark Master Web UI 
+      - "7077:7077"   # Spark Master Port 
+    command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
 
   spark-worker:
-    image: apache/spark:latest
-    command: ["/opt/spark/sbin/start-worker.sh", "spark://test-service:7077"]
-    environment:
-      SPARK_NO_DAEMONIZE: "true"
-    healthcheck:
-      test: curl --fail http://localhost:8081
-      interval: 5s
-      timeout: 10s
-      retries: 10
-      start_period: 5s
-
-  spark-thrift:
-    image: apache/spark:latest
-    command: ["/bin/bash", "-c", "/opt/spark/sbin/start-master.sh; env SPARK_NO_DAEMONIZE=true /opt/spark/sbin/start-thriftserver.sh"]
+    image: apache/spark:3.5.0
+    command: ["/opt/spark/sbin/start-worker.sh", "spark://spark-master:7077"]
     depends_on:
-      spark-thrift-worker:
+      spark-master:
         condition: service_started
-    healthcheck:
-      test: "bash -c 'exec 6<> /dev/tcp/localhost/10000'"
-      interval: 5s
-      timeout: 10s
-      retries: 10
-      start_period: 5s
-    ports:
-      - 20000:10000
-
-  spark-thrift-worker:
-    image: apache/spark:latest
-    command: ["/opt/spark/sbin/start-worker.sh", "spark://spark-thrift:7077"]
     environment:
-      SPARK_NO_DAEMONIZE: "true"
+      SPARK_NO_DAEMONIZE: true
     healthcheck:
       test: curl --fail http://localhost:8081
       interval: 5s
@@ -76,18 +101,55 @@ services:
       retries: 10
       start_period: 5s
 
-  minio:
-    image: quay.io/minio/minio:latest
-    command: ["server", "/data", "--console-address", ":9001"]
+  spark-thrift-server:
+    build:
+      context: ./ci/docker/
+      dockerfile: spark/Dockerfile
+      target: thrift
+    depends_on:
+      spark-master:
+        condition: service_started
+      hive-metastore:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
     environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: password
+      SPARK_MASTER: spark://spark-master:7077
+      KRB5CCNAME: /tmp/krb5cc_spark
+    ports:
+      - "10000:10000"  # Thrift JDBC/ODBC port
+      # - "10001:10001"  # Thrift HTTP port
+      - "4040:4040"    # Spark UI for Thrift Server
+    volumes:
+      - ./ci/docker/spark/conf/:/opt/spark/conf/:ro
+      - ./data/kerberos/keytabs:/var/keytabs
+      - ./data/metastore:/opt/spark-data
     healthcheck:
-      test: "mc ready local"
-      interval: 5s
+      test: ["CMD-SHELL", "klist && netstat -an | grep 10000 | grep LISTEN || exit 1"]
+      interval: 15s
       timeout: 10s
       retries: 10
-      start_period: 5s
+      start_period: 45s
+
+  # Apache Livy Server with Iceberg support
+  livy:
+    build:
+      context: ./ci/docker/
+      dockerfile: spark/Dockerfile
+      target: livy
+    depends_on:
+      spark-master:
+        condition: service_started
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
     ports:
-      - 9000:9000
-      - 9001:9001
+      - "8998:8998"  # Livy REST API
+    volumes:
+      - ./ci/docker/spark/conf/:/opt/livy/conf/:ro
+      - ./data/metastore:/opt/spark-data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8998/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
