@@ -100,7 +100,8 @@ const (
 	OptionValueApiThriftBinary = "thrift+binary"
 	OptionValueApiThriftHttp   = "thrift+http"
 	OptionValueApiLivy         = "livy"
-	// TODO: EMR StartJob API, Spark Connect
+	OptionValueApiConnect      = "connect"
+	// TODO: EMR StartJob API
 
 	// OptionAuthType
 
@@ -116,6 +117,10 @@ const (
 
 	OptionValueAuthTypeBasic    = "basic"
 	OptionValueAuthTypeAwsSigv4 = "aws_sigv4"
+
+	// Spark Connect auth types
+
+	OptionValueAuthTypeToken = "token"
 
 	// OptionLivySessionKind
 
