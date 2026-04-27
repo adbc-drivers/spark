@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG SPARK_VERSION=3.5.7
+ARG SPARK_VERSION=3.5.8
 FROM apache/spark:${SPARK_VERSION} AS base
 
-ARG SPARK_VERSION=3.5
+ARG SPARK_VERSION_NO_PATCH=3.5
 ARG ICEBERG_VERSION=1.7.0
 ARG SCALA_VERSION=2.12
 
@@ -32,10 +32,12 @@ ENV SPARK_HOME=/opt/spark
 WORKDIR /tmp
 
 # Download Iceberg runtime (Spark 3.5 + Scala 2.12)
-ARG ICEBERG_NAME="iceberg-spark-runtime-${SPARK_VERSION}_${SCALA_VERSION}"
+ARG ICEBERG_NAME="iceberg-spark-runtime-${SPARK_VERSION_NO_PATCH}_${SCALA_VERSION}"
 ARG ICEBERG_JAR="${ICEBERG_NAME}-${ICEBERG_VERSION}.jar"
 RUN wget -q https://repo1.maven.org/maven2/org/apache/iceberg/${ICEBERG_NAME}/${ICEBERG_VERSION}/${ICEBERG_JAR} -P ${SPARK_HOME}/jars/
 
+COPY kerberos/conf/krb5.conf /etc/krb5.conf
+ENV KRB5CCNAME="/tmp/krb5cc_spark"
 
 
 # ----
@@ -69,12 +71,10 @@ CMD ["/bin/bash", "-c", "$LIVY_HOME/bin/livy-server"]
 # ------
 # THRIFT
 # ------
-
 FROM base AS thrift
 
 COPY --from=base ${SPARK_HOME} ${SPARK_HOME}
 COPY hive/conf/ ${SPARK_HOME}/conf/
-COPY kerberos/conf/krb5.conf /etc/krb5.conf
 COPY spark/conf/ ${SPARK_HOME}/conf/
 COPY spark/entrypoint.sh /opt/entrypoint.sh
 
@@ -82,6 +82,29 @@ RUN chmod +x /opt/entrypoint.sh
 
 WORKDIR ${SPARK_HOME}
 
-ENV KRB5CCNAME="/tmp/krb5cc_spark"
+ENV SPARK_SERVER_TYPE=thrift
+
+CMD ["/opt/entrypoint.sh"]
+
+
+
+# -------
+# CONNECT
+# -------
+FROM base AS connect
+
+COPY --from=base ${SPARK_HOME} ${SPARK_HOME}
+COPY hive/conf/ ${SPARK_HOME}/conf/
+COPY spark/conf/ ${SPARK_HOME}/conf/
+COPY spark/entrypoint.sh /opt/entrypoint.sh
+
+ARG SPARK_VERSION
+RUN wget https://repo1.maven.org/maven2/org/apache/spark/spark-connect_${SCALA_VERSION}/${SPARK_VERSION}/spark-connect_${SCALA_VERSION}-${SPARK_VERSION}.jar -P ${SPARK_HOME}/jars/
+
+RUN chmod +x /opt/entrypoint.sh
+
+WORKDIR ${SPARK_HOME}
+
+ENV SPARK_SERVER_TYPE=connect
 
 CMD ["/opt/entrypoint.sh"]

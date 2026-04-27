@@ -115,7 +115,6 @@ services:
         condition: service_healthy
     environment:
       SPARK_MASTER: spark://spark-master:7077
-      KRB5CCNAME: /tmp/krb5cc_spark
     ports:
       - "10000:10000"  # Thrift JDBC/ODBC port
       # - "10001:10001"  # Thrift HTTP port
@@ -126,6 +125,34 @@ services:
       - ./data/metastore:/opt/spark-data
     healthcheck:
       test: ["CMD-SHELL", "klist && netstat -an | grep 10000 | grep LISTEN || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  spark-connect-server:
+    build:
+      context: ./ci/docker/
+      dockerfile: spark/Dockerfile
+      target: connect
+    depends_on:
+      spark-master:
+        condition: service_started
+      hive-metastore:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
+    environment:
+      SPARK_MASTER: spark://spark-master:7077
+    ports:
+      - "15002:15002"  # Spark Connect gRPC port
+      - "4041:4040"    # Spark UI
+    volumes:
+      - ./ci/docker/spark/conf/:/opt/spark/conf/:ro
+      - ./data/kerberos/keytabs:/var/keytabs
+      - ./data/metastore:/opt/spark-data
+    healthcheck:
+      test: ["CMD-SHELL", "klist && netstat -an | grep 15002 | grep LISTEN || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
