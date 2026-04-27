@@ -17,6 +17,7 @@ package spark
 import (
 	"context"
 	"fmt"
+	"github.com/adbc-drivers/apache/go/internal/connectimpl"
 	"github.com/adbc-drivers/apache/go/internal/livyimpl"
 	"github.com/adbc-drivers/apache/go/internal/sparkbase"
 	"github.com/adbc-drivers/apache/go/internal/thriftimpl"
@@ -61,7 +62,13 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 		options[fullKey] = values[0]
 	}
 
-	options[OptionApi] = uri.Scheme
+	scheme := uri.Scheme
+	// Spark Connect's native URI scheme is `sc`. Map it onto our internal
+	// api-name convention so `sc://host:port` works out of the box.
+	if scheme == "sc" {
+		scheme = OptionValueApiConnect
+	}
+	options[OptionApi] = scheme
 
 	return nil
 }
@@ -211,6 +218,43 @@ func livyOptsFromOptions(options map[string]string) (livyimpl.ConnectionOpts, er
 	return livyOpts, nil
 }
 
+func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOpts, error) {
+	connectOpts := connectimpl.ConnectionOpts{}
+
+	host, err := parseHostPortFromOptions(options)
+	if err != nil {
+		return connectOpts, err
+	}
+	connectOpts.Host = host
+
+	if username, ok := options[adbc.OptionKeyUsername]; ok {
+		delete(options, adbc.OptionKeyUsername)
+		connectOpts.Username = username
+	}
+
+	authType, ok := options[OptionAuthType]
+	if !ok {
+		return connectOpts, sparkbase.MissingRequiredOptionErr(OptionAuthType)
+	}
+	delete(options, OptionAuthType)
+	switch authType {
+	case OptionValueAuthTypeNone:
+		connectOpts.AuthType = connectimpl.AuthTypeNone
+	case OptionValueAuthTypeToken:
+		connectOpts.AuthType = connectimpl.AuthTypeToken
+		password, hasPassword := options[adbc.OptionKeyPassword]
+		if !hasPassword || password == "" {
+			return connectOpts, sparkbase.MissingRequiredOptionErr(adbc.OptionKeyPassword)
+		}
+		delete(options, adbc.OptionKeyPassword)
+		connectOpts.Token = password
+	default:
+		return connectOpts, sparkbase.InvalidOptionErr(OptionAuthType, authType)
+	}
+
+	return connectOpts, nil
+}
+
 func thriftOptsFromOptions(options map[string]string) (thriftimpl.ConnectionOpts, error) {
 	thriftOpts := thriftimpl.ConnectionOpts{}
 
@@ -299,7 +343,7 @@ func newSparkClientFactory(options map[string]string) (func(context.Context) (sp
 
 		sessionOptions := make(map[string]string)
 		for k, v := range options {
-			if after, ok0 := strings.CutPrefix(k, OptionSparkConfigPrefix); ok0 {
+			if after, ok := strings.CutPrefix(k, OptionSparkConfigPrefix); ok {
 				trimmedKey := after
 				sessionOptions[trimmedKey] = v
 				delete(options, k)
@@ -308,6 +352,24 @@ func newSparkClientFactory(options map[string]string) (func(context.Context) (sp
 
 		return func(ctx context.Context) (sparkbase.SparkClient, error) {
 			return livyimpl.NewClient(ctx, livyOpts, sessionOptions)
+		}, nil
+
+	case OptionValueApiConnect:
+		connectOpts, err := connectOptsFromOptions(options)
+		if err != nil {
+			return nil, err
+		}
+
+		sessionOptions := make(map[string]string)
+		for k, v := range options {
+			if after, ok := strings.CutPrefix(k, OptionSparkConfigPrefix); ok {
+				sessionOptions[after] = v
+				delete(options, k)
+			}
+		}
+
+		return func(ctx context.Context) (sparkbase.SparkClient, error) {
+			return connectimpl.NewClient(ctx, connectOpts, sessionOptions)
 		}, nil
 
 	default:
