@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from adbc_drivers_validation.tests.connection import (
-    TestConnection,  # noqa: F401
+from adbc_drivers_validation.tests.connection import (  # noqa: F401
+    TestConnection,
     generate_tests,
 )
 
-from .spark import SparkThriftHttpQuirks
+from . import spark
 
 
 def pytest_generate_tests(metafunc) -> None:
-    return generate_tests(SparkThriftHttpQuirks(), metafunc)
+    quirks = [spark.get_quirks(metafunc.config.getoption("vendor_version"))]
+    return generate_tests(quirks, metafunc)

@@ -12,40 +12,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import functools
+import re
 from pathlib import Path
 
 from adbc_drivers_validation import model, quirks
 
 
-class SparkThriftHttpQuirks(model.DriverQuirks):
-    name = "spark_thrift_http"
-    driver = "columnar_driver_spark"
-    driver_name = "ADBC Driver for Apache Spark"
+class SparkThriftQuirks(model.DriverQuirks):
+    name = "spark_thrift"
+    driver = "adbc_driver_spark"
+    driver_name = "ADBC Driver Foundry Driver for Apache Spark"
     vendor_name = "Apache Spark"
+    vendor_version = re.compile(r"3\.5\.\d+.*")
+    short_version = "3.5"
     features = model.DriverFeatures(
-        # connection_get_table_schema=True,
-        # connection_transactions=True,
-        # get_objects_constraints_foreign=True,
-        # get_objects_constraints_primary=True,
-        # get_objects_constraints_unique=True,
         statement_bind=False,
         statement_bulk_ingest=True,
-        # statement_bulk_ingest_catalog=True,
-        # statement_bulk_ingest_schema=True,
-        # statement_bulk_ingest_temporary=True,
-        # statement_execute_schema=True,
-        # statement_get_parameter_schema=True,
         statement_prepare=False,
         current_catalog="spark_catalog",
         current_schema="default",
-        # secondary_schema=model.FromEnv("REDSHIFT_SECONDARY_SCHEMA"),
-        # secondary_catalog=model.FromEnv("REDSHIFT_SECONDARY_CATALOG"),
-        # secondary_catalog_schema=model.FromEnv("REDSHIFT_SECONDARY_CATALOG_SCHEMA"),
         supported_xdbc_fields=[],
     )
     setup = model.DriverSetup(
         database={
             "uri": model.FromEnv("SPARK_URI"),
+            "username": "spark",
+            "password": "spark",
         },
         connection={},
         statement={
@@ -54,8 +47,8 @@ class SparkThriftHttpQuirks(model.DriverQuirks):
     )
 
     @property
-    def queries_path(self) -> Path:
-        return Path(__file__).parent.parent / "queries"
+    def queries_paths(self) -> tuple[Path]:
+        return (Path(__file__).parent.parent / "queries",)
 
     def bind_parameter(self, index: int) -> str:
         return f"${index}"
@@ -88,33 +81,14 @@ class SparkThriftHttpQuirks(model.DriverQuirks):
     def is_table_not_found(self, table_name: str, error: Exception) -> bool:
         return "TABLE_OR_VIEW_NOT_FOUND" in str(error) and table_name in str(error)
 
-    # def qualify_temp_table(
-    #     self, cursor: adbc_driver_manager.dbapi.Cursor, name: str
-    # ) -> str:
-    #     cursor.execute("SELECT current_schemas(true)")
-    #     schemas = cursor.fetchall()[0][0]
-    #     temp_schema = [s for s in schemas if s.startswith("pg_temp_")]
-    #     if not temp_schema:
-    #         raise ValueError(f"No pg_temp schema found in schemas {schemas}")
-    #     return f"{temp_schema[0]}.{name}"
-
-    # @property
-    # def sample_ddl_constraints(self) -> list[str]:
-    #     return [
-    #         "CREATE TABLE constraint_unique (z INT, a INT UNIQUE, b INT, c INT, UNIQUE (c, b))",
-    #         "CREATE TABLE constraint_primary (z INT, a INT PRIMARY KEY, b VARCHAR)",
-    #         "CREATE TABLE constraint_primary_multi (z INT, a INT, b VARCHAR, PRIMARY KEY (b, a))",
-    #         "CREATE TABLE constraint_primary_multi2 (z INT, a VARCHAR, b INT, PRIMARY KEY (a, b))",
-    #         "CREATE TABLE constraint_foreign (z INT, a INT, b INT, FOREIGN KEY (b) REFERENCES constraint_primary(a))",
-    #         "CREATE TABLE constraint_foreign_multi (z INT, a INT, b INT, c VARCHAR, FOREIGN KEY (c, b) REFERENCES constraint_primary_multi2(a, b))",
-    #         # Ensure the driver doesn't misinterpret column IDs as indices
-    #         "ALTER TABLE constraint_unique DROP COLUMN z",
-    #         "ALTER TABLE constraint_primary DROP COLUMN z",
-    #         "ALTER TABLE constraint_primary_multi DROP COLUMN z",
-    #         "ALTER TABLE constraint_primary_multi2 DROP COLUMN z",
-    #         "ALTER TABLE constraint_foreign DROP COLUMN z",
-    #         "ALTER TABLE constraint_foreign_multi DROP COLUMN z",
-    #     ]
-
     def split_statement(self, statement: str) -> list[str]:
         return quirks.split_statement(statement)
+
+
+@functools.cache
+def get_quirks(version: str) -> model.DriverQuirks:
+    vendor, _, version = version.partition(":")
+    if vendor in ("spark_thrift", "thrift"):
+        if version == "3.5":
+            return SparkThriftQuirks()
+    raise ValueError(f"unsupported Spark {vendor}:{version}")

@@ -16,4 +16,6 @@
 driver = "spark"
 repository = "apache"
 
-[lang.go]
+[[lang.go.validation.configs]]
+service_name = "spark-thrift-server"
+vendor_version = "thrift:3.5"
