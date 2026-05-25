@@ -12,13 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from adbc_drivers_validation.tests.ingest import (
-    TestIngest,  # noqa: F401
-    generate_tests,
-)
+import adbc_drivers_validation.tests.ingest
 
-from .spark import SparkThriftHttpQuirks
+from . import spark
 
 
 def pytest_generate_tests(metafunc) -> None:
-    return generate_tests(SparkThriftHttpQuirks(), metafunc)
+    quirks = [spark.get_quirks(metafunc.config.getoption("vendor_version"))]
+    return adbc_drivers_validation.tests.ingest.generate_tests(quirks, metafunc)
+
+
+class TestIngest(adbc_drivers_validation.tests.ingest.TestIngest):
+    pass

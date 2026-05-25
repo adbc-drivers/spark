@@ -25,14 +25,13 @@ ARG POSTGRES_NAME=postgresql-${POSTGRES_DRIVER_VERSION}
 USER root
 RUN export DEBIAN_FRONTEND=noninteractive \
         && apt-get update \
-        && apt-get install -y --no-install-recommends net-tools krb5-user \
+        && apt-get install -y --no-install-recommends net-tools krb5-user wget \
         && rm /opt/hadoop/share/hadoop/common/lib/slf4j-log4j12-1.7.25.jar
 
 # NOTE: If Hive >= 4, there, the prebuilt docker images contain wget.
 # Otherwise you need the local Postgres driver JAR in your workspace directory.
 
-# RUN wget -q https://jdbc.postgresql.org/download/${POSTGRES_NAME}.jar -P ${HIVE_HOME}/lib/
-COPY ./hive/postgresql-${POSTGRES_DRIVER_VERSION}.jar ${HIVE_HOME}/lib/
+RUN wget -q https://jdbc.postgresql.org/download/${POSTGRES_NAME}.jar -P ${HIVE_HOME}/lib/
 COPY ./hive/conf/ ${HIVE_HOME}/conf/
 COPY ./kerberos/conf/krb5.conf /etc/krb5.conf
 

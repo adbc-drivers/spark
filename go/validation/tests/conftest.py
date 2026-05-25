@@ -15,25 +15,41 @@
 from pathlib import Path
 
 import adbc_drivers_validation.model
+import adbc_drivers_validation.tests.conftest
 import pytest
 from adbc_drivers_validation.tests.conftest import (  # noqa: F401
     conn,
     conn_factory,
+    db_kwargs,
     manual_test,
-    pytest_collection_modifyitems,
 )
 
-from .spark import SparkThriftHttpQuirks
+from . import spark
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    adbc_drivers_validation.tests.conftest.pytest_addoption(parser)
+    parser.addoption("--vendor-version", action="store", default="thrift:3.5")
 
 
 @pytest.fixture(scope="session")
-def driver(request) -> adbc_drivers_validation.model.DriverQuirks:
+def driver(request, pytestconfig) -> adbc_drivers_validation.model.DriverQuirks:
     driver = request.param
-    assert driver == "spark_thrift_http"
-    return SparkThriftHttpQuirks()
+    assert driver.startswith("spark_")
+    return spark.get_quirks(pytestconfig.getoption("vendor_version"))
 
 
 @pytest.fixture(scope="session")
 def driver_path(driver: adbc_drivers_validation.model.DriverQuirks) -> str:
-    # Assume shared library is in the repo root
-    return str(Path(__file__).parent.parent.parent / "libadbc_driver_spark.so")
+    # Assume shared library is in the build directory
+    return str(
+        Path(__file__).parent.parent.parent / "build" / "libadbc_driver_spark.so"
+    )
+
+
+def pytest_collection_modifyitems(
+    session: pytest.Session, config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    adbc_drivers_validation.tests.conftest.pytest_collection_modifyitems(
+        session, config, items
+    )

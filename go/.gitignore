@@ -13,5 +13,7 @@
 # limitations under the License.
 
 data/
+generated/
 kerberos-data/
+validation-report*.xml
 .doit.db
