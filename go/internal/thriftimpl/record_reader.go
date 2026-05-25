@@ -27,10 +27,10 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/decimal128"
-	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
 type thriftRecordReader struct {
+	ctx        context.Context
 	client     *driverbase.Shared[hiveserver2.TCLIServiceClient]
 	req        *hiveserver2.TExecuteStatementReq
 	handle     *hiveserver2.TOperationHandle
@@ -38,11 +38,21 @@ type thriftRecordReader struct {
 	nextRowIdx int
 }
 
-func (rr *thriftRecordReader) AppendRow(builder *array.RecordBuilder) error {
+var _ driverbase.RecordReaderImpl = (*thriftRecordReader)(nil)
+
+func (rr *thriftRecordReader) AppendRows(builder *array.RecordBuilder) (int64, int64, error) {
+	err := rr.appendRow(builder)
+	if err != nil {
+		return 0, 0, err
+	}
+	return 1, 0, nil
+}
+
+func (rr *thriftRecordReader) appendRow(builder *array.RecordBuilder) error {
 	for rr.results == nil || (rr.results.HasMoreRows != nil && *rr.results.HasMoreRows && rr.nextRowIdx >= len(rr.results.Results.Rows)) {
 		var err error
 		rr.results, err = driverbase.WithShared(rr.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TFetchResultsResp, error) {
-			return client.FetchResults(context.Background(), &hiveserver2.TFetchResultsReq{
+			return client.FetchResults(rr.ctx, &hiveserver2.TFetchResultsReq{
 				OperationHandle: rr.handle,
 				Orientation:     hiveserver2.TFetchOrientation_FETCH_FIRST,
 				MaxRows:         65536,
@@ -159,7 +169,7 @@ func (rr *thriftRecordReader) BeginAppending(builder *array.RecordBuilder) error
 	return nil
 }
 
-func (rr *thriftRecordReader) NextResultSet(ctx context.Context, rec arrow.Record, rowIdx int) (*arrow.Schema, error) {
+func (rr *thriftRecordReader) NextResultSet(ctx context.Context, rec arrow.RecordBatch, rowIdx int) (*arrow.Schema, error) {
 	var schema *arrow.Schema
 	resp, err := driverbase.WithShared(rr.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TExecuteStatementResp, error) {
 		resp, err := client.ExecuteStatement(ctx, rr.req)
@@ -268,13 +278,14 @@ func (rr *thriftRecordReader) Close() error {
 	return nil
 }
 
-func newThriftRecordReader(ctx context.Context, mem memory.Allocator, client *driverbase.Shared[hiveserver2.TCLIServiceClient], req *hiveserver2.TExecuteStatementReq) (array.RecordReader, error) {
+func newThriftRecordReader(ctx context.Context, query sparkbase.QueryContext, client *driverbase.Shared[hiveserver2.TCLIServiceClient], req *hiveserver2.TExecuteStatementReq) (array.RecordReader, error) {
 	impl := &thriftRecordReader{
+		ctx:    ctx,
 		client: client,
 		req:    req,
 	}
 	rr := &driverbase.BaseRecordReader{}
-	err := rr.Init(ctx, mem, nil, 0, impl)
+	err := rr.Init(ctx, query.Mem, query.Log, nil, query.ReaderOptions, impl)
 	if err != nil {
 		return nil, err
 	}

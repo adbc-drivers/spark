@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
@@ -26,8 +27,10 @@ import (
 )
 
 type QueryContext struct {
-	Mem   memory.Allocator
-	Query string
+	ReaderOptions driverbase.BaseRecordReaderOptions
+	Mem           memory.Allocator
+	Log           *slog.Logger
+	Query         string
 }
 
 type SparkClient interface {
@@ -46,28 +49,42 @@ type SparkClient interface {
 
 type SparkClientFactory func(context.Context) (SparkClient, error)
 
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
 func singleRowStringQuery(sql string, c SparkClient, ctx context.Context, mem memory.Allocator) (string, error) {
 	query := QueryContext{
 		Query: sql,
 		Mem:   mem,
+		Log:   discardLogger,
 	}
 	rr, _, err := c.ExecuteQuery(ctx, query)
 	if err != nil {
 		return "", err
 	}
 
-	if rr.Record().NumRows() != 1 {
+	if !rr.Next() {
 		return "", adbc.Error{
 			Code: adbc.StatusInternal,
-			Msg:  fmt.Sprintf("[spark] `%s` did not return a single row", query),
+			Msg:  fmt.Sprintf("[spark] `%s` did not return any rows", query.Query),
 		}
 	}
 
-	if stringCol, ok := rr.Record().Column(0).(array.StringLike); ok {
+	rec := rr.RecordBatch()
+	if rec.NumRows() != 1 {
+		return "", adbc.Error{
+			Code: adbc.StatusInternal,
+			Msg:  fmt.Sprintf("[spark] `%s` did not return a single row", query.Query),
+		}
+	}
+
+	if stringCol, ok := rec.Column(0).(array.StringLike); ok {
 		return stringCol.Value(0), nil
 	}
 
-	panic("should return a single string column")
+	return "", adbc.Error{
+		Code: adbc.StatusInternal,
+		Msg:  fmt.Sprintf("[spark] `%s` did not return a string result", query.Query),
+	}
 }
 
 // The following are blanket implementations of metadata queries based on information schema queries.

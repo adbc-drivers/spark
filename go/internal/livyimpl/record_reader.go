@@ -30,7 +30,7 @@ type jsonRecordReader struct {
 	schema   *arrow.Schema
 	jsonRows []string
 	current  int
-	record   arrow.Record
+	record   arrow.RecordBatch
 	err      error
 }
 
@@ -83,7 +83,12 @@ func (r *jsonRecordReader) Next() bool {
 }
 
 // Record returns the current record
-func (r *jsonRecordReader) Record() arrow.Record {
+func (r *jsonRecordReader) Record() arrow.RecordBatch {
+	return r.record
+}
+
+// RecordBatch returns the current record batch
+func (r *jsonRecordReader) RecordBatch() arrow.RecordBatch {
 	return r.record
 }
 
@@ -108,7 +113,7 @@ func (r *jsonRecordReader) Retain() {
 }
 
 // buildRecord builds an Arrow record from JSON rows
-func (r *jsonRecordReader) buildRecord() (arrow.Record, error) {
+func (r *jsonRecordReader) buildRecord() (arrow.RecordBatch, error) {
 	// Parse all JSON rows
 	var rows []map[string]any
 	for i, jsonRow := range r.jsonRows {
@@ -125,7 +130,7 @@ func (r *jsonRecordReader) buildRecord() (arrow.Record, error) {
 
 	if len(rows) == 0 {
 		// Return empty record
-		return array.NewRecord(r.schema, []arrow.Array{}, 0), nil
+		return array.NewRecordBatch(r.schema, []arrow.Array{}, 0), nil
 	}
 
 	// Build arrays for each column
@@ -141,7 +146,7 @@ func (r *jsonRecordReader) buildRecord() (arrow.Record, error) {
 		}
 	}
 
-	return bldr.NewRecord(), nil
+	return bldr.NewRecordBatch(), nil
 }
 
 // appendValueToBuilder appends a value to an Arrow array builder
