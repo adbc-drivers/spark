@@ -49,7 +49,7 @@ type bulkIngestPendingCopy struct {
 	rows   int64
 }
 
-func (pendingCopy *bulkIngestPendingCopy) Rows() int64 {
+func (pendingCopy *bulkIngestPendingCopy) NumRows() int64 {
 	return pendingCopy.rows
 }
 
@@ -58,11 +58,13 @@ func (pendingCopy *bulkIngestPendingCopy) String() string {
 }
 
 type bulkIngestImpl struct {
+	driverbase.ParquetIngestImpl
+
 	logger   *slog.Logger
 	mem      memory.Allocator
 	client   sparkbase.SparkClient
 	s3Client *s3.Client
-	uploader *manager.Uploader
+	uploader *manager.Uploader //nolint:staticcheck
 	options  bulkIngestOptions
 	bucket   string
 	prefix   string
@@ -125,7 +127,7 @@ func (bi *bulkIngestImpl) Upload(ctx context.Context, chunk driverbase.BulkInges
 	ifNoneMatch := "*"
 
 	key := bi.generateObjectKey()
-	_, err := bi.uploader.Upload(ctx, &s3.PutObjectInput{
+	_, err := bi.uploader.Upload(ctx, &s3.PutObjectInput{ //nolint:staticcheck
 		Bucket:      &bi.bucket,
 		Key:         &key,
 		Body:        &chunk.Data.(*driverbase.BufferBulkIngestSink).Buffer,

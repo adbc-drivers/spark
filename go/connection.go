@@ -35,7 +35,7 @@ func (c *connectionImpl) Init(client sparkbase.SparkClient) error {
 	return nil
 }
 
-func (c *connectionImpl) Close() error {
+func (c *connectionImpl) Close(ctx context.Context) error {
 	if c.client == nil {
 		return c.ErrorHelper.Errorf(adbc.StatusInvalidState, "connection not initialized or already closed")
 	}
@@ -67,23 +67,23 @@ func (*connectionImpl) ListTableTypes(ctx context.Context) ([]string, error) {
 	}, nil
 }
 
-func (c *connectionImpl) GetCurrentCatalog() (string, error) {
-	return c.client.CurrentCatalog(context.Background(), c.Alloc)
+func (c *connectionImpl) GetCurrentCatalog(ctx context.Context) (string, error) {
+	return c.client.CurrentCatalog(ctx, c.Alloc)
 }
 
-func (c *connectionImpl) GetCurrentDbSchema() (string, error) {
-	return c.client.CurrentSchema(context.Background(), c.Alloc)
+func (c *connectionImpl) GetCurrentDbSchema(ctx context.Context) (string, error) {
+	return c.client.CurrentSchema(ctx, c.Alloc)
 }
 
-func (c *connectionImpl) SetCurrentCatalog(value string) error {
-	return c.client.SetCurrentCatalog(context.Background(), c.Alloc, value)
+func (c *connectionImpl) SetCurrentCatalog(ctx context.Context, value string) error {
+	return c.client.SetCurrentCatalog(ctx, c.Alloc, value)
 }
 
-func (c *connectionImpl) SetCurrentDbSchema(value string) error {
-	return c.client.SetCurrentSchema(context.Background(), c.Alloc, value)
+func (c *connectionImpl) SetCurrentDbSchema(ctx context.Context, value string) error {
+	return c.client.SetCurrentSchema(ctx, c.Alloc, value)
 }
 
-func (c *connectionImpl) SetAutocommit(enabled bool) error {
+func (c *connectionImpl) SetAutocommit(ctx context.Context, enabled bool) error {
 	if enabled {
 		return nil
 	}
@@ -111,14 +111,14 @@ func (c *connectionImpl) Rollback(ctx context.Context) error {
 	}
 }
 
-func (c *connectionImpl) NewStatement() (adbc.Statement, error) {
-	return &statementImpl{
+func (c *connectionImpl) NewStatement(ctx context.Context) (adbc.StatementWithContext, error) {
+	return driverbase.NewStatement(&statementImpl{
 		StatementImplBase: driverbase.NewStatementImplBase(&c.ConnectionImplBase, c.ErrorHelper),
 		cnxn:              c,
 		ingest: bulkIngestOptions{
 			BulkIngestOptions: driverbase.NewBulkIngestOptions(),
 		},
-	}, nil
+	}), nil
 }
 
 func (c *connectionImpl) ReadPartition(ctx context.Context, serializedPartition []byte) (array.RecordReader, error) {
@@ -128,7 +128,7 @@ func (c *connectionImpl) ReadPartition(ctx context.Context, serializedPartition 
 	}
 }
 
-func (c *connectionImpl) SetOption(key, value string) error {
+func (c *connectionImpl) SetOption(ctx context.Context, key, value string) error {
 	switch key {
 	default:
 		return adbc.Error{

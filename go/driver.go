@@ -27,11 +27,7 @@ type driverImpl struct {
 	driverbase.DriverImplBase
 }
 
-func (d *driverImpl) NewDatabase(opts map[string]string) (adbc.Database, error) {
-	return d.NewDatabaseWithContext(context.Background(), opts)
-}
-
-func (d *driverImpl) NewDatabaseWithContext(ctx context.Context, opts map[string]string) (adbc.Database, error) {
+func (d *driverImpl) NewDatabaseWithContext(ctx context.Context, opts map[string]string) (adbc.DatabaseWithContext, error) {
 	base, err := driverbase.NewDatabaseImplBase(ctx, &d.DriverImplBase)
 	if err != nil {
 		return nil, err
@@ -40,14 +36,14 @@ func (d *driverImpl) NewDatabaseWithContext(ctx context.Context, opts map[string
 		DatabaseImplBase: base,
 	}
 	opts = maps.Clone(opts)
-	if err := db.SetOptions(opts); err != nil {
+	if err := db.SetOptions(ctx, opts); err != nil {
 		return nil, err
 	}
 	return driverbase.NewDatabase(db), nil
 }
 
 // NewDriver creates a new driver using the given Arrow allocator.
-func NewDriver(alloc memory.Allocator) adbc.Driver {
+func NewDriver(alloc memory.Allocator) driverbase.DriverWithContext {
 	info := driverbase.DefaultDriverInfo("Apache Spark")
 	err := info.RegisterInfoCode(adbc.InfoDriverName, "ADBC Driver for Apache Spark")
 	if err != nil {

@@ -29,13 +29,13 @@ type databaseImpl struct {
 	clientFactory sparkbase.SparkClientFactory
 }
 
-func (d *databaseImpl) GetOption(key string) (string, error) {
-	return d.DatabaseImplBase.GetOption(key)
+func (d *databaseImpl) GetOption(ctx context.Context, key string) (string, error) {
+	return d.DatabaseImplBase.GetOption(ctx, key)
 }
 
-func (d *databaseImpl) SetOptions(options map[string]string) error {
+func (d *databaseImpl) SetOptions(ctx context.Context, options map[string]string) error {
 	var err error
-	d.clientFactory, err = newSparkClientFactory(options)
+	d.clientFactory, err = newSparkClientFactory(ctx, options)
 	if err != nil {
 		return err
 	}
@@ -50,7 +50,7 @@ func (d *databaseImpl) SetOptions(options map[string]string) error {
 	return nil
 }
 
-func (d *databaseImpl) Open(ctx context.Context) (adbc.Connection, error) {
+func (d *databaseImpl) Open(ctx context.Context) (adbc.ConnectionWithContext, error) {
 	conn := &connectionImpl{
 		ConnectionImplBase: driverbase.NewConnectionImplBase(&d.DatabaseImplBase),
 	}
@@ -73,6 +73,6 @@ func (d *databaseImpl) Open(ctx context.Context) (adbc.Connection, error) {
 		Connection(), nil
 }
 
-func (d *databaseImpl) Close() error {
+func (d *databaseImpl) Close(ctx context.Context) error {
 	return nil
 }

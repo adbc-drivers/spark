@@ -23,7 +23,7 @@ services:
       KADMIN_PRINCIPAL: kadmin/admin
       KADMIN_PASSWORD: password
     volumes:
-      - ./data/kerberos/keytabs:/var/keytabs
+      - ./.data/kerberos/keytabs:/var/keytabs
       - /dev/urandom:/dev/random
     healthcheck:
       test: ["CMD-SHELL", "netstat -an | grep 88 | grep LISTEN || exit 1"]
@@ -39,7 +39,7 @@ services:
     ports:
       - "5434:5432"
     volumes:
-      - ./data/metastore:/var/lib/postgresql
+      - ./.data/metastore:/var/lib/postgresql
       - ./ci/docker/hive/conf:/opt/hive/conf
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hive -d metastore"]
@@ -66,8 +66,8 @@ services:
     ports:
       - "9083:9083"  # Hive Metastore Thrift
     volumes:
-      - ./data/metastore:/opt/spark-data
-      - ./data/kerberos/keytabs:/var/keytabs
+      - ./.data/metastore:/opt/spark-data
+      - ./.data/kerberos/keytabs:/var/keytabs
     healthcheck:
       test: ["CMD-SHELL", "netstat -an | grep 9083 | grep LISTEN || exit 1"]
       interval: 10s
@@ -121,8 +121,8 @@ services:
       - "4040:4040"    # Spark UI for Thrift Server
     volumes:
       - ./ci/docker/spark/conf/:/opt/spark/conf/:ro
-      - ./data/kerberos/keytabs:/var/keytabs
-      - ./data/metastore:/opt/spark-data
+      - ./.data/kerberos/keytabs:/var/keytabs
+      - ./.data/metastore:/opt/spark-data
     healthcheck:
       test: ["CMD-SHELL", "klist && netstat -an | grep 10000 | grep LISTEN || exit 1"]
       interval: 15s
@@ -149,8 +149,8 @@ services:
       - "4041:4040"    # Spark UI
     volumes:
       - ./ci/docker/spark/conf/:/opt/spark/conf/:ro
-      - ./data/kerberos/keytabs:/var/keytabs
-      - ./data/metastore:/opt/spark-data
+      - ./.data/kerberos/keytabs:/var/keytabs
+      - ./.data/metastore:/opt/spark-data
     healthcheck:
       test: ["CMD-SHELL", "klist && netstat -an | grep 15002 | grep LISTEN || exit 1"]
       interval: 15s
@@ -173,7 +173,7 @@ services:
       - "8998:8998"  # Livy REST API
     volumes:
       - ./ci/docker/spark/conf/:/opt/livy/conf/:ro
-      - ./data/metastore:/opt/spark-data
+      - ./.data/metastore:/opt/spark-data
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8998/ || exit 1"]
       interval: 30s

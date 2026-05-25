@@ -143,7 +143,7 @@ func awsConfigFromOptions(ctx context.Context, options map[string]string) (aws.C
 	return cfg, nil
 }
 
-func livyOptsFromOptions(options map[string]string) (livyimpl.ConnectionOpts, error) {
+func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyimpl.ConnectionOpts, error) {
 	livyOpts := livyimpl.ConnectionOpts{}
 
 	host, err := parseHostPortFromOptions(options)
@@ -192,7 +192,7 @@ func livyOptsFromOptions(options map[string]string) (livyimpl.ConnectionOpts, er
 		livyOpts.AuthType = livyimpl.AuthTypeBasic
 	case OptionValueAuthTypeAwsSigv4:
 		livyOpts.AuthType = livyimpl.AuthTypeAwsSigV4
-		cfg, err := awsConfigFromOptions(context.Background(), options)
+		cfg, err := awsConfigFromOptions(ctx, options)
 		if err != nil {
 			return livyOpts, err
 		}
@@ -296,7 +296,7 @@ func thriftOptsFromOptions(options map[string]string) (thriftimpl.ConnectionOpts
 	return thriftOpts, nil
 }
 
-func newSparkClientFactory(options map[string]string) (func(context.Context) (sparkbase.SparkClient, error), error) {
+func newSparkClientFactory(ctx context.Context, options map[string]string) (func(context.Context) (sparkbase.SparkClient, error), error) {
 	uri, ok := options[adbc.OptionKeyURI]
 	if ok {
 		parsed, err := url.Parse(uri)
@@ -336,7 +336,7 @@ func newSparkClientFactory(options map[string]string) (func(context.Context) (sp
 		}, nil
 
 	case OptionValueApiLivy:
-		livyOpts, err := livyOptsFromOptions(options)
+		livyOpts, err := livyOptsFromOptions(ctx, options)
 		if err != nil {
 			return nil, err
 		}

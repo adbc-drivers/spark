@@ -53,7 +53,7 @@ func (st *statementImpl) clearIngestState() {
 	st.ingest.Clear()
 }
 
-func (st *statementImpl) Close() error {
+func (st *statementImpl) Close(ctx context.Context) error {
 	if st.params != nil {
 		st.params.Release()
 		st.params = nil
@@ -61,25 +61,25 @@ func (st *statementImpl) Close() error {
 	return nil
 }
 
-func (st *statementImpl) GetOption(key string) (string, error) {
+func (st *statementImpl) GetOption(ctx context.Context, key string) (string, error) {
 	return "", adbc.Error{
 		Msg:  fmt.Sprintf("[spark] Unknown statement option '%s'", key),
 		Code: adbc.StatusNotFound,
 	}
 }
-func (st *statementImpl) GetOptionBytes(key string) ([]byte, error) {
+func (st *statementImpl) GetOptionBytes(ctx context.Context, key string) ([]byte, error) {
 	return nil, adbc.Error{
 		Msg:  fmt.Sprintf("[spark] Unknown statement option '%s'", key),
 		Code: adbc.StatusNotFound,
 	}
 }
-func (st *statementImpl) GetOptionInt(key string) (int64, error) {
+func (st *statementImpl) GetOptionInt(ctx context.Context, key string) (int64, error) {
 	return 0, adbc.Error{
 		Msg:  fmt.Sprintf("[spark] Unknown statement option '%s'", key),
 		Code: adbc.StatusNotFound,
 	}
 }
-func (st *statementImpl) GetOptionDouble(key string) (float64, error) {
+func (st *statementImpl) GetOptionDouble(ctx context.Context, key string) (float64, error) {
 	return 0, adbc.Error{
 		Msg:  fmt.Sprintf("[spark] Unknown statement option '%s'", key),
 		Code: adbc.StatusNotFound,
@@ -87,7 +87,7 @@ func (st *statementImpl) GetOptionDouble(key string) (float64, error) {
 }
 
 // SetOption sets a string option on this statement
-func (st *statementImpl) SetOption(key string, val string) error {
+func (st *statementImpl) SetOption(ctx context.Context, key string, val string) error {
 	if ok, err := st.ingest.SetOption(&st.ErrorHelper, key, val); err != nil {
 		st.clearQueryState()
 		return err
@@ -112,28 +112,28 @@ func (st *statementImpl) SetOption(key string, val string) error {
 	return nil
 }
 
-func (st *statementImpl) SetOptionBytes(key string, value []byte) error {
+func (st *statementImpl) SetOptionBytes(ctx context.Context, key string, value []byte) error {
 	return adbc.Error{
 		Msg:  fmt.Sprintf("[spark] Unknown statement option '%s'", key),
 		Code: adbc.StatusNotImplemented,
 	}
 }
 
-func (st *statementImpl) SetOptionInt(key string, value int64) error {
+func (st *statementImpl) SetOptionInt(ctx context.Context, key string, value int64) error {
 	return adbc.Error{
 		Msg:  fmt.Sprintf("[spark] Unknown statement option '%s'", key),
 		Code: adbc.StatusNotImplemented,
 	}
 }
 
-func (st *statementImpl) SetOptionDouble(key string, value float64) error {
+func (st *statementImpl) SetOptionDouble(ctx context.Context, key string, value float64) error {
 	return adbc.Error{
 		Msg:  fmt.Sprintf("[spark] Unknown statement option '%s'", key),
 		Code: adbc.StatusNotImplemented,
 	}
 }
 
-func (st *statementImpl) SetSqlQuery(query string) error {
+func (st *statementImpl) SetSqlQuery(ctx context.Context, query string) error {
 	st.clearIngestState()
 	st.query = query
 	return nil
@@ -146,6 +146,7 @@ func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, 
 	}
 	return st.cnxn.client.ExecuteQuery(ctx, sparkbase.QueryContext{
 		Mem:   st.cnxn.Alloc,
+		Log:   st.cnxn.Logger,
 		Query: st.query,
 	})
 }
@@ -156,6 +157,7 @@ func (st *statementImpl) ExecuteUpdate(ctx context.Context) (int64, error) {
 	}
 	return st.cnxn.client.ExecuteUpdate(ctx, sparkbase.QueryContext{
 		Mem:   st.cnxn.Alloc,
+		Log:   st.cnxn.Logger,
 		Query: st.query,
 	})
 }
@@ -168,16 +170,16 @@ func (st *statementImpl) Prepare(ctx context.Context) error {
 	return sparkbase.ErrTBD
 }
 
-func (st *statementImpl) SetSubstraitPlan(plan []byte) error {
+func (st *statementImpl) SetSubstraitPlan(ctx context.Context, plan []byte) error {
 	return st.ErrorHelper.NotImplemented("SetSubstraitPlan not supported")
 }
 
-func (st *statementImpl) Bind(_ context.Context, values arrow.Record) error {
+func (st *statementImpl) Bind(_ context.Context, values arrow.RecordBatch) error {
 	if st.params != nil {
 		st.params.Release()
 		st.params = nil
 	}
-	stream, err := array.NewRecordReader(values.Schema(), []arrow.Record{values})
+	stream, err := array.NewRecordReader(values.Schema(), []arrow.RecordBatch{values})
 	if err != nil {
 		// Should never happen as error is for schema mismatch
 		return adbc.Error{
@@ -198,7 +200,7 @@ func (st *statementImpl) BindStream(_ context.Context, stream array.RecordReader
 	return nil
 }
 
-func (st *statementImpl) GetParameterSchema() (*arrow.Schema, error) {
+func (st *statementImpl) GetParameterSchema(ctx context.Context) (*arrow.Schema, error) {
 	return nil, sparkbase.ErrTBD
 }
 
@@ -229,7 +231,7 @@ func (st *statementImpl) executeIngest(ctx context.Context) (int64, error) {
 		opts.BaseEndpoint = aws.String("http://localhost:9000/")
 		opts.UsePathStyle = true
 	})
-	uploader := manager.NewUploader(s3Client, func(u *manager.Uploader) {
+	uploader := manager.NewUploader(s3Client, func(u *manager.Uploader) { //nolint:staticcheck
 		u.PartSize = 5 * 1024 * 1024
 	})
 

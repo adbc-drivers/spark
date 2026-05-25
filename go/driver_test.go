@@ -27,8 +27,9 @@ import (
 	"testing"
 
 	driver "github.com/adbc-drivers/apache/go"
+	"github.com/adbc-drivers/driverbase-go/driverbase"
+	"github.com/adbc-drivers/driverbase-go/validation"
 	"github.com/apache/arrow-adbc/go/adbc"
-	"github.com/apache/arrow-adbc/go/adbc/validation"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -41,18 +42,22 @@ type SparkQuirks struct {
 	mem *memory.CheckedAllocator
 }
 
-func (s *SparkQuirks) SetupDriver(t *testing.T) adbc.Driver {
+var _ validation.DriverQuirks = (*SparkQuirks)(nil)
+
+func (s *SparkQuirks) SetupDriver(t *testing.T) driverbase.DriverWithContext {
 	s.mem = memory.NewCheckedAllocator(memory.DefaultAllocator)
 	return driver.NewDriver(s.mem)
 }
 
-func (s *SparkQuirks) TearDownDriver(t *testing.T, _ adbc.Driver) {
+func (s *SparkQuirks) TearDownDriver(t *testing.T, _ driverbase.DriverWithContext) {
 	s.mem.AssertSize(t, 0)
 }
 
 func (s *SparkQuirks) DatabaseOptions() map[string]string {
 	return map[string]string{
 		adbc.OptionKeyURI: s.dsn,
+		"username":        "spark",
+		"password":        "spark",
 	}
 }
 
@@ -61,24 +66,25 @@ func quoteIdentifier(ident string) string {
 	return fmt.Sprintf(`"%s"`, strings.ReplaceAll(ident, `"`, `""`))
 }
 
-func (q *SparkQuirks) CreateSampleTable(tableName string, r arrow.Record) (err error) {
+func (q *SparkQuirks) CreateSampleTable(tableName string, r arrow.RecordBatch) (err error) {
 	return errors.New("TBD")
 }
 
-func (q *SparkQuirks) DropTable(cnxn adbc.Connection, tblname string) (err error) {
-	stmt, err := cnxn.NewStatement()
+func (q *SparkQuirks) DropTable(cnxn adbc.ConnectionWithContext, tblname string) (err error) {
+	ctx := context.Background()
+	stmt, err := cnxn.NewStatement(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		err = errors.Join(err, stmt.Close())
+		err = errors.Join(err, stmt.Close(ctx))
 	}()
 
-	if err = stmt.SetSqlQuery(`DROP TABLE IF EXISTS ` + quoteIdentifier(tblname)); err != nil {
+	if err = stmt.SetSqlQuery(ctx, `DROP TABLE IF EXISTS `+quoteIdentifier(tblname)); err != nil {
 		return err
 	}
 
-	_, err = stmt.ExecuteUpdate(context.Background())
+	_, err = stmt.ExecuteUpdate(ctx)
 	return err
 }
 
@@ -156,30 +162,30 @@ type DriverTests struct {
 	Quirks *SparkQuirks
 
 	ctx    context.Context
-	driver adbc.Driver
-	db     adbc.Database
-	cnxn   adbc.Connection
-	stmt   adbc.Statement
+	driver driverbase.DriverWithContext
+	db     adbc.DatabaseWithContext
+	cnxn   adbc.ConnectionWithContext
+	stmt   adbc.StatementWithContext
 }
 
 func (suite *DriverTests) SetupTest() {
 	var err error
 	suite.ctx = context.Background()
 	suite.driver = suite.Quirks.SetupDriver(suite.T())
-	suite.db, err = suite.driver.NewDatabase(suite.Quirks.DatabaseOptions())
+	suite.db, err = suite.driver.NewDatabaseWithContext(suite.ctx, suite.Quirks.DatabaseOptions())
 	suite.NoError(err)
 	suite.cnxn, err = suite.db.Open(suite.ctx)
 	suite.NoError(err)
-	suite.stmt, err = suite.cnxn.NewStatement()
+	suite.stmt, err = suite.cnxn.NewStatement(suite.ctx)
 	suite.NoError(err)
 }
 
 func (suite *DriverTests) TearDownTest() {
-	suite.NoError(suite.stmt.Close())
-	suite.NoError(suite.cnxn.Close())
+	suite.NoError(suite.stmt.Close(suite.ctx))
+	suite.NoError(suite.cnxn.Close(suite.ctx))
 	suite.Quirks.TearDownDriver(suite.T(), suite.driver)
 	suite.cnxn = nil
-	suite.NoError(suite.db.Close())
+	suite.NoError(suite.db.Close(suite.ctx))
 	suite.db = nil
 	suite.driver = nil
 }
@@ -369,9 +375,9 @@ func (suite *DriverTests) TestSelect() {
 		},
 	} {
 		suite.Run(testCase.name, func() {
-			suite.NoError(suite.stmt.SetSqlQuery(testCase.query))
+			suite.NoError(suite.stmt.SetSqlQuery(suite.ctx, testCase.query))
 
-			rdr, rows, err := suite.stmt.ExecuteQuery(context.Background())
+			rdr, rows, err := suite.stmt.ExecuteQuery(suite.ctx)
 			suite.NoError(err)
 			defer rdr.Release()
 
@@ -383,7 +389,7 @@ func (suite *DriverTests) TestSelect() {
 			suite.NoError(err)
 			defer expectedRecord.Release()
 
-			rec := rdr.Record()
+			rec := rdr.RecordBatch()
 			suite.NotNil(rec)
 
 			suite.Truef(array.RecordEqual(expectedRecord, rec), "expected: %s\ngot: %s", expectedRecord, rec)
@@ -396,9 +402,9 @@ func (suite *DriverTests) TestSelect() {
 }
 
 func (suite *DriverTests) TestSelectNoResult() {
-	suite.NoError(suite.stmt.SetSqlQuery("DROP TABLE IF EXISTS no_result"))
+	suite.NoError(suite.stmt.SetSqlQuery(suite.ctx, "DROP TABLE IF EXISTS no_result"))
 
-	rdr, rows, err := suite.stmt.ExecuteQuery(context.Background())
+	rdr, rows, err := suite.stmt.ExecuteQuery(suite.ctx)
 	suite.NoError(err)
 	defer rdr.Release()
 
@@ -422,10 +428,10 @@ type SparkTestSuite struct {
 	uri    string
 	mem    *memory.CheckedAllocator
 	ctx    context.Context
-	driver adbc.Driver
-	db     adbc.Database
-	cnxn   adbc.Connection
-	stmt   adbc.Statement
+	driver driverbase.DriverWithContext
+	db     adbc.DatabaseWithContext
+	cnxn   adbc.ConnectionWithContext
+	stmt   adbc.StatementWithContext
 }
 
 func (s *SparkTestSuite) SetupSuite() {
@@ -440,7 +446,7 @@ func (s *SparkTestSuite) SetupSuite() {
 	s.mem = memory.NewCheckedAllocator(memory.DefaultAllocator)
 
 	s.driver = driver.NewDriver(s.mem)
-	s.db, err = s.driver.NewDatabase(map[string]string{
+	s.db, err = s.driver.NewDatabaseWithContext(s.ctx, map[string]string{
 		adbc.OptionKeyURI: s.uri,
 	})
 	s.NoError(err)
@@ -455,19 +461,19 @@ func (s *SparkTestSuite) SetupSuite() {
 	s.cnxn, err = s.db.Open(s.ctx)
 	s.NoError(err)
 
-	s.stmt, err = s.cnxn.NewStatement()
+	s.stmt, err = s.cnxn.NewStatement(s.ctx)
 	s.NoError(err)
 }
 
 func (s *SparkTestSuite) TearDownSuite() {
 	if s.stmt != nil {
-		s.NoError(s.stmt.Close())
+		s.NoError(s.stmt.Close(s.ctx))
 	}
 	if s.cnxn != nil {
-		s.NoError(s.cnxn.Close())
+		s.NoError(s.cnxn.Close(s.ctx))
 	}
 	if s.db != nil {
-		s.NoError(s.db.Close())
+		s.NoError(s.db.Close(s.ctx))
 	}
 	s.mem.AssertSize(s.T(), 0)
 }

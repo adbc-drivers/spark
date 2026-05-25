@@ -204,7 +204,7 @@ func (c *thriftClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCo
 		SessionHandle: c.session,
 		Statement:     query.Query,
 	}
-	rdr, err := newThriftRecordReader(ctx, query.Mem, c.client, req)
+	rdr, err := newThriftRecordReader(ctx, query, c.client, req)
 	if err != nil {
 		return nil, -1, err
 	}
