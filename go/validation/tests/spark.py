@@ -31,6 +31,7 @@ class SparkThriftQuirks(model.DriverQuirks):
         statement_bind=False,
         statement_bulk_ingest=True,
         statement_prepare=False,
+        statement_rows_affected=True,
         current_catalog="spark_catalog",
         current_schema="default",
         supported_xdbc_fields=[],
