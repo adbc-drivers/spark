@@ -121,6 +121,10 @@ func (c *connectClient) ExecuteUpdate(ctx context.Context, q sparkbase.QueryCont
 	return -1, nil
 }
 
+func (c *connectClient) VendorVersion(ctx context.Context, mem memory.Allocator) (string, error) {
+	return sparkbase.DefaultVendorVersionImpl(c, ctx, mem)
+}
+
 func (c *connectClient) CurrentCatalog(ctx context.Context, mem memory.Allocator) (string, error) {
 	return sparkbase.DefaultCurrentCatalogImpl(c, ctx, mem)
 }

@@ -45,15 +45,10 @@ func (d *driverImpl) NewDatabaseWithContext(ctx context.Context, opts map[string
 // NewDriver creates a new driver using the given Arrow allocator.
 func NewDriver(alloc memory.Allocator) driverbase.DriverWithContext {
 	info := driverbase.DefaultDriverInfo("Apache Spark")
-	err := info.RegisterInfoCode(adbc.InfoDriverName, "ADBC Driver for Apache Spark")
+	err := info.RegisterInfoCode(adbc.InfoDriverName, "ADBC Driver Foundry Driver for Apache Spark")
 	if err != nil {
 		panic(err)
 	}
-	// if infoVendorVersion != "" {
-	// 	if err := info.RegisterInfoCode(adbc.InfoVendorVersion, infoVendorVersion); err != nil {
-	// 		panic(err)
-	// 	}
-	// }
 	base := driverbase.NewDriverImplBase(info, alloc)
 	base.ErrorHelper.DriverName = "spark"
 	return &driverImpl{DriverImplBase: base}

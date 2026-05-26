@@ -48,6 +48,11 @@ func (c *connectionImpl) Close(ctx context.Context) error {
 }
 
 func (c *connectionImpl) PrepareDriverInfo(ctx context.Context, infoCodes []adbc.InfoCode) error {
+	if version, err := c.client.VendorVersion(ctx, c.Alloc); err == nil && version != "" {
+		if err := c.DriverInfo.RegisterInfoCode(adbc.InfoVendorVersion, version); err != nil {
+			return err
+		}
+	}
 	if err := c.DriverInfo.RegisterInfoCode(adbc.InfoVendorSql, true); err != nil {
 		return err
 	}
