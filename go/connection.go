@@ -127,13 +127,3 @@ func (c *connectionImpl) ReadPartition(ctx context.Context, serializedPartition 
 		Msg:  "[spark] ReadPartition not supported",
 	}
 }
-
-func (c *connectionImpl) SetOption(ctx context.Context, key, value string) error {
-	switch key {
-	default:
-		return adbc.Error{
-			Msg:  "[spark] unknown connection option " + key + ": " + value,
-			Code: adbc.StatusInvalidArgument,
-		}
-	}
-}
