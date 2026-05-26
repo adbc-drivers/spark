@@ -548,6 +548,10 @@ func (c *livyClient) signRequestWithSigV4(ctx context.Context, req *http.Request
 	return nil
 }
 
+func (c *livyClient) VendorVersion(ctx context.Context, mem memory.Allocator) (string, error) {
+	return sparkbase.DefaultVendorVersionImpl(c, ctx, mem)
+}
+
 func (c *livyClient) CurrentCatalog(ctx context.Context, mem memory.Allocator) (string, error) {
 	return sparkbase.DefaultCurrentCatalogImpl(c, ctx, mem)
 }

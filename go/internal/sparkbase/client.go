@@ -45,6 +45,8 @@ type SparkClient interface {
 
 	CurrentSchema(ctx context.Context, mem memory.Allocator) (string, error)
 	SetCurrentSchema(ctx context.Context, mem memory.Allocator, schema string) error
+
+	VendorVersion(ctx context.Context, mem memory.Allocator) (string, error)
 }
 
 type SparkClientFactory func(context.Context) (SparkClient, error)
@@ -90,6 +92,10 @@ func singleRowStringQuery(sql string, c SparkClient, ctx context.Context, mem me
 // The following are blanket implementations of metadata queries based on information schema queries.
 // Concrete APIs may offer different implementations if the underlying API has a faster way to pull
 // that data.
+
+func DefaultVendorVersionImpl(c SparkClient, ctx context.Context, mem memory.Allocator) (string, error) {
+	return singleRowStringQuery("SELECT version()", c, ctx, mem)
+}
 
 func DefaultCurrentCatalogImpl(c SparkClient, ctx context.Context, mem memory.Allocator) (string, error) {
 	return singleRowStringQuery("SELECT current_catalog()", c, ctx, mem)

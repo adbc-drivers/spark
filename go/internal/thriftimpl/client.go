@@ -183,6 +183,27 @@ func (c *thriftClient) simpleQuery(ctx context.Context, query string, context st
 	})
 }
 
+func (c *thriftClient) VendorVersion(ctx context.Context, _ memory.Allocator) (string, error) {
+	req := &hiveserver2.TGetInfoReq{
+		SessionHandle: c.session,
+		InfoType:      hiveserver2.TGetInfoType_CLI_DBMS_VER,
+	}
+	resp, err := driverbase.WithShared(c.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TGetInfoResp, error) {
+		resp, err := client.GetInfo(ctx, req)
+		if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, resp, "get vendor version"); err != nil {
+			return nil, err
+		}
+		return resp, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if resp.InfoValue != nil && resp.InfoValue.StringValue != nil {
+		return *resp.InfoValue.StringValue, nil
+	}
+	return "", nil
+}
+
 func (c *thriftClient) CurrentCatalog(ctx context.Context, mem memory.Allocator) (string, error) {
 	return sparkbase.DefaultCurrentCatalogImpl(c, ctx, mem)
 }
