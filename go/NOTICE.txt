@@ -1,5 +1,5 @@
-ADBC Driver for Apache Spark
-Copyright 2025 ADBC Drivers Contributors
+ADBC Driver Foundry Driver for Apache Spark
+Copyright 2026 ADBC Drivers Contributors
 
 This product includes software developed at
 The Apache Software Foundation (http://www.apache.org/).
