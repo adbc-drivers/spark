@@ -215,7 +215,7 @@ func (bi *bulkIngestImpl) createTableStatement(schema *arrow.Schema, ifTableExis
 			b.WriteString(sparkbase.QuoteIdentifier(field.Name))
 
 			switch field.Type.ID() {
-			case arrow.BINARY:
+			case arrow.BINARY, arrow.LARGE_BINARY, arrow.FIXED_SIZE_BINARY, arrow.BINARY_VIEW:
 				b.WriteString(" BINARY")
 			case arrow.BOOL:
 				b.WriteString(" BOOLEAN")
@@ -234,7 +234,7 @@ func (bi *bulkIngestImpl) createTableStatement(schema *arrow.Schema, ifTableExis
 				b.WriteString(" INTEGER")
 			case arrow.INT64:
 				b.WriteString(" BIGINT")
-			case arrow.STRING:
+			case arrow.STRING, arrow.LARGE_STRING, arrow.STRING_VIEW:
 				b.WriteString(" STRING")
 			case arrow.TIMESTAMP:
 				ts := field.Type.(*arrow.TimestampType)
