@@ -247,10 +247,25 @@ func (c *thriftClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryC
 		return -1, err
 	}
 	// TODO: if HasResultSet, do we have to explicitly free it?
-	if resp.OperationHandle.ModifiedRowCount == nil {
+	if resp.OperationHandle.ModifiedRowCount != nil {
+		return int64(*resp.OperationHandle.ModifiedRowCount), nil
+	}
+
+	statusResp, err := driverbase.WithShared(c.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TGetOperationStatusResp, error) {
+		return client.GetOperationStatus(ctx, &hiveserver2.TGetOperationStatusReq{
+			OperationHandle: resp.OperationHandle,
+		})
+	})
+	if err != nil {
 		return -1, nil
 	}
-	return int64(*resp.OperationHandle.ModifiedRowCount), nil
+	if err = sparkbase.StatusToAdbcErr(statusResp.Status, "get operation status"); err != nil {
+		return -1, nil
+	}
+	if statusResp.NumModifiedRows != nil {
+		return *statusResp.NumModifiedRows, nil
+	}
+	return -1, nil
 }
 
 func (c *thriftClient) GetCatalogs(ctx context.Context, catalogFilter *string) ([]string, error) {
@@ -305,74 +320,141 @@ func (c *thriftClient) GetDBSchemasForCatalog(ctx context.Context, catalog strin
 }
 
 func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string, includeColumns bool) ([]driverbase.TableInfo, error) {
+	type getObjectsResult struct {
+		tableResp *hiveserver2.TFetchResultsResp
+		colResp   *hiveserver2.TFetchResultsResp
+	}
+
 	// HiveServer2 lacks support for parameters so we have to build the
 	// query.  N.B. Databricks extends the protocol with parameters so we
 	// should use that when available.
-	var tables []driverbase.TableInfo
+	tablesReq := &hiveserver2.TGetTablesReq{
+		SessionHandle: c.session,
+		CatalogName:   new(hiveserver2.TPatternOrIdentifier(catalog)),
+		SchemaName:    new(hiveserver2.TPatternOrIdentifier(schema)),
+	}
+	if tableFilter != nil {
+		tablesReq.TableName = new(hiveserver2.TPatternOrIdentifier(*tableFilter))
+	}
+
+	var colReq *hiveserver2.TGetColumnsReq
 	if includeColumns {
-	} else {
-		// TODO: tableFilter
-		req := &hiveserver2.TGetTablesReq{
+		colReq = &hiveserver2.TGetColumnsReq{
 			SessionHandle: c.session,
-			CatalogName:   new(hiveserver2.TPatternOrIdentifier(catalog)),
+			CatalogName:   new(hiveserver2.TIdentifier(catalog)),
 			SchemaName:    new(hiveserver2.TPatternOrIdentifier(schema)),
 		}
-		resp, err := driverbase.WithShared(c.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TFetchResultsResp, error) {
-			resp, err := client.GetTables(ctx, req)
-			if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, resp, "get tables for %s.%s", catalog, schema); err != nil {
-				return nil, err
-			}
+		if tableFilter != nil {
+			colReq.TableName = new(hiveserver2.TPatternOrIdentifier(*tableFilter))
+		}
+		if columnFilter != nil {
+			colReq.ColumnName = new(hiveserver2.TPatternOrIdentifier(*columnFilter))
+		}
+	}
 
-			if !resp.OperationHandle.HasResultSet {
-				return nil, adbc.Error{
-					Code: adbc.StatusInternal,
-					Msg:  "[spark] GetTables did not return a result set",
-				}
-			}
-
-			// TODO: may need to fetch results multiple times
-			rs, err := client.FetchResults(ctx, &hiveserver2.TFetchResultsReq{
-				OperationHandle: resp.OperationHandle,
-				Orientation:     hiveserver2.TFetchOrientation_FETCH_FIRST,
-				MaxRows:         65536,
-			})
-			if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, rs, "get tables for %s.%s", catalog, schema); err != nil {
-				return nil, err
-			}
-			return rs, nil
-		})
-
-		if err != nil {
+	result, err := driverbase.WithShared(c.client, func(client *hiveserver2.TCLIServiceClient) (*getObjectsResult, error) {
+		resp, err := client.GetTables(ctx, tablesReq)
+		if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, resp, "get tables for %s.%s", catalog, schema); err != nil {
 			return nil, err
 		}
 
-		// var query strings.Builder
-		// query.WriteString("SELECT table_name, table_type FROM information_schema.tables WHERE table_catalog = ")
-		// query.WriteString(sparkbase.QuoteString(catalog))
-		// query.WriteString(" AND table_schema = ")
-		// query.WriteString(sparkbase.QuoteString(schema))
+		if !resp.OperationHandle.HasResultSet {
+			return nil, adbc.Error{
+				Code: adbc.StatusInternal,
+				Msg:  "[spark] GetTables did not return a result set",
+			}
+		}
 
-		// resp, err := c.simpleQuery(ctx, query.String(), "get schemas")
-		// if err != nil {
-		// 	return nil, err
-		// } else if resp == nil {
-		// 	return nil, adbc.Error{
-		// 		Code: adbc.StatusInternal,
-		// 		Msg:  fmt.Sprintf("[spark] `%s` did not return a result set", query.String()),
-		// 	}
-		// }
+		// TODO: may need to fetch results multiple times
+		tableRs, err := client.FetchResults(ctx, &hiveserver2.TFetchResultsReq{
+			OperationHandle: resp.OperationHandle,
+			Orientation:     hiveserver2.TFetchOrientation_FETCH_FIRST,
+			MaxRows:         65536,
+		})
+		if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, tableRs, "get tables for %s.%s", catalog, schema); err != nil {
+			return nil, err
+		}
 
-		for _, row := range resp.Results.Rows {
+		if colReq == nil {
+			return &getObjectsResult{tableResp: tableRs}, nil
+		}
+
+		colResp, err := client.GetColumns(ctx, colReq)
+		if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, colResp, "get columns for %s.%s", catalog, schema); err != nil {
+			return nil, err
+		}
+
+		if !colResp.OperationHandle.HasResultSet {
+			return &getObjectsResult{tableResp: tableRs}, nil
+		}
+
+		// TODO: may need to fetch results multiple times
+		colRs, err := client.FetchResults(ctx, &hiveserver2.TFetchResultsReq{
+			OperationHandle: colResp.OperationHandle,
+			Orientation:     hiveserver2.TFetchOrientation_FETCH_FIRST,
+			MaxRows:         65536,
+		})
+		if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, colRs, "get columns for %s.%s", catalog, schema); err != nil {
+			return nil, err
+		}
+
+		return &getObjectsResult{tableResp: tableRs, colResp: colRs}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	tables := make([]driverbase.TableInfo, 0)
+	tableIndex := make(map[string]int)
+	for _, row := range result.tableResp.Results.Rows {
+		tableName := *row.ColVals[2].GetStringVal().Value
+		tableType := *row.ColVals[3].GetStringVal().Value
+		tableIndex[tableName] = len(tables)
+		tables = append(tables, driverbase.TableInfo{
+			TableName:    tableName,
+			TableType:    tableType,
+			TableColumns: []driverbase.ColumnInfo{},
+		})
+	}
+
+	if result.colResp != nil {
+		for _, row := range result.colResp.Results.Rows {
 			tableName := *row.ColVals[2].GetStringVal().Value
-			tableType := *row.ColVals[3].GetStringVal().Value
-			tables = append(tables, driverbase.TableInfo{
-				TableName:        tableName,
-				TableType:        tableType,
-				TableColumns:     nil,
-				TableConstraints: nil,
-			})
+			idx, ok := tableIndex[tableName]
+			if !ok {
+				continue
+			}
+
+			col := driverbase.ColumnInfo{
+				ColumnName: *row.ColVals[3].GetStringVal().Value,
+			}
+
+			if v := row.ColVals[16].GetI32Val(); v != nil && v.Value != nil {
+				col.OrdinalPosition = new(*v.Value + 1)
+			}
+			if v := row.ColVals[4].GetI32Val(); v != nil && v.Value != nil {
+				col.XdbcDataType = new(int16(*v.Value))
+			}
+			if v := row.ColVals[5].GetStringVal(); v != nil && v.Value != nil {
+				col.XdbcTypeName = v.Value
+			}
+			if v := row.ColVals[6].GetI32Val(); v != nil && v.Value != nil {
+				col.XdbcColumnSize = v.Value
+			}
+			if v := row.ColVals[10].GetI32Val(); v != nil && v.Value != nil {
+				col.XdbcNullable = new(int16(*v.Value))
+			}
+			if v := row.ColVals[11].GetStringVal(); v != nil && v.Value != nil {
+				col.Remarks = v.Value
+			}
+			if v := row.ColVals[17].GetStringVal(); v != nil && v.Value != nil {
+				col.XdbcIsNullable = v.Value
+			}
+
+			tables[idx].TableColumns = append(tables[idx].TableColumns, col)
 		}
 	}
+
 	return tables, nil
 }
 
