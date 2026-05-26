@@ -27,6 +27,7 @@ class SparkThriftQuirks(model.DriverQuirks):
     vendor_version = re.compile(r"3\.5\.\d+.*")
     short_version = "3.5"
     features = model.DriverFeatures(
+        get_objects=True,
         statement_bind=False,
         statement_bulk_ingest=True,
         statement_prepare=False,
@@ -52,6 +53,10 @@ class SparkThriftQuirks(model.DriverQuirks):
 
     def bind_parameter(self, index: int) -> str:
         return f"${index}"
+
+    def quote_one_identifier(self, identifier: str) -> str:
+        identifier = identifier.replace("`", "``")
+        return f"`{identifier}`"
 
     def drop_table(
         self,

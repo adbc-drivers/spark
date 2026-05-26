@@ -188,7 +188,7 @@ func (c *thriftClient) CurrentCatalog(ctx context.Context, mem memory.Allocator)
 }
 
 func (c *thriftClient) CurrentSchema(ctx context.Context, mem memory.Allocator) (string, error) {
-	return sparkbase.DefaultCurrentCatalogImpl(c, ctx, mem)
+	return sparkbase.DefaultCurrentSchemaImpl(c, ctx, mem)
 }
 
 func (c *thriftClient) SetCurrentCatalog(ctx context.Context, mem memory.Allocator, catalog string) error {
