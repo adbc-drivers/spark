@@ -187,7 +187,7 @@ func (rr *thriftRecordReader) NextResultSet(ctx context.Context, rec arrow.Recor
 		})
 		if err != nil {
 			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute statement")
-		} else if err = sparkbase.StatusToAdbcErr(meta.Status, "execute statement"); err != nil {
+		} else if err = sparkbase.StatusToAdbcErr(adbc.StatusIO, meta.Status, "execute statement"); err != nil {
 			return nil, err
 		}
 

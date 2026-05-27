@@ -58,6 +58,13 @@ func (st *statementImpl) Close(ctx context.Context) error {
 		st.params.Release()
 		st.params = nil
 	}
+	if st.cnxn == nil {
+		return adbc.Error{
+			Msg:  "[spark] statement not initialized or already closed",
+			Code: adbc.StatusInvalidState,
+		}
+	}
+	st.cnxn = nil
 	return nil
 }
 
@@ -143,6 +150,11 @@ func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, 
 	if st.ingest.IsSet() {
 		n, err := st.executeIngest(ctx)
 		return arrowext.EmptyReader{}, n, err
+	} else if st.query == "" {
+		return nil, -1, adbc.Error{
+			Msg:  "[spark] no query set",
+			Code: adbc.StatusInvalidState,
+		}
 	}
 	return st.cnxn.client.ExecuteQuery(ctx, sparkbase.QueryContext{
 		Mem:   st.cnxn.Alloc,

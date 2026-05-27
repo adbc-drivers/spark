@@ -243,7 +243,7 @@ func (c *thriftClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryC
 	if err != nil {
 		return -1, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute statement")
 	}
-	if err = sparkbase.StatusToAdbcErr(resp.Status, "execute statement"); err != nil {
+	if err = sparkbase.StatusToAdbcErr(adbc.StatusIO, resp.Status, "execute statement"); err != nil {
 		return -1, err
 	}
 	// TODO: if HasResultSet, do we have to explicitly free it?
@@ -259,7 +259,7 @@ func (c *thriftClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryC
 	if err != nil {
 		return -1, nil
 	}
-	if err = sparkbase.StatusToAdbcErr(statusResp.Status, "get operation status"); err != nil {
+	if err = sparkbase.StatusToAdbcErr(adbc.StatusIO, statusResp.Status, "get operation status"); err != nil {
 		return -1, nil
 	}
 	if statusResp.NumModifiedRows != nil {
