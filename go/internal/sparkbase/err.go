@@ -30,8 +30,7 @@ var ErrTBD = adbc.Error{
 
 // errToAdbcErr converts an error to an ADBC error.
 func ErrToAdbcErr(defaultStatus adbc.Status, err error, context string, contextArgs ...any) error {
-	var adbcError adbc.Error
-	if errors.As(err, &adbcError) {
+	if _, ok := errors.AsType[adbc.Error](err); ok {
 		return err
 	}
 
@@ -65,7 +64,7 @@ func ErrToAdbcErr(defaultStatus adbc.Status, err error, context string, contextA
 	}
 }
 
-func StatusToAdbcErr(status *hiveserver2.TStatus, context string, contextArgs ...any) error {
+func StatusToAdbcErr(defaultStatus adbc.Status, status *hiveserver2.TStatus, context string, contextArgs ...any) error {
 	switch status.StatusCode {
 	case hiveserver2.TStatusCode_SUCCESS_STATUS:
 		return nil
@@ -74,10 +73,32 @@ func StatusToAdbcErr(status *hiveserver2.TStatus, context string, contextArgs ..
 		return nil
 	}
 
-	return adbc.Error{
-		Code: adbc.StatusIO,
-		Msg:  fmt.Sprintf("[spark] Could not %s: %s", fmt.Sprintf(context, contextArgs...), status),
+	messages := strings.Join(status.InfoMessages, "\n")
+	err := adbc.Error{
+		Code: defaultStatus,
+		Msg:  fmt.Sprintf("[spark] could not %s: %s", fmt.Sprintf(context, contextArgs...), messages),
 	}
+
+	if status.SqlState != nil {
+		copy(err.SqlState[:], []byte(*status.SqlState))
+
+		// https://spark.apache.org/docs/3.5.8/sql-error-conditions.html
+		switch *status.SqlState {
+		case "22003":
+			err.Code = adbc.StatusInvalidData
+		case "22546", "42000", "42601", "42702", "42704", "42710", "42846":
+			err.Code = adbc.StatusInvalidArgument
+		case "42K03", "42P01":
+			err.Code = adbc.StatusNotFound
+		case "42P07":
+			err.Code = adbc.StatusAlreadyExists
+		}
+	}
+	if status.ErrorCode != nil {
+		err.VendorCode = *status.ErrorCode
+	}
+
+	return err
 }
 
 type GetStatus interface {
@@ -110,7 +131,7 @@ func ToAdbcErr(defaultStatus adbc.Status, err error, status GetStatus, context s
 	if err != nil {
 		return ErrToAdbcErr(defaultStatus, err, context, contextArgs...)
 	} else if status != nil {
-		return StatusToAdbcErr(status.GetStatus(), context, contextArgs...)
+		return StatusToAdbcErr(defaultStatus, status.GetStatus(), context, contextArgs...)
 	}
 	return nil
 }

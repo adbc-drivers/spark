@@ -28,6 +28,7 @@ import (
 
 	driver "github.com/adbc-drivers/apache/go"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
+	"github.com/adbc-drivers/driverbase-go/testutil"
 	"github.com/adbc-drivers/driverbase-go/validation"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
@@ -66,7 +67,57 @@ func quoteIdentifier(ident string) string {
 }
 
 func (q *SparkQuirks) CreateSampleTable(tableName string, r arrow.RecordBatch) (err error) {
-	return errors.New("TBD")
+	checkedClose := func(c testutil.CloserWithContext) {
+		err = errors.Join(err, c.Close(context.Background()))
+	}
+
+	ctx := context.Background()
+	d := driver.NewDriver(q.mem)
+	db, err := d.NewDatabaseWithContext(ctx, q.DatabaseOptions())
+	if err != nil {
+		return err
+	}
+	defer checkedClose(db)
+
+	conn, err := db.Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer checkedClose(conn)
+
+	stmt, err := conn.NewStatement(ctx)
+	if err != nil {
+		return err
+	}
+	defer checkedClose(stmt)
+
+	var s strings.Builder
+	fmt.Fprintf(&s, "CREATE TABLE %s (", quoteIdentifier(tableName))
+	for i, field := range r.Schema().Fields() {
+		if i > 0 {
+			s.WriteString(", ")
+		}
+		s.WriteString(quoteIdentifier(field.Name))
+		switch field.Type.ID() {
+		case arrow.INT64:
+			s.WriteString(" BIGINT")
+		case arrow.STRING:
+			s.WriteString(" STRING")
+		default:
+			return fmt.Errorf("unsupported field type %s for field %s", field.Type, field.Name)
+		}
+	}
+	s.WriteString(")")
+
+	if err := stmt.SetSqlQuery(ctx, s.String()); err != nil {
+		return err
+	}
+
+	if _, err := stmt.ExecuteUpdate(ctx); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (q *SparkQuirks) DropTable(cnxn adbc.ConnectionWithContext, tblname string) (err error) {
@@ -96,6 +147,7 @@ func (q *SparkQuirks) BindParameter(idx int) string                { return fmt.
 func (q *SparkQuirks) SupportsBulkIngest(string) bool              { return false }
 func (q *SparkQuirks) SupportsConcurrentStatements() bool          { return false }
 func (q *SparkQuirks) SupportsCurrentCatalogSchema() bool          { return true }
+func (q *SparkQuirks) SupportsGetTableSchema() bool                { return false }
 func (q *SparkQuirks) SupportsExecuteSchema() bool                 { return false }
 func (q *SparkQuirks) SupportsGetSetOptions() bool                 { return true }
 func (q *SparkQuirks) SupportsPartitionedData() bool               { return false }

@@ -45,6 +45,6 @@ func (s *ErrorTestSuite) TestNonexistentTable() {
 	var adbcError adbc.Error
 	s.ErrorAs(err, &adbcError)
 
-	s.Equal(adbc.StatusInvalidArgument, adbcError.Code)
+	s.Equal(adbc.StatusNotFound, adbcError.Code)
 	s.Equal([]byte("42P01"), adbcError.SqlState[:])
 }
