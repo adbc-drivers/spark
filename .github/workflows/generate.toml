@@ -18,8 +18,8 @@ repository = "apache"
 
 [[lang.go.validation.configs]]
 service_name = "spark35-thrift-server"
-vendor_version = "thrift_3.5"
+vendor_version = "spark3_3.5-thrift"
 
 [[lang.go.validation.configs]]
 service_name = "spark4-thrift-server"
-vendor_version = "thrift_4.0"
+vendor_version = "spark4_4.0-thrift"

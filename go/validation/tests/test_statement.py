@@ -25,7 +25,10 @@ def pytest_generate_tests(metafunc) -> None:
 
 class TestStatement(adbc_drivers_validation.tests.statement.TestStatement):
     def test_rows_affected(self, driver, conn):
-        if driver.short_version == "4.0":
-            # TODO(lidavidm): is there a way to get this info?
+        if driver.short_version == "4.0-thrift":
             pytest.skip("Spark 4 does not report UPDATE/DELETE row count")
+        if driver.short_version == "3.5-thrift":
+            pytest.skip(
+                "Spark 3.5 returns -1 for rows affected instead of actual count"
+            )
         super().test_rows_affected(driver, conn)

@@ -30,13 +30,13 @@ from . import spark
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     adbc_drivers_validation.tests.conftest.pytest_addoption(parser)
-    parser.addoption("--vendor-version", action="store", default="thrift:3.5")
+    parser.addoption("--vendor-version", action="store", default="spark3_3.5-thrift")
 
 
 @pytest.fixture(scope="session")
 def driver(request, pytestconfig) -> adbc_drivers_validation.model.DriverQuirks:
     driver = request.param
-    assert driver.startswith("spark_")
+    assert driver.startswith("spark")
     return spark.get_quirks(pytestconfig.getoption("vendor_version"))
 
 
