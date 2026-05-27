@@ -19,7 +19,7 @@ from pathlib import Path
 from adbc_drivers_validation import model, quirks
 
 
-class SparkThriftQuirks(model.DriverQuirks):
+class Spark3ThriftQuirks(model.DriverQuirks):
     name = "spark_thrift"
     driver = "adbc_driver_spark"
     driver_name = "ADBC Driver Foundry Driver for Apache Spark"
@@ -91,10 +91,17 @@ class SparkThriftQuirks(model.DriverQuirks):
         return quirks.split_statement(statement)
 
 
+class Spark4ThriftQuirks(Spark3ThriftQuirks):
+    vendor_version = re.compile(r"4\.0\.\d+.*")
+    short_version = "4.0"
+
+
 @functools.cache
 def get_quirks(version: str) -> model.DriverQuirks:
     vendor, _, version = version.partition(":")
     if vendor in ("spark_thrift", "thrift"):
         if version == "3.5":
-            return SparkThriftQuirks()
+            return Spark3ThriftQuirks()
+        elif version == "4.0":
+            return Spark4ThriftQuirks()
     raise ValueError(f"unsupported Spark {vendor}:{version}")

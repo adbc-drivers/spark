@@ -1,4 +1,4 @@
-#:schema https://raw.githubusercontent.com/adbc-drivers/dev/refs/heads/main/schema/generate-schema.json
+#!/bin/bash
 # Copyright (c) 2026 ADBC Drivers Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,13 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-driver = "spark"
-repository = "apache"
+set -e
 
-[[lang.go.validation.configs]]
-service_name = "spark35-thrift-server"
-vendor_version = "thrift:3.5"
-
-[[lang.go.validation.configs]]
-service_name = "spark4-thrift-server"
-vendor_version = "thrift:4.0"
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    SELECT 'CREATE DATABASE metastore4'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'metastore4')\gexec
+    GRANT ALL PRIVILEGES ON DATABASE metastore4 TO hive;
+EOSQL
