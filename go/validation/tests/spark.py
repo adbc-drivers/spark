@@ -30,7 +30,7 @@ class Spark3ThriftQuirks(model.DriverQuirks):
         get_objects=True,
         statement_bind=False,
         statement_bulk_ingest=True,
-        statement_prepare=False,
+        statement_prepare=True,
         statement_rows_affected=True,
         current_catalog="spark_catalog",
         current_schema="default",
