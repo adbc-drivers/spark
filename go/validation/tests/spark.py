@@ -50,7 +50,7 @@ class Spark3ThriftQuirks(model.DriverQuirks):
 
     @property
     def queries_paths(self) -> tuple[Path]:
-        return (Path(__file__).parent.parent / "queries",)
+        return (Path(__file__).parent.parent / "queries/spark35",)
 
     def bind_parameter(self, index: int) -> str:
         return f"${index}"
@@ -94,6 +94,13 @@ class Spark3ThriftQuirks(model.DriverQuirks):
 class Spark4ThriftQuirks(Spark3ThriftQuirks):
     vendor_version = re.compile(r"4\.0\.\d+.*")
     short_version = "4.0"
+
+    @property
+    def queries_paths(self) -> tuple[Path]:
+        return (
+            *super().queries_paths,
+            Path(__file__).parent.parent / "queries/spark40",
+        )
 
 
 @functools.cache

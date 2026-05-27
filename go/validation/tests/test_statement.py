@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import adbc_drivers_validation.tests.statement
+import pytest
 
 from . import spark
 
@@ -23,4 +24,8 @@ def pytest_generate_tests(metafunc) -> None:
 
 
 class TestStatement(adbc_drivers_validation.tests.statement.TestStatement):
-    pass
+    def test_rows_affected(self, driver, conn):
+        if driver.short_version == "4.0":
+            # TODO(lidavidm): is there a way to get this info?
+            pytest.skip("Spark 4 does not report UPDATE/DELETE row count")
+        super().test_rows_affected(driver, conn)
