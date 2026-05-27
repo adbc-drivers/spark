@@ -114,10 +114,10 @@ jobs:
         working-directory: go
         run: |
           if [[ -f compose.yaml ]]; then
-            if ! docker compose up --detach --wait test-service; then
+            if ! docker compose up --detach --wait spark4-thrift-server; then
               echo "Service failed to start"
               echo "Logs:"
-              docker compose logs test-service
+              docker compose logs spark4-thrift-server
               exit 1
             fi
           fi
