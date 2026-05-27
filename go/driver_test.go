@@ -62,8 +62,7 @@ func (s *SparkQuirks) DatabaseOptions() map[string]string {
 }
 
 func quoteIdentifier(ident string) string {
-	// TODO:
-	return fmt.Sprintf(`"%s"`, strings.ReplaceAll(ident, `"`, `""`))
+	return fmt.Sprintf("`%s`", strings.ReplaceAll(ident, "`", "``"))
 }
 
 func (q *SparkQuirks) CreateSampleTable(tableName string, r arrow.RecordBatch) (err error) {
@@ -94,23 +93,23 @@ func (q *SparkQuirks) SampleTableSchemaMetadata(tblName string, dt arrow.DataTyp
 
 func (q *SparkQuirks) Alloc() memory.Allocator                     { return q.mem }
 func (q *SparkQuirks) BindParameter(idx int) string                { return fmt.Sprintf("$%d", idx+1) }
-func (q *SparkQuirks) SupportsBulkIngest(string) bool              { return true }
+func (q *SparkQuirks) SupportsBulkIngest(string) bool              { return false }
 func (q *SparkQuirks) SupportsConcurrentStatements() bool          { return false }
 func (q *SparkQuirks) SupportsCurrentCatalogSchema() bool          { return true }
-func (q *SparkQuirks) SupportsExecuteSchema() bool                 { return true }
+func (q *SparkQuirks) SupportsExecuteSchema() bool                 { return false }
 func (q *SparkQuirks) SupportsGetSetOptions() bool                 { return true }
 func (q *SparkQuirks) SupportsPartitionedData() bool               { return false }
 func (q *SparkQuirks) SupportsStatistics() bool                    { return false }
-func (q *SparkQuirks) SupportsTransactions() bool                  { return true }
-func (q *SparkQuirks) SupportsGetParameterSchema() bool            { return true }
-func (q *SparkQuirks) SupportsDynamicParameterBinding() bool       { return true }
+func (q *SparkQuirks) SupportsTransactions() bool                  { return false }
+func (q *SparkQuirks) SupportsGetParameterSchema() bool            { return false }
+func (q *SparkQuirks) SupportsDynamicParameterBinding() bool       { return false }
 func (q *SparkQuirks) SupportsErrorIngestIncompatibleSchema() bool { return true }
-func (q *SparkQuirks) Catalog() string                             { return "dev" }
-func (q *SparkQuirks) DBSchema() string                            { return "public" }
+func (q *SparkQuirks) Catalog() string                             { return "spark_catalog" }
+func (q *SparkQuirks) DBSchema() string                            { return "default" }
 func (q *SparkQuirks) GetMetadata(code adbc.InfoCode) any {
 	switch code {
 	case adbc.InfoDriverName:
-		return "ADBC Driver for Apache Spark"
+		return "ADBC Driver Foundry Driver for Apache Spark"
 	// runtime/debug.ReadBuildInfo doesn't currently work for tests
 	// github.com/golang/go/issues/33976
 	case adbc.InfoDriverVersion:
@@ -118,7 +117,7 @@ func (q *SparkQuirks) GetMetadata(code adbc.InfoCode) any {
 	case adbc.InfoDriverArrowVersion:
 		return "(unknown or development build)"
 	case adbc.InfoVendorVersion:
-		return "(unknown or development build)"
+		return "4.0.0"
 	case adbc.InfoVendorArrowVersion:
 		return "(unknown or development build)"
 	case adbc.InfoDriverADBCVersion:
@@ -448,6 +447,8 @@ func (s *SparkTestSuite) SetupSuite() {
 	s.driver = driver.NewDriver(s.mem)
 	s.db, err = s.driver.NewDatabaseWithContext(s.ctx, map[string]string{
 		adbc.OptionKeyURI: s.uri,
+		"username":        "spark",
+		"password":        "spark",
 	})
 	s.NoError(err)
 
