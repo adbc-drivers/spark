@@ -103,12 +103,17 @@ class Spark4ThriftQuirks(Spark3ThriftQuirks):
         )
 
 
+_VERSION_RE = re.compile(r"^(spark_thrift|thrift)_(\d+\.\d+)$")
+
+
 @functools.cache
-def get_quirks(version: str) -> model.DriverQuirks:
-    vendor, _, version = version.partition(":")
+def get_quirks(combined_version: str) -> model.DriverQuirks:
+    m = _VERSION_RE.match(combined_version)
+    vendor = m.group(1) if m else combined_version
+    version = m.group(2) if m else ""
     if vendor in ("spark_thrift", "thrift"):
         if version == "3.5":
             return Spark3ThriftQuirks()
         elif version == "4.0":
             return Spark4ThriftQuirks()
-    raise ValueError(f"unsupported Spark {vendor}:{version}")
+    raise ValueError(f"unsupported Spark {combined_version}")
