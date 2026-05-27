@@ -154,8 +154,8 @@ jobs:
       matrix:
         include:
           # I think we only need to test one platform, but we can change that later
-          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark35-thrift-server", vendor_version: "thrift:3.5" }
-          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrift-server", vendor_version: "thrift:4.0" }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark35-thrift-server", vendor_version: "spark3_3.5-thrift" }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrift-server", vendor_version: "spark4_4.0-thrift" }
     permissions:
       contents: read
     steps:

@@ -20,12 +20,12 @@ from adbc_drivers_validation import model, quirks
 
 
 class Spark3ThriftQuirks(model.DriverQuirks):
-    name = "spark_thrift"
+    name = "spark3"
     driver = "adbc_driver_spark"
     driver_name = "ADBC Driver Foundry Driver for Apache Spark"
     vendor_name = "Apache Spark"
     vendor_version = re.compile(r"3\.5\.\d+.*")
-    short_version = "3.5"
+    short_version = "3.5-thrift"
     features = model.DriverFeatures(
         get_objects=True,
         statement_bind=False,
@@ -50,7 +50,10 @@ class Spark3ThriftQuirks(model.DriverQuirks):
 
     @property
     def queries_paths(self) -> tuple[Path]:
-        return (Path(__file__).parent.parent / "queries",)
+        return (
+            Path(__file__).parent.parent / "queries/base",
+            Path(__file__).parent.parent / "queries/spark35",
+        )
 
     def bind_parameter(self, index: int) -> str:
         return f"${index}"
@@ -92,16 +95,33 @@ class Spark3ThriftQuirks(model.DriverQuirks):
 
 
 class Spark4ThriftQuirks(Spark3ThriftQuirks):
+    name = "spark4"
     vendor_version = re.compile(r"4\.0\.\d+.*")
-    short_version = "4.0"
+    short_version = "4.0-thrift"
+
+    @property
+    def queries_paths(self) -> tuple[Path]:
+        return (
+            Path(__file__).parent.parent / "queries/base",
+            Path(__file__).parent.parent / "queries/spark40",
+        )
+
+
+_VERSION_RE = re.compile(r"^(spark3|spark4)(?:_|:)(\d+\.\d+-thrift)$")
 
 
 @functools.cache
-def get_quirks(version: str) -> model.DriverQuirks:
-    vendor, _, version = version.partition(":")
-    if vendor in ("spark_thrift", "thrift"):
-        if version == "3.5":
+def get_quirks(combined_version: str) -> model.DriverQuirks:
+    m = _VERSION_RE.match(combined_version)
+    if m is None:
+        raise ValueError(f"invalid version format: {combined_version}")
+
+    vendor = m.group(1)
+    version = m.group(2)
+    if vendor in ("spark3",):
+        if version == "3.5-thrift":
             return Spark3ThriftQuirks()
-        elif version == "4.0":
+    elif vendor in ("spark4",):
+        if version == "4.0-thrift":
             return Spark4ThriftQuirks()
-    raise ValueError(f"unsupported Spark {vendor}:{version}")
+    raise ValueError(f"unsupported Spark {vendor} {version}")
