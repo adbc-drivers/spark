@@ -167,7 +167,14 @@ func (st *statementImpl) ExecuteSchema(ctx context.Context) (*arrow.Schema, erro
 }
 
 func (st *statementImpl) Prepare(ctx context.Context) error {
-	return sparkbase.ErrTBD
+	if st.query == "" {
+		return adbc.Error{
+			Msg:  "[spark] no query set",
+			Code: adbc.StatusInvalidState,
+		}
+	}
+	// no-op
+	return nil
 }
 
 func (st *statementImpl) SetSubstraitPlan(ctx context.Context, plan []byte) error {
@@ -196,7 +203,10 @@ func (st *statementImpl) BindStream(_ context.Context, stream array.RecordReader
 		st.params.Release()
 		st.params = nil
 	}
-	st.params = stream
+	if stream != nil {
+		st.params = stream
+		st.params.Retain()
+	}
 	return nil
 }
 

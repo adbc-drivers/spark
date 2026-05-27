@@ -63,6 +63,7 @@ func singleRowStringQuery(sql string, c SparkClient, ctx context.Context, mem me
 	if err != nil {
 		return "", err
 	}
+	defer rr.Release()
 
 	if !rr.Next() {
 		return "", adbc.Error{
@@ -80,7 +81,8 @@ func singleRowStringQuery(sql string, c SparkClient, ctx context.Context, mem me
 	}
 
 	if stringCol, ok := rec.Column(0).(array.StringLike); ok {
-		return stringCol.Value(0), nil
+		// force copy as arrow-go by default slices the internal allocation
+		return string(stringCol.Value(0)), nil
 	}
 
 	return "", adbc.Error{
