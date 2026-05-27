@@ -41,65 +41,12 @@ services:
     volumes:
       - ./.data/metastore:/var/lib/postgresql
       - ./ci/docker/hive/conf:/opt/hive/conf
+      - ./ci/docker/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hive -d metastore"]
       interval: 5s
       timeout: 5s
       retries: 5
-
-  # Hive Metastore (catalog backend for Iceberg)
-  hive-metastore:
-    build:
-      context: ./ci/docker/
-      dockerfile: hive/Dockerfile
-      target: hive
-    depends_on:
-      metastore-db:
-        condition: service_healthy
-      kerberos:
-        condition: service_healthy
-    environment:
-      IS_RESUME: true
-      SERVICE_NAME: metastore
-      DB_DRIVER: postgres
-      KRB5CCNAME: /tmp/krb5cc_hive
-    ports:
-      - "9083:9083"  # Hive Metastore Thrift
-    volumes:
-      - ./.data/metastore:/opt/spark-data
-      - ./.data/kerberos/keytabs:/var/keytabs
-    healthcheck:
-      test: ["CMD-SHELL", "netstat -an | grep 9083 | grep LISTEN || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 5s
-
-  spark-master:
-    image: apache/spark:3.5.0
-    environment:
-      - SPARK_MODE=master
-      - SPARK_MASTER_HOST=spark-master
-      - SPARK_MASTER_PORT=7077
-    ports:
-      - "8080:8080"   # Spark Master Web UI
-      - "7077:7077"   # Spark Master Port
-    command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
-
-  spark-worker:
-    image: apache/spark:3.5.0
-    command: ["/opt/spark/sbin/start-worker.sh", "spark://spark-master:7077"]
-    depends_on:
-      spark-master:
-        condition: service_started
-    environment:
-      SPARK_NO_DAEMONIZE: true
-    healthcheck:
-      test: curl --fail http://localhost:8081
-      interval: 5s
-      timeout: 10s
-      retries: 10
-      start_period: 5s
 
   minio:
     image: quay.io/minio/minio:latest
@@ -128,25 +75,81 @@ services:
       mc mb --ignore-existing local/test
       "
 
-  spark-thrift-server:
+  # ==========================================================================
+  # Spark 3.5 Stack
+  # ==========================================================================
+
+  hive3-metastore:
+    build:
+      context: ./ci/docker/
+      dockerfile: hive/Dockerfile
+      target: hive
+    depends_on:
+      metastore-db:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
+    environment:
+      IS_RESUME: true
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      KRB5CCNAME: /tmp/krb5cc_hive
+    ports:
+      - "9083:9083"  # Hive Metastore Thrift
+    volumes:
+      - ./.data/metastore:/opt/spark-data
+      - ./.data/kerberos/keytabs:/var/keytabs
+    healthcheck:
+      test: ["CMD-SHELL", "netstat -an | grep 9083 | grep LISTEN || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  spark35-master:
+    image: apache/spark:3.5.0
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark35-master
+      - SPARK_MASTER_PORT=7077
+    ports:
+      - "8080:8080"   # Spark Master Web UI
+      - "7077:7077"   # Spark Master Port
+    command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
+
+  spark35-worker:
+    image: apache/spark:3.5.0
+    command: ["/opt/spark/sbin/start-worker.sh", "spark://spark35-master:7077"]
+    depends_on:
+      spark35-master:
+        condition: service_started
+    environment:
+      SPARK_NO_DAEMONIZE: true
+    healthcheck:
+      test: curl --fail http://localhost:8081
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+
+  spark35-thrift-server:
     build:
       context: ./ci/docker/
       dockerfile: spark/Dockerfile
       target: thrift
     depends_on:
-      spark-master:
+      spark35-master:
         condition: service_started
-      hive-metastore:
+      hive3-metastore:
         condition: service_healthy
       kerberos:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
     environment:
-      SPARK_MASTER: spark://spark-master:7077
+      SPARK_MASTER: spark://spark35-master:7077
     ports:
       - "10000:10000"  # Thrift JDBC/ODBC port
-      # - "10001:10001"  # Thrift HTTP port
       - "4040:4040"    # Spark UI for Thrift Server
     volumes:
       - ./ci/docker/spark/conf/:/opt/spark/conf/:ro
@@ -159,20 +162,20 @@ services:
       retries: 10
       start_period: 45s
 
-  spark-connect-server:
+  spark35-connect-server:
     build:
       context: ./ci/docker/
       dockerfile: spark/Dockerfile
       target: connect
     depends_on:
-      spark-master:
+      spark35-master:
         condition: service_started
-      hive-metastore:
+      hive3-metastore:
         condition: service_healthy
       kerberos:
         condition: service_healthy
     environment:
-      SPARK_MASTER: spark://spark-master:7077
+      SPARK_MASTER: spark://spark35-master:7077
     ports:
       - "15002:15002"  # Spark Connect gRPC port
       - "4041:4040"    # Spark UI
@@ -188,16 +191,16 @@ services:
       start_period: 45s
 
   # Apache Livy Server with Iceberg support
-  livy:
+  spark35-livy:
     build:
       context: ./ci/docker/
       dockerfile: spark/Dockerfile
       target: livy
     depends_on:
-      spark-master:
+      spark35-master:
         condition: service_started
     environment:
-      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_MASTER=spark://spark35-master:7077
     ports:
       - "8998:8998"  # Livy REST API
     volumes:
@@ -209,3 +212,118 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+
+  # ==========================================================================
+  # Spark 4 Stack
+  # ==========================================================================
+
+  hive4-metastore:
+    build:
+      context: ./ci/docker/
+      dockerfile: hive4/Dockerfile
+      target: hive
+    depends_on:
+      metastore-db:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
+    environment:
+      IS_RESUME: true
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      KRB5CCNAME: /tmp/krb5cc_hive
+    ports:
+      - "9083:9083"  # Hive Metastore Thrift
+    volumes:
+      - ./.data/metastore4:/opt/spark-data
+      - ./.data/kerberos/keytabs:/var/keytabs
+    healthcheck:
+      test: ["CMD-SHELL", "netstat -an | grep 9083 | grep LISTEN || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  spark4-master:
+    image: apache/spark:4.0.0
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark4-master
+      - SPARK_MASTER_PORT=7077
+    ports:
+      - "8080:8080"   # Spark Master Web UI
+      - "7077:7077"   # Spark Master Port
+    command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
+
+  spark4-worker:
+    image: apache/spark:4.0.0
+    command: ["/opt/spark/sbin/start-worker.sh", "spark://spark4-master:7077"]
+    depends_on:
+      spark4-master:
+        condition: service_started
+    environment:
+      SPARK_NO_DAEMONIZE: true
+    healthcheck:
+      test: curl --fail http://localhost:8081
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+
+  spark4-thrift-server:
+    build:
+      context: ./ci/docker/
+      dockerfile: spark4/Dockerfile
+      target: thrift
+    depends_on:
+      spark4-master:
+        condition: service_started
+      hive4-metastore:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      SPARK_MASTER: spark://spark4-master:7077
+    ports:
+      - "10000:10000"  # Thrift JDBC/ODBC port
+      - "4040:4040"    # Spark UI for Thrift Server
+    volumes:
+      - ./ci/docker/spark4/conf/:/opt/spark/conf/:ro
+      - ./.data/kerberos/keytabs:/var/keytabs
+      - ./.data/metastore4:/opt/spark-data
+    healthcheck:
+      test: ["CMD-SHELL", "klist && netstat -an | grep 10000 | grep LISTEN || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  spark4-connect-server:
+    build:
+      context: ./ci/docker/
+      dockerfile: spark4/Dockerfile
+      target: connect
+    depends_on:
+      spark4-master:
+        condition: service_started
+      hive4-metastore:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
+    environment:
+      SPARK_MASTER: spark://spark4-master:7077
+    ports:
+      - "15002:15002"  # Spark Connect gRPC port
+      - "4041:4040"    # Spark UI
+    volumes:
+      - ./ci/docker/spark4/conf/:/opt/spark/conf/:ro
+      - ./.data/kerberos/keytabs:/var/keytabs
+      - ./.data/metastore4:/opt/spark-data
+    healthcheck:
+      test: ["CMD-SHELL", "klist && netstat -an | grep 15002 | grep LISTEN || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
