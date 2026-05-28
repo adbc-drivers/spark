@@ -17,6 +17,8 @@ package connectimpl
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/url"
 	"strings"
 
@@ -27,6 +29,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	sparksql "github.com/apache/spark-connect-go/v40/spark/sql"
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 type AuthType uint8
 
@@ -141,25 +145,203 @@ func (c *connectClient) SetCurrentSchema(ctx context.Context, mem memory.Allocat
 	return sparkbase.DefaultSetCurrentSchemaImpl(c, ctx, mem, schema)
 }
 
-func (c *connectClient) GetCatalogs(ctx context.Context, catalogFilter *string) ([]string, error) {
-	return nil, adbc.Error{
-		Code: adbc.StatusNotImplemented,
-		Msg:  "GetCatalogs not supported",
+func (c *connectClient) executeMetadataQuery(ctx context.Context, sql string) (array.RecordReader, error) {
+	query := sparkbase.QueryContext{
+		Query: sql,
+		Log:   discardLogger,
 	}
+	rr, _, err := c.ExecuteQuery(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return rr, nil
+}
+
+func (c *connectClient) GetCatalogs(ctx context.Context, catalogFilter *string) ([]string, error) {
+	var query strings.Builder
+	query.WriteString("SHOW CATALOGS")
+	if catalogFilter != nil && *catalogFilter != "" {
+		query.WriteString(" LIKE ")
+		query.WriteString(sparkbase.QuoteString(*catalogFilter))
+	}
+
+	rr, err := c.executeMetadataQuery(ctx, query.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rr.Release()
+
+	var catalogs []string
+	for rr.Next() {
+		rec := rr.RecordBatch()
+		col, ok := rec.Column(0).(array.StringLike)
+		if !ok {
+			return nil, adbc.Error{
+				Code: adbc.StatusInternal,
+				Msg:  "[spark] SHOW CATALOGS did not return a string column",
+			}
+		}
+		for i := range int(rec.NumRows()) {
+			catalogs = append(catalogs, string(col.Value(i)))
+		}
+	}
+	return catalogs, nil
 }
 
 func (c *connectClient) GetDBSchemasForCatalog(ctx context.Context, catalog string, schemaFilter *string) ([]string, error) {
-	return nil, adbc.Error{
-		Code: adbc.StatusNotImplemented,
-		Msg:  "GetDBSchemasForCatalog not supported",
+	var query strings.Builder
+	query.WriteString("SHOW SCHEMAS IN ")
+	query.WriteString(sparkbase.QuoteIdentifier(catalog))
+	if schemaFilter != nil && *schemaFilter != "" {
+		query.WriteString(" LIKE ")
+		query.WriteString(sparkbase.QuoteString(*schemaFilter))
 	}
+
+	rr, err := c.executeMetadataQuery(ctx, query.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rr.Release()
+
+	var schemas []string
+	for rr.Next() {
+		rec := rr.RecordBatch()
+		col, ok := rec.Column(0).(array.StringLike)
+		if !ok {
+			return nil, adbc.Error{
+				Code: adbc.StatusInternal,
+				Msg:  "[spark] SHOW SCHEMAS did not return a string column",
+			}
+		}
+		for i := range int(rec.NumRows()) {
+			schemas = append(schemas, string(col.Value(i)))
+		}
+	}
+	return schemas, nil
 }
 
 func (c *connectClient) GetTablesForDBSchema(ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string, includeColumns bool) ([]driverbase.TableInfo, error) {
-	return nil, adbc.Error{
-		Code: adbc.StatusNotImplemented,
-		Msg:  "GetTablesForDBSchema not supported",
+	if includeColumns {
+		return c.getTablesWithColumns(ctx, catalog, schema, tableFilter, columnFilter)
 	}
+	return c.getTablesOnly(ctx, catalog, schema, tableFilter)
+}
+
+func (c *connectClient) getTablesOnly(ctx context.Context, catalog string, schema string, tableFilter *string) ([]driverbase.TableInfo, error) {
+	var query strings.Builder
+	query.WriteString("SHOW TABLES IN ")
+	query.WriteString(sparkbase.QuoteIdentifier(catalog))
+	query.WriteString(".")
+	query.WriteString(sparkbase.QuoteIdentifier(schema))
+	if tableFilter != nil && *tableFilter != "" {
+		query.WriteString(" LIKE ")
+		query.WriteString(sparkbase.QuoteString(*tableFilter))
+	}
+
+	rr, err := c.executeMetadataQuery(ctx, query.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rr.Release()
+
+	tables := make([]driverbase.TableInfo, 0)
+	for rr.Next() {
+		rec := rr.RecordBatch()
+		// SHOW TABLES returns: namespace, tableName, isTemporary
+		nameCol, ok := rec.Column(1).(array.StringLike)
+		if !ok {
+			return nil, adbc.Error{
+				Code: adbc.StatusInternal,
+				Msg:  "[spark] SHOW TABLES did not return expected columns",
+			}
+		}
+		for i := range int(rec.NumRows()) {
+			tableName := string(nameCol.Value(i))
+			tables = append(tables, driverbase.TableInfo{
+				TableName:    tableName,
+				TableType:    "TABLE",
+				TableColumns: []driverbase.ColumnInfo{},
+			})
+		}
+	}
+	return tables, nil
+}
+
+func (c *connectClient) getTablesWithColumns(ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string) ([]driverbase.TableInfo, error) {
+	tables, err := c.getTablesOnly(ctx, catalog, schema, tableFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	columnFilterRe, err := driverbase.PatternToRegexp(columnFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	for idx := range tables {
+		columns, err := c.describeTable(ctx, catalog, schema, tables[idx].TableName)
+		if err != nil {
+			return nil, err
+		}
+		if columnFilterRe != nil {
+			filtered := make([]driverbase.ColumnInfo, 0, len(columns))
+			for _, col := range columns {
+				if columnFilterRe.MatchString(col.ColumnName) {
+					filtered = append(filtered, col)
+				}
+			}
+			columns = filtered
+		}
+		tables[idx].TableColumns = columns
+	}
+	return tables, nil
+}
+
+func (c *connectClient) describeTable(ctx context.Context, catalog string, schema string, table string) ([]driverbase.ColumnInfo, error) {
+	sql := fmt.Sprintf("DESCRIBE TABLE %s.%s.%s",
+		sparkbase.QuoteIdentifier(catalog),
+		sparkbase.QuoteIdentifier(schema),
+		sparkbase.QuoteIdentifier(table))
+
+	rr, err := c.executeMetadataQuery(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+	defer rr.Release()
+
+	var columns []driverbase.ColumnInfo
+	var ordinal int32
+	for rr.Next() {
+		rec := rr.RecordBatch()
+		// DESCRIBE TABLE returns: col_name, data_type, comment
+		colNameCol, ok := rec.Column(0).(array.StringLike)
+		if !ok {
+			return nil, adbc.Error{
+				Code: adbc.StatusInternal,
+				Msg:  "[spark] DESCRIBE TABLE did not return expected columns",
+			}
+		}
+		dataTypeCol, _ := rec.Column(1).(array.StringLike)
+
+		for i := range int(rec.NumRows()) {
+			colName := string(colNameCol.Value(i))
+			// DESCRIBE TABLE may include partition info or empty separator rows
+			if colName == "" || colName[0] == '#' {
+				break
+			}
+
+			ordinal++
+			col := driverbase.ColumnInfo{
+				ColumnName:      colName,
+				OrdinalPosition: new(ordinal),
+				XdbcTypeName:    new(string(dataTypeCol.Value(i))),
+				XdbcNullable:    new(int16(1)),
+				XdbcIsNullable:  new("YES"),
+			}
+			columns = append(columns, col)
+		}
+	}
+	return columns, nil
 }
 
 var _ sparkbase.SparkClient = (*connectClient)(nil)

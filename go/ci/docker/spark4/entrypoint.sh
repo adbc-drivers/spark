@@ -57,11 +57,17 @@ else
     log_pattern="*thriftserver*.out"
 fi
 
+EXTRA_CONF=""
+if [ "$SPARK_SERVER_TYPE" = "thrifthttp" ]; then
+    EXTRA_CONF="--conf spark.hive.server2.hive.server2.transport.mode=http --conf spark.hive.server2.thrift.http.port=10001 --conf spark.hive.server2.thrift.http.path=cliservice"
+fi
+
 echo "Starting Spark server ($SPARK_SERVER_TYPE)..."
 $server_command \
   --properties-file $SPARK_HOME/conf/spark-defaults.conf \
   --conf spark.kerberos.keytab=/var/keytabs/hive.keytab \
-  --conf spark.kerberos.principal=hiveuser/hive-metastore@KDC.LOCAL
+  --conf spark.kerberos.principal=hiveuser/hive-metastore@KDC.LOCAL \
+  $EXTRA_CONF
 
 echo "Waiting for server to start..."
 for i in {1..30}; do
