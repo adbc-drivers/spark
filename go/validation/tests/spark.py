@@ -120,6 +120,14 @@ class Spark4ConnectQuirks(Spark4ThriftQuirks):
         },
     )
 
+    @property
+    def queries_paths(self) -> tuple[Path]:
+        return (
+            Path(__file__).parent.parent / "queries/base",
+            Path(__file__).parent.parent / "queries/spark40",
+            Path(__file__).parent.parent / "queries/spark40-connect",
+        )
+
 
 _VERSION_RE = re.compile(r"^(spark3|spark4)(?:_|:)(\d+\.\d+-(thrift|connect))$")
 
