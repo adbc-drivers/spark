@@ -1,4 +1,5 @@
-# Copyright (c) 2025-2026 ADBC Drivers Contributors
+#!/bin/bash
+# Copyright (c) 2026 ADBC Drivers Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,7 +13,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-export SPARK_URI="spark://localhost:10000?auth_type=plain&api=thrift%2Bbinary"
-export SPARK_CONNECT_URI="spark://localhost:15002?auth_type=none&api=connect"
-export SPARK_LIVY_URI="spark://localhost:8998?auth_type=basic&api=livy&livy.session_kind=sql"
-export AWS_REGION="us-east-1"
+set -e
+set -x
+
+echo "=== Livy Server Startup ==="
+
+# Wait for keytab
+echo "Waiting for keytab..."
+while [ ! -f /var/keytabs/hive.keytab ]; do
+    echo "Keytab not found, waiting..."
+    sleep 2
+done
+
+# Initialize Kerberos credentials
+echo "Initializing Kerberos credentials..."
+kinit -V -k -t /var/keytabs/hive.keytab hiveuser/hive-metastore@KDC.LOCAL
+
+echo "Kerberos credentials obtained successfully:"
+klist
+
+exec $LIVY_HOME/bin/livy-server

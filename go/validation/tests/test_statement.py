@@ -27,7 +27,7 @@ class TestStatement(adbc_drivers_validation.tests.statement.TestStatement):
     def test_rows_affected(self, driver, conn):
         if driver.short_version.startswith("4.0-"):
             pytest.skip("Spark 4 does not report UPDATE/DELETE row count")
-        if driver.short_version == "3.5-thrift":
+        if driver.short_version.startswith("3.5-"):
             pytest.skip(
                 "Spark 3.5 returns -1 for rows affected instead of actual count"
             )

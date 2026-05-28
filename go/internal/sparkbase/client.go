@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
@@ -82,7 +83,7 @@ func singleRowStringQuery(sql string, c SparkClient, ctx context.Context, mem me
 
 	if stringCol, ok := rec.Column(0).(array.StringLike); ok {
 		// force copy as arrow-go by default slices the internal allocation
-		return string(stringCol.Value(0)), nil
+		return strings.Clone(stringCol.Value(0)), nil
 	}
 
 	return "", adbc.Error{
@@ -131,4 +132,201 @@ func DefaultSetCurrentSchemaImpl(c SparkClient, ctx context.Context, mem memory.
 		return err
 	}
 	return nil
+}
+
+func executeMetadataQuery(c SparkClient, ctx context.Context, sql string) (array.RecordReader, error) {
+	query := QueryContext{
+		Query: sql,
+		Mem:   memory.DefaultAllocator,
+		Log:   discardLogger,
+	}
+	rr, _, err := c.ExecuteQuery(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return rr, nil
+}
+
+func DefaultGetCatalogsImpl(c SparkClient, ctx context.Context, catalogFilter *string) ([]string, error) {
+	var query strings.Builder
+	query.WriteString("SHOW CATALOGS")
+	if catalogFilter != nil && *catalogFilter != "" {
+		query.WriteString(" LIKE ")
+		query.WriteString(QuoteString(*catalogFilter))
+	}
+
+	rr, err := executeMetadataQuery(c, ctx, query.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rr.Release()
+
+	var catalogs []string
+	for rr.Next() {
+		rec := rr.RecordBatch()
+		col, ok := rec.Column(0).(array.StringLike)
+		if !ok {
+			return nil, adbc.Error{
+				Code: adbc.StatusInternal,
+				Msg:  "[spark] SHOW CATALOGS did not return a string column",
+			}
+		}
+		for i := range int(rec.NumRows()) {
+			catalogs = append(catalogs, strings.Clone(col.Value(i)))
+		}
+	}
+	return catalogs, nil
+}
+
+func DefaultGetDBSchemasForCatalogImpl(c SparkClient, ctx context.Context, catalog string, schemaFilter *string) ([]string, error) {
+	var query strings.Builder
+	query.WriteString("SHOW SCHEMAS IN ")
+	query.WriteString(QuoteIdentifier(catalog))
+	if schemaFilter != nil && *schemaFilter != "" {
+		query.WriteString(" LIKE ")
+		query.WriteString(QuoteString(*schemaFilter))
+	}
+
+	rr, err := executeMetadataQuery(c, ctx, query.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rr.Release()
+
+	var schemas []string
+	for rr.Next() {
+		rec := rr.RecordBatch()
+		col, ok := rec.Column(0).(array.StringLike)
+		if !ok {
+			return nil, adbc.Error{
+				Code: adbc.StatusInternal,
+				Msg:  "[spark] SHOW SCHEMAS did not return a string column",
+			}
+		}
+		for i := range int(rec.NumRows()) {
+			schemas = append(schemas, strings.Clone(col.Value(i)))
+		}
+	}
+	return schemas, nil
+}
+
+func DefaultGetTablesForDBSchemaImpl(c SparkClient, ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string, includeColumns bool) ([]driverbase.TableInfo, error) {
+	if includeColumns {
+		return defaultGetTablesWithColumns(c, ctx, catalog, schema, tableFilter, columnFilter)
+	}
+	return defaultGetTablesOnly(c, ctx, catalog, schema, tableFilter)
+}
+
+func defaultGetTablesOnly(c SparkClient, ctx context.Context, catalog string, schema string, tableFilter *string) ([]driverbase.TableInfo, error) {
+	var query strings.Builder
+	query.WriteString("SHOW TABLES IN ")
+	query.WriteString(QuoteIdentifier(catalog))
+	query.WriteString(".")
+	query.WriteString(QuoteIdentifier(schema))
+	if tableFilter != nil && *tableFilter != "" {
+		query.WriteString(" LIKE ")
+		query.WriteString(QuoteString(*tableFilter))
+	}
+
+	rr, err := executeMetadataQuery(c, ctx, query.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rr.Release()
+
+	tables := make([]driverbase.TableInfo, 0)
+	for rr.Next() {
+		rec := rr.RecordBatch()
+		nameCol, ok := rec.Column(1).(array.StringLike)
+		if !ok {
+			return nil, adbc.Error{
+				Code: adbc.StatusInternal,
+				Msg:  "[spark] SHOW TABLES did not return expected columns",
+			}
+		}
+		for i := range int(rec.NumRows()) {
+			tableName := strings.Clone(nameCol.Value(i))
+			tables = append(tables, driverbase.TableInfo{
+				TableName:    tableName,
+				TableType:    "TABLE",
+				TableColumns: []driverbase.ColumnInfo{},
+			})
+		}
+	}
+	return tables, nil
+}
+
+func defaultGetTablesWithColumns(c SparkClient, ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string) ([]driverbase.TableInfo, error) {
+	tables, err := defaultGetTablesOnly(c, ctx, catalog, schema, tableFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	columnFilterRe, err := driverbase.PatternToRegexp(columnFilter)
+	if err != nil {
+		return nil, err
+	}
+
+	for idx := range tables {
+		columns, err := defaultDescribeTable(c, ctx, catalog, schema, tables[idx].TableName)
+		if err != nil {
+			return nil, err
+		}
+		if columnFilterRe != nil {
+			filtered := make([]driverbase.ColumnInfo, 0, len(columns))
+			for _, col := range columns {
+				if columnFilterRe.MatchString(col.ColumnName) {
+					filtered = append(filtered, col)
+				}
+			}
+			columns = filtered
+		}
+		tables[idx].TableColumns = columns
+	}
+	return tables, nil
+}
+
+func defaultDescribeTable(c SparkClient, ctx context.Context, catalog string, schema string, table string) ([]driverbase.ColumnInfo, error) {
+	sql := fmt.Sprintf("DESCRIBE TABLE %s.%s.%s",
+		QuoteIdentifier(catalog),
+		QuoteIdentifier(schema),
+		QuoteIdentifier(table))
+
+	rr, err := executeMetadataQuery(c, ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+	defer rr.Release()
+
+	var columns []driverbase.ColumnInfo
+	var ordinal int32
+	for rr.Next() {
+		rec := rr.RecordBatch()
+		colNameCol, ok := rec.Column(0).(array.StringLike)
+		if !ok {
+			return nil, adbc.Error{
+				Code: adbc.StatusInternal,
+				Msg:  "[spark] DESCRIBE TABLE did not return expected columns",
+			}
+		}
+		dataTypeCol, _ := rec.Column(1).(array.StringLike)
+
+		for i := range int(rec.NumRows()) {
+			colName := strings.Clone(colNameCol.Value(i))
+			if colName == "" || colName[0] == '#' {
+				break
+			}
+
+			ordinal++
+			col := driverbase.ColumnInfo{
+				ColumnName:      colName,
+				OrdinalPosition: new(ordinal),
+				XdbcTypeName:    new(strings.Clone(dataTypeCol.Value(i))),
+				XdbcNullable:    new(int16(1)),
+				XdbcIsNullable:  new("YES"),
+			}
+			columns = append(columns, col)
+		}
+	}
+	return columns, nil
 }

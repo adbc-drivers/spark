@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import adbc_drivers_validation.tests.ingest
+import pytest
 
 from . import spark
 
@@ -23,4 +24,10 @@ def pytest_generate_tests(metafunc) -> None:
 
 
 class TestIngest(adbc_drivers_validation.tests.ingest.TestIngest):
-    pass
+    def test_create_large_batch(self, driver, conn, query):
+        if driver.short_version == "3.5-livy":
+            pytest.skip(
+                "Livy SQL sessions truncate results at 1000 rows"
+                " (spark.sql.repl.eagerEval.maxNumRows default)"
+            )
+        super().test_create_large_batch(driver, conn, query)

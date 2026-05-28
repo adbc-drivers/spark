@@ -54,6 +54,16 @@ Note: The example above is for Python using the [adbc-driver-manager](https://py
 
 ### Connection String Format
 
+## Limitations
+
+### Hiveserver2/Thrift Protocol
+
+- In Spark 3.x, binary data that does not happen to be valid UTF-8 will be corrupted.
+- The client cannot tell whether a timestamp carries a time zone or not; all timestamps are assumed to be in UTC as a result.
+
+### Livy
+
+- Only the first 1000 rows of a result set can be fetched. This can be tuned by configuring Spark with `spark.sql.repl.eagerEval.maxNumRows`.
 
 ## Feature & Type Support
 

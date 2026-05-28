@@ -94,6 +94,31 @@ class Spark3ThriftQuirks(model.DriverQuirks):
         return quirks.split_statement(statement)
 
 
+class Spark3LivyQuirks(Spark3ThriftQuirks):
+    name = "spark3"
+    vendor_version = re.compile(r"3\.5\.\d+.*")
+    short_version = "3.5-livy"
+    setup = model.DriverSetup(
+        database={
+            "uri": model.FromEnv("SPARK_LIVY_URI"),
+            "username": "spark",
+            "password": "spark",
+        },
+        connection={},
+        statement={
+            "spark.ingest.staging_area_uri": "s3://test/temporary",
+        },
+    )
+
+    @property
+    def queries_paths(self) -> tuple[Path]:
+        return (
+            Path(__file__).parent.parent / "queries/base",
+            Path(__file__).parent.parent / "queries/spark35",
+            Path(__file__).parent.parent / "queries/spark35-livy",
+        )
+
+
 class Spark4ThriftQuirks(Spark3ThriftQuirks):
     name = "spark4"
     vendor_version = re.compile(r"4\.0\.\d+.*")
@@ -129,7 +154,7 @@ class Spark4ConnectQuirks(Spark4ThriftQuirks):
         )
 
 
-_VERSION_RE = re.compile(r"^(spark3|spark4)(?:_|:)(\d+\.\d+-(thrift|connect))$")
+_VERSION_RE = re.compile(r"^(spark3|spark4)(?:_|:)(\d+\.\d+-(connect|livy|thrift))$")
 
 
 @functools.cache
@@ -143,6 +168,8 @@ def get_quirks(combined_version: str) -> model.DriverQuirks:
     if vendor in ("spark3",):
         if version == "3.5-thrift":
             return Spark3ThriftQuirks()
+        elif version == "3.5-livy":
+            return Spark3LivyQuirks()
     elif vendor in ("spark4",):
         if version == "4.0-thrift":
             return Spark4ThriftQuirks()

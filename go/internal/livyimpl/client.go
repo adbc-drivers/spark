@@ -411,7 +411,9 @@ func (c *livyClient) CreateStatement(ctx context.Context, req CreateStatementReq
 	}
 
 	var stmt Statement
-	if err := json.NewDecoder(resp.Body).Decode(&stmt); err != nil {
+	dec := json.NewDecoder(resp.Body)
+	dec.UseNumber()
+	if err := dec.Decode(&stmt); err != nil {
 		return nil, fmt.Errorf("failed to decode statement response: %w", err)
 	}
 
@@ -434,7 +436,9 @@ func (c *livyClient) GetStatement(ctx context.Context, sessionID, statementID in
 	}
 
 	var stmt Statement
-	if err := json.NewDecoder(resp.Body).Decode(&stmt); err != nil {
+	dec := json.NewDecoder(resp.Body)
+	dec.UseNumber()
+	if err := dec.Decode(&stmt); err != nil {
 		return nil, fmt.Errorf("failed to decode statement response: %w", err)
 	}
 
@@ -561,7 +565,7 @@ func (c *livyClient) SetCurrentCatalog(ctx context.Context, mem memory.Allocator
 }
 
 func (c *livyClient) CurrentSchema(ctx context.Context, mem memory.Allocator) (string, error) {
-	return sparkbase.DefaultCurrentCatalogImpl(c, ctx, mem)
+	return sparkbase.DefaultCurrentSchemaImpl(c, ctx, mem)
 }
 
 func (c *livyClient) SetCurrentSchema(ctx context.Context, mem memory.Allocator, schema string) error {
@@ -614,10 +618,7 @@ func (c *livyClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCont
 	}
 
 	// Parse data
-	var jsonRows []string
-
-	// For SQL sessions, parse the table output
-	jsonRows, err = parseDataFromSQLResult(stmt, schema)
+	rows, err := parseDataFromSQLResult(stmt, schema)
 	if err != nil {
 		return nil, -1, adbc.Error{
 			Code: adbc.StatusInternal,
@@ -625,8 +626,8 @@ func (c *livyClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCont
 		}
 	}
 
-	// Create a record reader from the JSON rows
-	reader, err := newJSONRecordReader(query.Mem, schema, jsonRows)
+	// Create a record reader from the parsed rows
+	reader, err := newJSONRecordReader(query.Mem, schema, rows)
 	if err != nil {
 		return nil, -1, adbc.Error{
 			Code: adbc.StatusInternal,
@@ -634,36 +635,45 @@ func (c *livyClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCont
 		}
 	}
 
-	return reader, int64(len(jsonRows)), nil
+	return reader, int64(len(rows)), nil
 }
 
 func (c *livyClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryContext) (int64, error) {
-	// TODO: specialize this and discard result set
-	return 0, adbc.Error{
-		Code: adbc.StatusNotImplemented,
-		Msg:  "ExecuteUpdate not supported",
+	// TODO(lidavidm): properly map error
+	stmt, err := c.CreateStatement(ctx, CreateStatementRequest{Code: query.Query})
+	if err != nil {
+		return -1, adbc.Error{
+			Code: adbc.StatusIO,
+			Msg:  fmt.Sprintf("failed to execute query: %v", err),
+		}
 	}
+	stmt, err = c.WaitForStatementComplete(ctx, stmt.ID, c.queryTimeout)
+	if err != nil {
+		return -1, adbc.Error{
+			Code: adbc.StatusIO,
+			Msg:  fmt.Sprintf("query execution failed: %v", err),
+		}
+	}
+	// Check for errors
+	if stmt.Output.Status == "error" {
+		return -1, adbc.Error{
+			Code: adbc.StatusInvalidData,
+			Msg:  fmt.Sprintf("query error: %s: %s", stmt.Output.Ename, stmt.Output.Evalue),
+		}
+	}
+	return -1, nil
 }
 
 func (c *livyClient) GetCatalogs(ctx context.Context, catalogFilter *string) ([]string, error) {
-	return []string{}, adbc.Error{
-		Code: adbc.StatusNotImplemented,
-		Msg:  "GetCatalogs not supported",
-	}
+	return sparkbase.DefaultGetCatalogsImpl(c, ctx, catalogFilter)
 }
 
 func (c *livyClient) GetDBSchemasForCatalog(ctx context.Context, catalog string, schemaFilter *string) ([]string, error) {
-	return []string{}, adbc.Error{
-		Code: adbc.StatusNotImplemented,
-		Msg:  "GetDBSchemasForCatalog not supported",
-	}
+	return sparkbase.DefaultGetDBSchemasForCatalogImpl(c, ctx, catalog, schemaFilter)
 }
 
 func (c *livyClient) GetTablesForDBSchema(ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string, includeColumns bool) ([]driverbase.TableInfo, error) {
-	return []driverbase.TableInfo{}, adbc.Error{
-		Code: adbc.StatusNotImplemented,
-		Msg:  "GetTablesForDBSchema not supported",
-	}
+	return sparkbase.DefaultGetTablesForDBSchemaImpl(c, ctx, catalog, schema, tableFilter, columnFilter, includeColumns)
 }
 
 // parseSchemaFromSQLResult extracts schema from SQL session result
@@ -688,41 +698,37 @@ func parseSchemaFromSQLResult(stmt *Statement) (*arrow.Schema, error) {
 }
 
 // parseDataFromSQLResult extracts data rows from SQL session result
-func parseDataFromSQLResult(stmt *Statement, schema *arrow.Schema) ([]string, error) {
-	var jsonRows []string
-
+func parseDataFromSQLResult(stmt *Statement, schema *arrow.Schema) ([]map[string]any, error) {
 	// SQL session results come in application/json format
 	if jsonData, ok := stmt.Output.Data["application/json"]; ok {
 		dataMap, ok := jsonData.(map[string]any)
 		if ok {
-			// If data is in structured format with "data" field
 			if dataArray, ok := dataMap["data"].([]any); ok {
+				var rows []map[string]any
 				for _, row := range dataArray {
-					// Convert row to JSON object based on schema
-					rowJSON, err := convertRowToJSON(row, schema)
+					rowMap, err := rowToMap(row, schema)
 					if err == nil {
-						jsonRows = append(jsonRows, rowJSON)
+						rows = append(rows, rowMap)
 					}
 				}
-				return jsonRows, nil
+				return rows, nil
 			}
 		}
 	}
 
 	// Fallback: parse text/plain table output
 	if textData, ok := stmt.Output.Data["text/plain"].(string); ok {
-		return parseTableOutputToJSON(textData, schema)
+		return parseTableOutput(textData, schema)
 	}
 
 	return nil, fmt.Errorf("unable to extract data from SQL result")
 }
 
-// parseTableOutputToJSON converts SQL table text output to JSON rows
-func parseTableOutputToJSON(output string, schema *arrow.Schema) ([]string, error) {
-	var jsonRows []string
+// parseTableOutput converts SQL table text output to row maps
+func parseTableOutput(output string, schema *arrow.Schema) ([]map[string]any, error) {
+	var rows []map[string]any
 	lines := strings.Split(output, "\n")
 
-	// Skip header and separator lines
 	dataStarted := false
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -750,21 +756,18 @@ func parseTableOutputToJSON(output string, schema *arrow.Schema) ([]string, erro
 			}
 
 			if len(rowData) > 0 {
-				jsonBytes, _ := json.Marshal(rowData)
-				jsonRows = append(jsonRows, string(jsonBytes))
+				rows = append(rows, rowData)
 			}
 		}
 	}
 
-	return jsonRows, nil
+	return rows, nil
 }
 
-// convertRowToJSON converts a row from SQL result to JSON string
-func convertRowToJSON(row any, schema *arrow.Schema) (string, error) {
-	// If row is already a map, marshal it directly
+// rowToMap converts a row from SQL result to a map
+func rowToMap(row any, schema *arrow.Schema) (map[string]any, error) {
 	if rowMap, ok := row.(map[string]any); ok {
-		jsonBytes, err := json.Marshal(rowMap)
-		return string(jsonBytes), err
+		return rowMap, nil
 	}
 
 	// If row is an array, map it to schema fields
@@ -775,11 +778,10 @@ func convertRowToJSON(row any, schema *arrow.Schema) (string, error) {
 				rowData[schema.Field(i).Name] = val
 			}
 		}
-		jsonBytes, err := json.Marshal(rowData)
-		return string(jsonBytes), err
+		return rowData, nil
 	}
 
-	return "", fmt.Errorf("unsupported row format: %T", row)
+	return nil, fmt.Errorf("unsupported row format: %T", row)
 }
 
 var _ sparkbase.SparkClient = (*livyClient)(nil)
