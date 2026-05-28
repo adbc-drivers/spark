@@ -312,6 +312,8 @@ services:
         condition: service_healthy
       kerberos:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       SPARK_MASTER: spark://spark4-master:7077
     ports:
@@ -323,6 +325,37 @@ services:
       - ./.data/metastore4:/opt/spark-data
     healthcheck:
       test: ["CMD-SHELL", "klist && netstat -an | grep 15002 | grep LISTEN || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  spark4-thrifthttp-server:
+    build:
+      context: ./ci/docker/
+      dockerfile: spark4/Dockerfile
+      target: thrift
+    depends_on:
+      spark4-master:
+        condition: service_started
+      hive4-metastore:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      SPARK_MASTER: spark://spark4-master:7077
+      SPARK_SERVER_TYPE: thrifthttp
+    ports:
+      - "10001:10001"  # Thrift HTTP port
+      - "4042:4040"    # Spark UI for Thrift HTTP Server
+    volumes:
+      - ./ci/docker/spark4/conf/:/opt/spark/conf/:ro
+      - ./.data/kerberos/keytabs:/var/keytabs
+      - ./.data/metastore4:/opt/spark-data
+    healthcheck:
+      test: ["CMD-SHELL", "klist && netstat -an | grep 10001 | grep LISTEN || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
