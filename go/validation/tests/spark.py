@@ -107,7 +107,21 @@ class Spark4ThriftQuirks(Spark3ThriftQuirks):
         )
 
 
-_VERSION_RE = re.compile(r"^(spark3|spark4)(?:_|:)(\d+\.\d+-thrift)$")
+class Spark4ConnectQuirks(Spark4ThriftQuirks):
+    short_version = "4.0-connect"
+    setup = model.DriverSetup(
+        database={
+            "uri": model.FromEnv("SPARK_CONNECT_URI"),
+            "username": "spark",
+        },
+        connection={},
+        statement={
+            "spark.ingest.staging_area_uri": "s3://test/temporary",
+        },
+    )
+
+
+_VERSION_RE = re.compile(r"^(spark3|spark4)(?:_|:)(\d+\.\d+-(thrift|connect))$")
 
 
 @functools.cache
@@ -124,4 +138,6 @@ def get_quirks(combined_version: str) -> model.DriverQuirks:
     elif vendor in ("spark4",):
         if version == "4.0-thrift":
             return Spark4ThriftQuirks()
+        elif version == "4.0-connect":
+            return Spark4ConnectQuirks()
     raise ValueError(f"unsupported Spark {vendor} {version}")
