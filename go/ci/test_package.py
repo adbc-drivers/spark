@@ -1,4 +1,4 @@
-# Copyright (c) 2025-2026 ADBC Drivers Contributors
+# Copyright (c) 2026 ADBC Drivers Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,5 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-export SPARK_URI="spark://localhost:10000?auth_type=plain&api=thrift%2Bbinary"
-export AWS_REGION="us-east-1"
+import adbc_driver_manager.dbapi
+import pytest
+
+
+def test_package() -> None:
+    with pytest.raises(
+        adbc_driver_manager.dbapi.OperationalError,
+        match="Could not open binary thrift client",
+    ):
+        with adbc_driver_manager.dbapi.connect(
+            uri="spark://localhost:20000?auth_type=plain", autocommit=True
+        ) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")

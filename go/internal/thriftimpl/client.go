@@ -127,7 +127,7 @@ func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient,
 		}
 
 		if err := transport.Open(); err != nil {
-			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "could not open binary thrift client")
+			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "open binary thrift client")
 		}
 
 	}

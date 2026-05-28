@@ -63,12 +63,37 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 	}
 
 	scheme := uri.Scheme
-	// Spark Connect's native URI scheme is `sc`. Map it onto our internal
-	// api-name convention so `sc://host:port` works out of the box.
-	if scheme == "sc" {
-		scheme = OptionValueApiConnect
+	api := options[OptionApi]
+	switch scheme {
+	case "sc", OptionValueApiConnect:
+		// Spark Connect's native URI scheme is `sc`. Map it onto our internal
+		// api-name convention so `sc://host:port` works out of the box.
+		if api != "" && api != OptionValueApiConnect {
+			return adbc.Error{
+				Code: adbc.StatusInvalidArgument,
+				Msg:  fmt.Sprintf("[spark] URI scheme 'sc' cannot be used with explicit API option %s=%s", OptionApi, api),
+			}
+		}
+		options[OptionApi] = OptionValueApiConnect
+	case "spark":
+		// This scheme doesn't imply an API; default to thrift+http if
+		// it isn't already set
+
+		// example:
+		// spark:// => thrift + binary
+		// spark://?api=thrift%2Bhttp => thrift + http
+		if _, ok := options[OptionApi]; !ok {
+			options[OptionApi] = OptionValueApiThriftBinary
+		}
+	case OptionValueApiThriftBinary, OptionValueApiThriftHttp, OptionValueApiLivy:
+		if api != "" && api != scheme {
+			return adbc.Error{
+				Code: adbc.StatusInvalidArgument,
+				Msg:  fmt.Sprintf("[spark] URI scheme '%s' cannot be used with explicit API option %s=%s", scheme, OptionApi, api),
+			}
+		}
+		options[OptionApi] = scheme
 	}
-	options[OptionApi] = scheme
 
 	return nil
 }
