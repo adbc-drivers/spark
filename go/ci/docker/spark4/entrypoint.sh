@@ -59,7 +59,7 @@ fi
 
 EXTRA_CONF=""
 if [ "$SPARK_SERVER_TYPE" = "thrifthttp" ]; then
-    EXTRA_CONF="--conf spark.hive.server2.hive.server2.transport.mode=http --conf spark.hive.server2.thrift.http.port=10001 --conf spark.hive.server2.thrift.http.path=cliservice"
+    EXTRA_CONF="--hiveconf hive.server2.transport.mode=http --hiveconf hive.server2.thrift.http.port=10001 --hiveconf hive.server2.thrift.http.path=cliservice"
 fi
 
 echo "Starting Spark server ($SPARK_SERVER_TYPE)..."

@@ -16,6 +16,7 @@ package thriftimpl
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -103,7 +104,8 @@ func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient,
 	switch opts.Transport {
 	case Http:
 		transportName = "HTTP"
-		uri := opts.Host
+		// TODO(lidavidm): TLS, configurable HTTP path
+		uri := "http://" + opts.Host + "/cliservice"
 		transport, err = thrift.NewTHttpClient(uri)
 		if err != nil {
 			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "could not open HTTP thrift client")
@@ -114,7 +116,8 @@ func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient,
 			// It seems Spark expects the header but does not do anything with it
 			transport.(*thrift.THttpClient).SetHeader("Authorization", "Basic DummyToken")
 		case Plain:
-			transport.(*thrift.THttpClient).SetHeader("Authorization", fmt.Sprintf("Basic %s:%s", opts.Username, opts.Password))
+			creds := base64.StdEncoding.EncodeToString(fmt.Appendf(nil, "%s:%s", opts.Username, opts.Password))
+			transport.(*thrift.THttpClient).SetHeader("Authorization", "Basic "+creds)
 		}
 	case Binary:
 		transportName = "binary"

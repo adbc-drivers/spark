@@ -132,6 +132,23 @@ class Spark4ThriftQuirks(Spark3ThriftQuirks):
         )
 
 
+class Spark4ThriftHttpQuirks(Spark4ThriftQuirks):
+    vendor_version = re.compile(r"4\.0\.\d+.*\(HiveServer2\+HTTP\)")
+    short_version = "4.0-thrifthttp"
+
+    setup = model.DriverSetup(
+        database={
+            "uri": model.FromEnv("SPARK_THRIFTHTTP_URI"),
+            "username": "spark",
+            "password": "spark",
+        },
+        connection={},
+        statement={
+            "spark.ingest.staging_area_uri": "s3://test/temporary",
+        },
+    )
+
+
 class Spark4ConnectQuirks(Spark4ThriftQuirks):
     vendor_version = re.compile(r"4\.0\.\d+.*\(Spark Connect\)")
     short_version = "4.0-connect"
@@ -155,7 +172,9 @@ class Spark4ConnectQuirks(Spark4ThriftQuirks):
         )
 
 
-_VERSION_RE = re.compile(r"^(spark3|spark4)(?:_|:)(\d+\.\d+-(connect|livy|thrift))$")
+_VERSION_RE = re.compile(
+    r"^(spark3|spark4)(?:_|:)(\d+\.\d+-(connect|livy|thrift|thrifthttp))$"
+)
 
 
 @functools.cache
@@ -174,6 +193,8 @@ def get_quirks(combined_version: str) -> model.DriverQuirks:
     elif vendor in ("spark4",):
         if version == "4.0-thrift":
             return Spark4ThriftQuirks()
+        elif version == "4.0-thrifthttp":
+            return Spark4ThriftHttpQuirks()
         elif version == "4.0-connect":
             return Spark4ConnectQuirks()
     raise ValueError(f"unsupported Spark {vendor} {version}")
