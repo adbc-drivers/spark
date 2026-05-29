@@ -74,6 +74,7 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 	return &connectClient{session: session}, nil
 }
 
+// TODO(lidavidm): AuthType isn't used above, and this puts username but no password?
 func buildConnectionString(opts ConnectionOpts) string {
 	var b strings.Builder
 	b.WriteString("sc://")

@@ -16,4 +16,4 @@
 
 [tags]
 sql-type-name = "TIMESTAMP_NTZ"
-broken_vendor = "Livy 0.8.0 does not serialize TIMESTAMP_NTZ values in JSON responses (returns empty object)"
+broken-vendor = "The Livy backend does not support TIMESTAMP_NTZ"

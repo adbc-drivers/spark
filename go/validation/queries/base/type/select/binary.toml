@@ -16,5 +16,5 @@
 sql-type-name = "BINARY"
 partial-support = true
 caveats = [
-  "Spark mangles binary values! Use with caution"
+  "The HiveServer2 backend mangles binary values"
 ]

@@ -17,9 +17,6 @@
 [tags]
 sql-type-name = "BINARY"
 partial-support = true
-caveats = [
-  "Livy returns the correct binary value unlike Spark Thrift (SPARK-28474)"
-]
 
 // part: expected
 

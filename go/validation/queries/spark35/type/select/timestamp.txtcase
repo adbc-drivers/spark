@@ -14,8 +14,6 @@
 
 // part: metadata
 
-# https://issues.apache.org/jira/browse/SPARK-39720
-skip = "Spark 3.5 does not clean up warehouse directory on DROP TABLE, causing LOCATION_ALREADY_EXISTS on re-creation"
-
 [tags]
+broken-vendor = "Spark 3.5 + Hive 3 does not support TIMESTAMP_NTZ"
 sql-type-name = "TIMESTAMP_NTZ"

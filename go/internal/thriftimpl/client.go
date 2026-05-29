@@ -57,21 +57,22 @@ type ConnectionOpts struct {
 }
 
 type thriftClient struct {
-	transport thrift.TTransport
+	transport     thrift.TTransport
+	transportName string
 	// TODO(lidavidm): do we need the lock if we're using the HTTP client?
 	client  *driverbase.Shared[hiveserver2.TCLIServiceClient]
 	session *hiveserver2.TSessionHandle
 }
 
 func (c *thriftClient) BackendName() string {
-	return "HiveServer2"
+	return fmt.Sprintf("HiveServer2+%s", c.transportName)
 }
 
 type nilCloser struct{}
 
 func (nilCloser) Close() error { return nil }
 
-func wrapThriftTransport(ctx context.Context, cfg *thrift.TConfiguration, transport thrift.TTransport) (sparkbase.SparkClient, error) {
+func wrapThriftTransport(ctx context.Context, cfg *thrift.TConfiguration, transport thrift.TTransport, transportName string) (sparkbase.SparkClient, error) {
 	factory := thrift.NewTBinaryProtocolFactoryConf(cfg)
 	iprot := factory.GetProtocol(transport)
 	oprot := factory.GetProtocol(transport)
@@ -84,9 +85,10 @@ func wrapThriftTransport(ctx context.Context, cfg *thrift.TConfiguration, transp
 		return nil, errors.Join(err, transport.Close())
 	}
 	return &thriftClient{
-		transport: transport,
-		client:    driverbase.NewShared(client, nilCloser{}),
-		session:   resp.SessionHandle,
+		transport:     transport,
+		transportName: transportName,
+		client:        driverbase.NewShared(client, nilCloser{}),
+		session:       resp.SessionHandle,
 	}, nil
 }
 
@@ -97,8 +99,10 @@ func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient,
 	)
 	cfg := &thrift.TConfiguration{}
 
+	transportName := ""
 	switch opts.Transport {
 	case Http:
+		transportName = "HTTP"
 		uri := opts.Host
 		transport, err = thrift.NewTHttpClient(uri)
 		if err != nil {
@@ -113,6 +117,7 @@ func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient,
 			transport.(*thrift.THttpClient).SetHeader("Authorization", fmt.Sprintf("Basic %s:%s", opts.Username, opts.Password))
 		}
 	case Binary:
+		transportName = "binary"
 		transport = thrift.NewTSocketConf(opts.Host, cfg)
 
 		switch opts.Auth {
@@ -136,7 +141,7 @@ func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient,
 
 	}
 
-	return wrapThriftTransport(ctx, cfg, transport)
+	return wrapThriftTransport(ctx, cfg, transport, transportName)
 }
 
 func (c *thriftClient) Close() error {

@@ -16,10 +16,6 @@
 
 [tags]
 sql-type-name = "BINARY"
-partial-support = true
-caveats = [
-  "Spark Connect returns the correct value, but Spark Thrift mangles non-UTF-8 binary data (SPARK-28474)"
-]
 
 // part: expected
 
