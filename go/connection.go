@@ -16,6 +16,7 @@ package spark
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/adbc-drivers/apache/go/internal/sparkbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
@@ -48,8 +49,10 @@ func (c *connectionImpl) Close(ctx context.Context) error {
 }
 
 func (c *connectionImpl) PrepareDriverInfo(ctx context.Context, infoCodes []adbc.InfoCode) error {
+	backendName := c.client.BackendName()
 	if version, err := c.client.VendorVersion(ctx, c.Alloc); err == nil && version != "" {
-		if err := c.DriverInfo.RegisterInfoCode(adbc.InfoVendorVersion, version); err != nil {
+		fullVersion := fmt.Sprintf("%s (%s)", version, backendName)
+		if err := c.DriverInfo.RegisterInfoCode(adbc.InfoVendorVersion, fullVersion); err != nil {
 			return err
 		}
 	}

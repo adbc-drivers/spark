@@ -24,7 +24,7 @@ class Spark3ThriftQuirks(model.DriverQuirks):
     driver = "adbc_driver_spark"
     driver_name = "ADBC Driver Foundry Driver for Apache Spark"
     vendor_name = "Apache Spark"
-    vendor_version = re.compile(r"3\.5\.\d+.*")
+    vendor_version = re.compile(r"3\.5\.\d+.*\(HiveServer2\)")
     short_version = "3.5-thrift"
     features = model.DriverFeatures(
         get_objects=True,
@@ -96,7 +96,7 @@ class Spark3ThriftQuirks(model.DriverQuirks):
 
 class Spark3LivyQuirks(Spark3ThriftQuirks):
     name = "spark3"
-    vendor_version = re.compile(r"3\.5\.\d+.*")
+    vendor_version = re.compile(r"3\.5\.\d+.*\(Apache Livy\)")
     short_version = "3.5-livy"
     setup = model.DriverSetup(
         database={
@@ -121,7 +121,7 @@ class Spark3LivyQuirks(Spark3ThriftQuirks):
 
 class Spark4ThriftQuirks(Spark3ThriftQuirks):
     name = "spark4"
-    vendor_version = re.compile(r"4\.0\.\d+.*")
+    vendor_version = re.compile(r"4\.0\.\d+.*\(HiveServer2\)")
     short_version = "4.0-thrift"
 
     @property
@@ -133,6 +133,7 @@ class Spark4ThriftQuirks(Spark3ThriftQuirks):
 
 
 class Spark4ConnectQuirks(Spark4ThriftQuirks):
+    vendor_version = re.compile(r"4\.0\.\d+.*\(Spark Connect\)")
     short_version = "4.0-connect"
     setup = model.DriverSetup(
         database={
