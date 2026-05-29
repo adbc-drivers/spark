@@ -163,6 +163,7 @@ jobs:
         include:
           # I think we only need to test one platform, but we can change that later
           - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark35-thrift-server", vendor_version: "spark3_3.5-thrift" }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark35-livy", vendor_version: "spark3_3.5-livy" }
           - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrift-server", vendor_version: "spark4_4.0-thrift" }
           - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-connect-server", vendor_version: "spark4_4.0-connect" }
     permissions:

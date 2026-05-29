@@ -66,11 +66,13 @@ RUN wget https://archive.apache.org/dist/incubator/livy/${LIVY_VERSION}/${LIVY_N
 RUN mkdir -p ${LIVY_HOME}/logs ${LIVY_HOME}/conf
 
 COPY spark/conf/ ${LIVY_HOME}/conf/
+COPY spark/livy-entrypoint.sh /opt/livy-entrypoint.sh
+RUN chmod +x /opt/livy-entrypoint.sh
 
 EXPOSE 8998
 WORKDIR ${LIVY_HOME}
 
-CMD ["/bin/bash", "-c", "$LIVY_HOME/bin/livy-server"]
+CMD ["/opt/livy-entrypoint.sh"]
 
 
 

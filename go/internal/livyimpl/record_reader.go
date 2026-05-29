@@ -15,32 +15,35 @@
 package livyimpl
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/decimal128"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
-// jsonRecordReader reads JSON rows and converts them to Arrow records
+// jsonRecordReader reads parsed row maps and converts them to Arrow records
 type jsonRecordReader struct {
-	alloc    memory.Allocator
-	schema   *arrow.Schema
-	jsonRows []string
-	current  int
-	record   arrow.RecordBatch
-	err      error
+	alloc   memory.Allocator
+	schema  *arrow.Schema
+	rows    []map[string]any
+	current int
+	record  arrow.RecordBatch
+	err     error
 }
 
 // newJSONRecordReader creates a new JSON record reader
-func newJSONRecordReader(alloc memory.Allocator, schema *arrow.Schema, jsonRows []string) (*jsonRecordReader, error) {
+func newJSONRecordReader(alloc memory.Allocator, schema *arrow.Schema, rows []map[string]any) (*jsonRecordReader, error) {
 	return &jsonRecordReader{
-		alloc:    alloc,
-		schema:   schema,
-		jsonRows: jsonRows,
-		current:  -1,
+		alloc:   alloc,
+		schema:  schema,
+		rows:    rows,
+		current: -1,
 	}, nil
 }
 
@@ -63,7 +66,7 @@ func (r *jsonRecordReader) Next() bool {
 	// Build all records at once (simplified approach)
 	if r.current == -1 {
 		r.current = 0
-		if len(r.jsonRows) == 0 {
+		if len(r.rows) == 0 {
 			return false
 		}
 
@@ -112,32 +115,16 @@ func (r *jsonRecordReader) Retain() {
 	}
 }
 
-// buildRecord builds an Arrow record from JSON rows
+// buildRecord builds an Arrow record from pre-parsed row maps
 func (r *jsonRecordReader) buildRecord() (arrow.RecordBatch, error) {
-	// Parse all JSON rows
-	var rows []map[string]any
-	for i, jsonRow := range r.jsonRows {
-		if jsonRow == "" {
-			fmt.Printf("DEBUG: Skipping empty row at index %d\n", i)
-			continue
-		}
-		var row map[string]any
-		if err := json.Unmarshal([]byte(jsonRow), &row); err != nil {
-			return nil, fmt.Errorf("failed to parse JSON row %d (content: %q): %w", i, jsonRow, err)
-		}
-		rows = append(rows, row)
-	}
-
-	if len(rows) == 0 {
-		// Return empty record
+	if len(r.rows) == 0 {
 		return array.NewRecordBatch(r.schema, []arrow.Array{}, 0), nil
 	}
 
-	// Build arrays for each column
 	bldr := array.NewRecordBuilder(r.alloc, r.schema)
 	defer bldr.Release()
 
-	for rowIdx, row := range rows {
+	for rowIdx, row := range r.rows {
 		for colIdx, field := range r.schema.Fields() {
 			value := row[field.Name]
 			if err := appendValueToBuilder(bldr.Field(colIdx), value, field.Type); err != nil {
@@ -166,8 +153,23 @@ func appendValueToBuilder(builder array.Builder, value any, dataType arrow.DataT
 
 	case *array.BinaryBuilder:
 		if str, ok := value.(string); ok {
-			b.Append([]byte(str))
+			decoded, err := hex.DecodeString(str)
+			if err != nil {
+				b.Append([]byte(str))
+			} else {
+				b.Append(decoded)
+			}
 		} else if bytes, ok := value.([]byte); ok {
+			b.Append(bytes)
+		} else if arr, ok := value.([]any); ok {
+			bytes := make([]byte, len(arr))
+			for i, v := range arr {
+				if numVal, ok := toInt64(v); ok {
+					bytes[i] = byte(numVal)
+				} else {
+					return fmt.Errorf("cannot convert array element %T to byte", v)
+				}
+			}
 			b.Append(bytes)
 		} else {
 			return fmt.Errorf("cannot convert %T to binary", value)
@@ -249,6 +251,14 @@ func appendValueToBuilder(builder array.Builder, value any, dataType arrow.DataT
 		} else {
 			return fmt.Errorf("cannot convert %T to float64", value)
 		}
+
+	case *array.Decimal128Builder:
+		str := fmt.Sprintf("%v", value)
+		num, err := decimal128.FromString(str, b.Type().(*arrow.Decimal128Type).Precision, b.Type().(*arrow.Decimal128Type).Scale)
+		if err != nil {
+			return fmt.Errorf("cannot parse decimal128 value %q: %w", str, err)
+		}
+		b.Append(num)
 
 	case *array.Date32Builder:
 		// Parse date string or epoch days
@@ -346,6 +356,12 @@ func appendValueToBuilder(builder array.Builder, value any, dataType arrow.DataT
 // toInt64 converts various numeric types to int64
 func toInt64(value any) (int64, bool) {
 	switch v := value.(type) {
+	case json.Number:
+		n, err := strconv.ParseInt(string(v), 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return n, true
 	case int:
 		return int64(v), true
 	case int8:
@@ -378,6 +394,12 @@ func toInt64(value any) (int64, bool) {
 // toFloat64 converts various numeric types to float64
 func toFloat64(value any) (float64, bool) {
 	switch v := value.(type) {
+	case json.Number:
+		n, err := strconv.ParseFloat(string(v), 64)
+		if err != nil {
+			return 0, false
+		}
+		return n, true
 	case int:
 		return float64(v), true
 	case int8:

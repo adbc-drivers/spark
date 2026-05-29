@@ -17,6 +17,7 @@ package livyimpl
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/apache/arrow-go/v18/arrow"
@@ -123,14 +124,24 @@ func convertSimpleSparkType(sparkType string) (arrow.DataType, error) {
 		return arrow.BinaryTypes.Binary, nil
 	case "date":
 		return arrow.FixedWidthTypes.Date32, nil
-	case "timestamp":
+	case "timestamp", "timestamp_ntz":
 		return arrow.FixedWidthTypes.Timestamp_us, nil
 	default:
-		// Handle decimal, etc.
 		if strings.HasPrefix(sparkType, "decimal(") {
-			// Parse decimal(precision, scale)
-			// For now, default to decimal128
-			return arrow.PrimitiveTypes.Float64, nil // Fallback to float64
+			inner := sparkType[len("decimal(") : len(sparkType)-1]
+			parts := strings.Split(inner, ",")
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("invalid decimal type: %s", sparkType)
+			}
+			precision, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+			if err != nil {
+				return nil, fmt.Errorf("invalid decimal precision in %s: %w", sparkType, err)
+			}
+			scale, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if err != nil {
+				return nil, fmt.Errorf("invalid decimal scale in %s: %w", sparkType, err)
+			}
+			return &arrow.Decimal128Type{Precision: int32(precision), Scale: int32(scale)}, nil
 		}
 		return nil, fmt.Errorf("unsupported Spark type: %s", sparkType)
 	}

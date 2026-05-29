@@ -176,9 +176,10 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 		return livyOpts, err
 	}
 
+	// TODO: come up with a better way to do this
 	// Allow explicit http://
 	if !strings.Contains(host, "://") {
-		host = fmt.Sprintf("https://%s", host)
+		host = fmt.Sprintf("http://%s", host)
 	}
 	livyOpts.BaseURL = host
 
