@@ -37,7 +37,7 @@ dbc install spark
 
 ## Connecting
 
-To use the driver, provide an Oracle connection string as the `uri` option. The driver supports URI format and DSN-style connection strings, but URIs are recommended.
+To use the driver, provide a connection string as the `uri` option.
 
 ```python
 from adbc_driver_manager import dbapi
@@ -45,7 +45,7 @@ from adbc_driver_manager import dbapi
 dbapi.connect(
   driver="spark",
   db_kwargs={
-      "uri": ""
+      "uri": "spark://localhost:10000?auth_type=plain&api=thrift%2Bbinary"
   }
 )
 ```
@@ -54,9 +54,54 @@ Note: The example above is for Python using the [adbc-driver-manager](https://py
 
 ### Connection String Format
 
+- The URI scheme is "spark://".
+- The host and port should be provided.
+- If not specified, the `api` defaults to `thrift+binary` (URI-encoded: `thrift%2Bbinary`).
+- Options can be specified as query parameters or as driver options.
+
+:::{note}
+Reserved characters in URI elements must be URI-encoded. For example, `@` becomes `%40` and `+` becomes `%2B`.
+:::
+
+### Connection Options
+
+These parameters can be specified in the URI as query parameters, or as connection parameters:
+
+`spark.api` (query parameter: `api`)
+: **Values**: `connect`, `livy`, or `thrift+binary`.
+
+  How to connect to Spark.
+
+  | Value           | Backend                |
+  |-----------------|------------------------|
+  | `connect`       | Spark Connect          |
+  | `livy`          | Apache Livy            |
+  | `thrift+binary` | HiveServer2 (over TCP) |
+
+`spark.auth_type` (query parameter: `auth_type`)
+: **Values**: `sql`, `spark`, or `pyspark`.
+
+  How to authenticate to Spark.
+
+  | Auth Type   | Applicable Backends |
+  |-------------|---------------------|
+  | `aws_sigv4` | `livy`              |
+  | `basic`     | `connect`, `livy`   |
+  | `none`      | `connect`, `livy`   |
+  | `nosasl`    | `thrift+binary`     |
+  | `plain`     | `thrift+binary`     |
+  | `token`     | `connect`           |
+
+`spark.livy.session_kind` (query parameter: `livy.session_kind`)
+: **Values**: `sql`, `spark`, or `pyspark`.
+
+  For the Livy backend, what kind of session to create.
+
 ## Limitations
 
-### Hiveserver2/Thrift Protocol
+Different backends have limitations; some limitations related to data type support are also noted below.
+
+### HiveServer2/Thrift Protocol
 
 - In Spark 3.x, binary data that does not happen to be valid UTF-8 will be corrupted.
 - The client cannot tell whether a timestamp carries a time zone or not; all timestamps are assumed to be in UTC as a result.

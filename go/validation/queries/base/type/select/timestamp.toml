@@ -15,6 +15,6 @@
 [tags]
 sql-type-name = "TIMESTAMP_NTZ"
 caveats = [
-  "Spark reports TIMESTAMP on the wire, so we can't tell that it was actually a naive timestamp"
+  "The HiveServer2 backend cannot differentiate between TIMESTAMP and TIMESTAMP_NTZ"
 ]
 partial-support = true

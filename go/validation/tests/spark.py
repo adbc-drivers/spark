@@ -24,7 +24,7 @@ class Spark3ThriftQuirks(model.DriverQuirks):
     driver = "adbc_driver_spark"
     driver_name = "ADBC Driver Foundry Driver for Apache Spark"
     vendor_name = "Apache Spark"
-    vendor_version = re.compile(r"3\.5\.\d+.*\(HiveServer2\)")
+    vendor_version = re.compile(r"3\.5\.\d+.*\(HiveServer2\+binary\)")
     short_version = "3.5-thrift"
     features = model.DriverFeatures(
         get_objects=True,

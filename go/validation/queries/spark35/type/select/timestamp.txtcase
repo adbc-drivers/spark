@@ -14,8 +14,5 @@
 
 // part: metadata
 
-# https://issues.apache.org/jira/browse/SPARK-39720
-skip = "Spark 3.5 does not clean up warehouse directory on DROP TABLE, causing LOCATION_ALREADY_EXISTS on re-creation"
-
 [tags]
 sql-type-name = "TIMESTAMP_NTZ"
