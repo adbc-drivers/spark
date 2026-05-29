@@ -32,5 +32,9 @@ service_name = "spark4-thrift-server"
 vendor_version = "spark4_4.0-thrift"
 
 [[lang.go.validation.configs]]
+service_name = "spark4-thrifthttp-server"
+vendor_version = "spark4_4.0-thrifthttp"
+
+[[lang.go.validation.configs]]
 service_name = "spark4-connect-server"
 vendor_version = "spark4_4.0-connect"
