@@ -121,7 +121,7 @@ class Spark3LivyQuirks(Spark3ThriftQuirks):
 
 class Spark4ThriftQuirks(Spark3ThriftQuirks):
     name = "spark4"
-    vendor_version = re.compile(r"4\.0\.\d+.*\(HiveServer2\)")
+    vendor_version = re.compile(r"4\.0\.\d+.*\(HiveServer2\+binary\)")
     short_version = "4.0-thrift"
 
     @property
