@@ -111,6 +111,10 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 	return client, nil
 }
 
+func (c *livyClient) BackendName() string {
+	return "Apache Livy"
+}
+
 // Session represents a Livy session
 type Session struct {
 	ID                  int            `json:"id"`

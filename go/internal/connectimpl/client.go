@@ -50,6 +50,10 @@ type connectClient struct {
 	session sparksql.SparkSession
 }
 
+func (c *connectClient) BackendName() string {
+	return "Spark Connect"
+}
+
 // NewClient creates a SparkClient backed by a Spark Connect gRPC session.
 func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[string]string) (sparkbase.SparkClient, error) {
 	connStr := buildConnectionString(opts)

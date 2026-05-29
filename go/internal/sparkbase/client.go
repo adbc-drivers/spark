@@ -38,6 +38,8 @@ type SparkClient interface {
 	io.Closer
 	driverbase.DbObjectsEnumerator
 
+	BackendName() string
+
 	ExecuteQuery(ctx context.Context, query QueryContext) (array.RecordReader, int64, error)
 	ExecuteUpdate(ctx context.Context, query QueryContext) (int64, error)
 

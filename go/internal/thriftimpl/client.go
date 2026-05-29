@@ -63,6 +63,10 @@ type thriftClient struct {
 	session *hiveserver2.TSessionHandle
 }
 
+func (c *thriftClient) BackendName() string {
+	return "HiveServer2"
+}
+
 type nilCloser struct{}
 
 func (nilCloser) Close() error { return nil }
