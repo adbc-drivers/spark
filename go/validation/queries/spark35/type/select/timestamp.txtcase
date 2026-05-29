@@ -14,7 +14,6 @@
 
 // part: metadata
 
-broken-vendor = "Spark 3.5 + Hive 3 does not support TIMESTAMP_NTZ"
-
 [tags]
+broken-vendor = "Spark 3.5 + Hive 3 does not support TIMESTAMP_NTZ"
 sql-type-name = "TIMESTAMP_NTZ"
