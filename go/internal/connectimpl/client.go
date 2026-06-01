@@ -39,7 +39,7 @@ type ConnectionOpts struct {
 	// Host is "hostname" or "hostname:port".
 	Host string
 
-	AuthType AuthType
+	AuthType AuthType // not used
 	Username string
 	// Token is the OAuth2 bearer token used when AuthType is AuthTypeToken.
 	// The spark-connect-go client enables TLS when a token is present.
@@ -74,7 +74,6 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 	return &connectClient{session: session}, nil
 }
 
-// TODO(lidavidm): AuthType isn't used above, and this puts username but no password?
 func buildConnectionString(opts ConnectionOpts) string {
 	var b strings.Builder
 	b.WriteString("sc://")
