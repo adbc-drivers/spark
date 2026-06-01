@@ -207,7 +207,7 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
-      spark4-connect-tls:
+      tls-proxy:
         condition: service_started
     environment:
       - SPARK_MASTER=spark://spark35-master:7077
@@ -311,7 +311,7 @@ services:
       retries: 10
       start_period: 45s
 
-  spark4-connect-tls-init:
+  tls-proxy-init:
     image: alpine:3.21
     command:
       - sh
@@ -324,16 +324,16 @@ services:
             -keyout /certs/server.key \
             -out /certs/server.crt \
             -days 3650 \
-            -subj "/CN=spark4-connect-tls" \
-            -addext "subjectAltName=DNS:spark4-connect-tls,DNS:localhost"
+            -subj "/CN=tls-proxy" \
+            -addext "subjectAltName=DNS:tls-proxy,DNS:localhost"
         fi
     volumes:
       - ./.data/tls:/certs
 
-  spark4-connect-tls:
+  tls-proxy:
     image: caddy:2-alpine
     depends_on:
-      spark4-connect-tls-init:
+      tls-proxy-init:
         condition: service_completed_successfully
     ports:
       - "15003:15003"  # Spark Connect gRPC over TLS
@@ -363,7 +363,7 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
-      spark4-connect-tls:
+      tls-proxy:
         condition: service_started
     environment:
       SPARK_MASTER: spark://spark4-master:7077
@@ -395,7 +395,7 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
-      spark4-connect-tls:
+      tls-proxy:
         condition: service_started
     environment:
       SPARK_MASTER: spark://spark4-master:7077
