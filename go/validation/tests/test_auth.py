@@ -89,17 +89,22 @@ def test_auth(subtests, driver, driver_path):
     cases.sort(key=lambda c: c[0])
 
     for replacement, error_message in cases:
+        new_uri = uri.replace(orig, replacement)
+        if replacement == "auth_type=nosasl":
+            kwargs = {}
+        else:
+            kwargs = {
+                "username": "spark",
+                "password": "spark",
+            }
+
         with subtests.test(auth_type=replacement[10:]):
-            new_uri = uri.replace(orig, replacement)
             with pytest.raises(adbc_driver_manager.Error, match=error_message):
                 with adbc_driver_manager.dbapi.connect(
                     driver=driver_path,
                     uri=new_uri,
                     autocommit=True,
-                    db_kwargs={
-                        "username": "spark",
-                        "password": "spark",
-                    },
+                    db_kwargs=kwargs,
                 ) as conn:
                     with conn.cursor() as cursor:
                         cursor.execute("SELECT 1")
