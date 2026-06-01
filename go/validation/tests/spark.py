@@ -39,8 +39,6 @@ class Spark3ThriftQuirks(model.DriverQuirks):
     setup = model.DriverSetup(
         database={
             "uri": model.FromEnv("SPARK_URI"),
-            "username": "spark",
-            "password": "spark",
         },
         connection={},
         statement={
@@ -101,8 +99,6 @@ class Spark3LivyQuirks(Spark3ThriftQuirks):
     setup = model.DriverSetup(
         database={
             "uri": model.FromEnv("SPARK_LIVY_URI"),
-            "username": "spark",
-            "password": "spark",
         },
         connection={},
         statement={
@@ -139,8 +135,6 @@ class Spark4ThriftHttpQuirks(Spark4ThriftQuirks):
     setup = model.DriverSetup(
         database={
             "uri": model.FromEnv("SPARK_THRIFTHTTP_URI"),
-            "username": "spark",
-            "password": "spark",
         },
         connection={},
         statement={
@@ -155,7 +149,6 @@ class Spark4ConnectQuirks(Spark4ThriftQuirks):
     setup = model.DriverSetup(
         database={
             "uri": model.FromEnv("SPARK_CONNECT_URI"),
-            "username": "spark",
         },
         connection={},
         statement={

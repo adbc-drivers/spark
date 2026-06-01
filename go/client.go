@@ -42,7 +42,16 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 	default:
 		return adbc.Error{
 			Code: adbc.StatusInvalidArgument,
-			Msg:  "Invalid URI host:port",
+			Msg:  "[spark] invalid URI host:port",
+		}
+	}
+
+	if uri.User != nil {
+		if uri.User.Username() != "" {
+			options[adbc.OptionKeyUsername] = uri.User.Username()
+		}
+		if password, ok := uri.User.Password(); ok && password != "" {
+			options[adbc.OptionKeyPassword] = password
 		}
 	}
 
@@ -59,7 +68,7 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 		if len(values) != 1 {
 			return adbc.Error{
 				Code: adbc.StatusInvalidArgument,
-				Msg:  fmt.Sprintf("Key '%s' needs to have exactly one value", key),
+				Msg:  fmt.Sprintf("[spark] Key '%s' needs to have exactly one value", key),
 			}
 		}
 		options[fullKey] = values[0]
@@ -324,8 +333,16 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 	return connectOpts, nil
 }
 
-func thriftOptsFromOptions(options map[string]string) (thriftimpl.ConnectionOpts, error) {
+func thriftOptsFromOptions(api string, options map[string]string) (thriftimpl.ConnectionOpts, error) {
 	thriftOpts := thriftimpl.ConnectionOpts{}
+	switch api {
+	case OptionValueApiThriftBinary:
+		thriftOpts.Transport = thriftimpl.Binary
+	case OptionValueApiThriftHttp:
+		thriftOpts.Transport = thriftimpl.Http
+	default:
+		return thriftOpts, sparkbase.InvalidOptionErr(OptionApi, api)
+	}
 
 	authType, ok := options[OptionAuthType]
 	if !ok {
@@ -377,6 +394,18 @@ func thriftOptsFromOptions(options map[string]string) (thriftimpl.ConnectionOpts
 	return thriftOpts, nil
 }
 
+func sessionOptionsFromOptions(options map[string]string) map[string]string {
+	sessionOptions := make(map[string]string)
+	for k, v := range options {
+		if after, ok := strings.CutPrefix(k, OptionSparkConfigPrefix); ok {
+			trimmedKey := after
+			sessionOptions[trimmedKey] = v
+			delete(options, k)
+		}
+	}
+	return sessionOptions
+}
+
 func newSparkClientFactory(ctx context.Context, options map[string]string) (func(context.Context) (sparkbase.SparkClient, error), error) {
 	uri, ok := options[adbc.OptionKeyURI]
 	if ok {
@@ -401,19 +430,14 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 
 	switch api {
 	case OptionValueApiThriftBinary, OptionValueApiThriftHttp:
-		thriftOpts, err := thriftOptsFromOptions(options)
+		thriftOpts, err := thriftOptsFromOptions(api, options)
 		if err != nil {
 			return nil, err
 		}
 
-		if api == OptionValueApiThriftBinary {
-			thriftOpts.Transport = thriftimpl.Binary
-		} else {
-			thriftOpts.Transport = thriftimpl.Http
-		}
-
+		sessionOptions := sessionOptionsFromOptions(options)
 		return func(ctx context.Context) (sparkbase.SparkClient, error) {
-			return thriftimpl.NewClient(ctx, thriftOpts)
+			return thriftimpl.NewClient(ctx, thriftOpts, sessionOptions)
 		}, nil
 
 	case OptionValueApiLivy:
@@ -422,15 +446,7 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 			return nil, err
 		}
 
-		sessionOptions := make(map[string]string)
-		for k, v := range options {
-			if after, ok := strings.CutPrefix(k, OptionSparkConfigPrefix); ok {
-				trimmedKey := after
-				sessionOptions[trimmedKey] = v
-				delete(options, k)
-			}
-		}
-
+		sessionOptions := sessionOptionsFromOptions(options)
 		return func(ctx context.Context) (sparkbase.SparkClient, error) {
 			return livyimpl.NewClient(ctx, livyOpts, sessionOptions)
 		}, nil
@@ -441,14 +457,7 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 			return nil, err
 		}
 
-		sessionOptions := make(map[string]string)
-		for k, v := range options {
-			if after, ok := strings.CutPrefix(k, OptionSparkConfigPrefix); ok {
-				sessionOptions[after] = v
-				delete(options, k)
-			}
-		}
-
+		sessionOptions := sessionOptionsFromOptions(options)
 		return func(ctx context.Context) (sparkbase.SparkClient, error) {
 			return connectimpl.NewClient(ctx, connectOpts, sessionOptions)
 		}, nil

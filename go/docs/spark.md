@@ -145,3 +145,5 @@ Different backends have limitations; some limitations related to data type suppo
 ## Compatibility
 
 {{ compatibility_info|safe }}
+
+[spark]: https://spark.apache.org/
