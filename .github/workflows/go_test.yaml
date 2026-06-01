@@ -118,6 +118,7 @@ jobs:
               echo "Service failed to start"
               echo "Logs:"
               docker compose logs spark4-thrift-server
+              docker compose logs tls-proxy
               exit 1
             fi
           fi
@@ -230,6 +231,7 @@ jobs:
               echo "Service failed to start"
               echo "Logs:"
               docker compose logs ${{ matrix.service_name }}
+              docker compose logs tls-proxy
               exit 1
             fi
           fi
