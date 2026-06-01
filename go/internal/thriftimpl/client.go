@@ -77,14 +77,16 @@ type nilCloser struct{}
 
 func (nilCloser) Close() error { return nil }
 
-func wrapThriftTransport(ctx context.Context, cfg *thrift.TConfiguration, transport thrift.TTransport, transportName string) (sparkbase.SparkClient, error) {
+func wrapThriftTransport(ctx context.Context, cfg *thrift.TConfiguration, transport thrift.TTransport, transportName string, sessionOptions map[string]string) (sparkbase.SparkClient, error) {
 	factory := thrift.NewTBinaryProtocolFactoryConf(cfg)
 	iprot := factory.GetProtocol(transport)
 	oprot := factory.GetProtocol(transport)
 
 	client := hiveserver2.NewTCLIServiceClient(thrift.NewTStandardClient(iprot, oprot))
 
-	req := &hiveserver2.TOpenSessionReq{}
+	req := &hiveserver2.TOpenSessionReq{
+		Configuration: sessionOptions,
+	}
 	resp, err := client.OpenSession(ctx, req)
 	if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, resp, "open HiveServer2 session"); err != nil {
 		return nil, errors.Join(err, transport.Close())
@@ -97,7 +99,7 @@ func wrapThriftTransport(ctx context.Context, cfg *thrift.TConfiguration, transp
 	}, nil
 }
 
-func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient, error) {
+func NewClient(ctx context.Context, opts ConnectionOpts, sessionOptions map[string]string) (sparkbase.SparkClient, error) {
 	var (
 		transport thrift.TTransport
 		err       error
@@ -109,6 +111,7 @@ func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient,
 	case Http:
 		transportName = "HTTP"
 		var uri string
+		// TODO: does 'cliservice' path need to be configurable?
 		if opts.Tls {
 			uri = "https://" + opts.Host + "/cliservice"
 		} else {
@@ -160,7 +163,7 @@ func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient,
 
 	}
 
-	return wrapThriftTransport(ctx, cfg, transport, transportName)
+	return wrapThriftTransport(ctx, cfg, transport, transportName, sessionOptions)
 }
 
 func (c *thriftClient) Close() error {

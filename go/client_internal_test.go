@@ -15,9 +15,13 @@
 package spark
 
 import (
+	"context"
 	"net/url"
 	"testing"
 
+	"github.com/adbc-drivers/apache/go/internal/connectimpl"
+	"github.com/adbc-drivers/apache/go/internal/livyimpl"
+	"github.com/adbc-drivers/apache/go/internal/thriftimpl"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/stretchr/testify/require"
 )
@@ -106,6 +110,151 @@ func TestParseOptionsFromUri(t *testing.T) {
 				"spark.api":  "connect",
 			},
 		},
+		{
+			uri: "spark://localhost?api=connect&tls=true",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.api":  "connect",
+				"spark.tls":  "true",
+			},
+		},
+		{
+			uri: "spark://localhost?api=connect&tls=true&validateservercertificate=false",
+			options: map[string]string{
+				"spark.host":                        "localhost",
+				"spark.api":                         "connect",
+				"spark.tls":                         "true",
+				"spark.validate_server_certificate": "false",
+			},
+		},
+		{
+			uri: "spark://foobar@localhost?api=connect",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.api":  "connect",
+				"username":   "foobar",
+			},
+		},
+		{
+			uri: "spark://foobar:pass@localhost?api=connect",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.api":  "connect",
+				"username":   "foobar",
+				"password":   "pass",
+			},
+		},
+
+		{
+			uri: "spark://localhost?api=livy&tls=true",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.api":  "livy",
+				"spark.tls":  "true",
+			},
+		},
+		{
+			uri: "spark://localhost?api=livy&tls=true&validateservercertificate=false",
+			options: map[string]string{
+				"spark.host":                        "localhost",
+				"spark.api":                         "livy",
+				"spark.tls":                         "true",
+				"spark.validate_server_certificate": "false",
+			},
+		},
+		{
+			uri: "spark://foobar@localhost:8000?api=livy",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.port": "8000",
+				"spark.api":  "livy",
+				"username":   "foobar",
+			},
+		},
+		{
+			uri: "spark://foobar:pass@localhost:8000?api=livy",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.port": "8000",
+				"spark.api":  "livy",
+				"username":   "foobar",
+				"password":   "pass",
+			},
+		},
+
+		{
+			uri: "spark://localhost?api=thrift%2Bbinary&tls=true",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.api":  "thrift+binary",
+				"spark.tls":  "true",
+			},
+		},
+		{
+			uri: "spark://localhost?api=thrift%2Bbinary&tls=true&validateservercertificate=false",
+			options: map[string]string{
+				"spark.host":                        "localhost",
+				"spark.api":                         "thrift+binary",
+				"spark.tls":                         "true",
+				"spark.validate_server_certificate": "false",
+			},
+		},
+		{
+			uri: "spark://foobar@localhost:8000?api=thrift%2Bbinary",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.port": "8000",
+				"spark.api":  "thrift+binary",
+				"username":   "foobar",
+			},
+		},
+		{
+			uri: "spark://foobar:pass@localhost:8000?api=thrift%2Bbinary",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.port": "8000",
+				"spark.api":  "thrift+binary",
+				"username":   "foobar",
+				"password":   "pass",
+			},
+		},
+
+		{
+			uri: "spark://localhost?api=thrift%2Bhttp&tls=true",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.api":  "thrift+http",
+				"spark.tls":  "true",
+			},
+		},
+		{
+			uri: "spark://localhost?api=thrift%2Bhttp&tls=true&validateservercertificate=false",
+			options: map[string]string{
+				"spark.host":                        "localhost",
+				"spark.api":                         "thrift+http",
+				"spark.tls":                         "true",
+				"spark.validate_server_certificate": "false",
+			},
+		},
+		{
+			uri: "spark://foobar@localhost:8000?api=thrift%2Bhttp",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.port": "8000",
+				"spark.api":  "thrift+http",
+				"username":   "foobar",
+			},
+		},
+		{
+			uri: "spark://foobar:pass@localhost:8000?api=thrift%2Bhttp",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.port": "8000",
+				"spark.api":  "thrift+http",
+				"username":   "foobar",
+				"password":   "pass",
+			},
+		},
 	} {
 		u, err := url.Parse(tc.uri)
 		require.NoError(t, err)
@@ -113,6 +262,170 @@ func TestParseOptionsFromUri(t *testing.T) {
 		err = parseOptionsFromUri(u, options)
 		require.NoError(t, err, "failed to parse options from URI %s", tc.uri)
 		require.Equal(t, tc.options, options, "unexpected options for URI %s", tc.uri)
+	}
+}
+
+func TestParseConnectOptionsFromUri(t *testing.T) {
+	type testCase struct {
+		uri     string
+		options connectimpl.ConnectionOpts
+	}
+
+	for _, tc := range []testCase{
+		{
+			uri: "spark://localhost:10000?api=connect&auth_type=none",
+			options: connectimpl.ConnectionOpts{
+				Host:     "localhost:10000",
+				AuthType: connectimpl.AuthTypeNone,
+			},
+		},
+		{
+			uri: "spark://foo:bar@localhost:10000?api=connect&auth_type=token",
+			options: connectimpl.ConnectionOpts{
+				Host:     "localhost:10000",
+				AuthType: connectimpl.AuthTypeToken,
+				Username: "foo",
+				Token:    "bar",
+			},
+		},
+	} {
+		u, err := url.Parse(tc.uri)
+		require.NoError(t, err)
+		options := map[string]string{}
+		err = parseOptionsFromUri(u, options)
+		require.NoError(t, err, "failed to parse options from URI %s", tc.uri)
+
+		parsedOptions, err := connectOptsFromOptions(options)
+		require.NoError(t, err, "failed to parse Connect options from URI %s", tc.uri)
+
+		require.Equal(t, tc.options, parsedOptions, "unexpected options for URI %s", tc.uri)
+	}
+}
+
+func TestParseLivyOptionsFromUri(t *testing.T) {
+	type testCase struct {
+		uri     string
+		options livyimpl.ConnectionOpts
+	}
+
+	for _, tc := range []testCase{
+		{
+			uri: "spark://localhost:10000?api=livy&auth_type=basic&livy.session_kind=sql",
+			options: livyimpl.ConnectionOpts{
+				SessionKind:               livyimpl.SessionKindSql,
+				AuthType:                  livyimpl.AuthTypeBasic,
+				BaseURL:                   "http://localhost:10000",
+				ValidateServerCertificate: true,
+			},
+		},
+		{
+			uri: "spark://foo:bar@localhost:10000?api=livy&auth_type=basic&livy.session_kind=sql",
+			options: livyimpl.ConnectionOpts{
+				SessionKind:               livyimpl.SessionKindSql,
+				AuthType:                  livyimpl.AuthTypeBasic,
+				BaseURL:                   "http://localhost:10000",
+				Username:                  "foo",
+				Password:                  "bar",
+				ValidateServerCertificate: true,
+			},
+		},
+		{
+			uri: "spark://foo:bar@localhost:10000?api=livy&auth_type=basic&livy.session_kind=sql&tls=true",
+			options: livyimpl.ConnectionOpts{
+				SessionKind:               livyimpl.SessionKindSql,
+				AuthType:                  livyimpl.AuthTypeBasic,
+				BaseURL:                   "https://localhost:10000",
+				Username:                  "foo",
+				Password:                  "bar",
+				ValidateServerCertificate: true,
+			},
+		},
+		{
+			uri: "spark://foo:bar@localhost:10000?api=livy&auth_type=basic&livy.session_kind=sql&tls=true&validateservercertificate=false",
+			options: livyimpl.ConnectionOpts{
+				SessionKind:               livyimpl.SessionKindSql,
+				AuthType:                  livyimpl.AuthTypeBasic,
+				BaseURL:                   "https://localhost:10000",
+				Username:                  "foo",
+				Password:                  "bar",
+				ValidateServerCertificate: false,
+			},
+		},
+	} {
+		ctx := context.Background()
+		u, err := url.Parse(tc.uri)
+		require.NoError(t, err)
+		options := map[string]string{}
+		err = parseOptionsFromUri(u, options)
+		require.NoError(t, err, "failed to parse options from URI %s", tc.uri)
+
+		parsedOptions, err := livyOptsFromOptions(ctx, options)
+		require.NoError(t, err, "failed to parse Livy options from URI %s", tc.uri)
+
+		require.Equal(t, tc.options, parsedOptions, "unexpected options for URI %s", tc.uri)
+	}
+}
+
+func TestParseThriftOptionsFromUri(t *testing.T) {
+	type testCase struct {
+		uri     string
+		options thriftimpl.ConnectionOpts
+	}
+
+	for _, tc := range []testCase{
+		{
+			uri: "spark://localhost:10000?api=thrift%2Bbinary&auth_type=nosasl",
+			options: thriftimpl.ConnectionOpts{
+				Transport:                 thriftimpl.Binary,
+				Auth:                      thriftimpl.NoSasl,
+				ValidateServerCertificate: true,
+				Host:                      "localhost:10000",
+			},
+		},
+		{
+			uri: "spark://localhost:10000?api=thrift%2Bhttp&auth_type=nosasl",
+			options: thriftimpl.ConnectionOpts{
+				Transport:                 thriftimpl.Http,
+				Auth:                      thriftimpl.NoSasl,
+				ValidateServerCertificate: true,
+				Host:                      "localhost:10000",
+			},
+		},
+		{
+			uri: "spark://foo:bar@localhost:10000?api=thrift%2Bhttp&auth_type=plain",
+			options: thriftimpl.ConnectionOpts{
+				Transport:                 thriftimpl.Http,
+				Auth:                      thriftimpl.Plain,
+				Username:                  "foo",
+				Password:                  "bar",
+				ValidateServerCertificate: true,
+				Host:                      "localhost:10000",
+			},
+		},
+		{
+			uri: "spark://localhost:10000?api=thrift%2Bhttp&auth_type=nosasl&tls=true&validateservercertificate=false",
+			options: thriftimpl.ConnectionOpts{
+				Transport:                 thriftimpl.Http,
+				Auth:                      thriftimpl.NoSasl,
+				Tls:                       true,
+				ValidateServerCertificate: false,
+				Host:                      "localhost:10000",
+			},
+		},
+	} {
+		u, err := url.Parse(tc.uri)
+		require.NoError(t, err)
+		options := map[string]string{}
+		err = parseOptionsFromUri(u, options)
+		require.NoError(t, err, "failed to parse options from URI %s", tc.uri)
+
+		api := options[OptionApi]
+		delete(options, OptionApi)
+
+		parsedOptions, err := thriftOptsFromOptions(api, options)
+		require.NoError(t, err, "failed to parse thrift options from URI %s", tc.uri)
+
+		require.Equal(t, tc.options, parsedOptions, "unexpected options for URI %s", tc.uri)
 	}
 }
 

@@ -92,6 +92,7 @@ def test_auth(subtests, driver, driver_path):
         new_uri = uri.replace(orig, replacement)
         if replacement in ("auth_type=none", "auth_type=nosasl"):
             kwargs = {}
+            uri = uri.replace("spark:spark@", "")
         else:
             kwargs = {
                 "username": "spark",
