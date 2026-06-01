@@ -201,6 +201,12 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 		return livyOpts, err
 	}
 
+	validateServerCertificate, err := parseBoolOption(OptionValidateServerCertificate, options, true)
+	if err != nil {
+		return livyOpts, err
+	}
+	livyOpts.ValidateServerCertificate = validateServerCertificate
+
 	if !strings.Contains(host, "://") {
 		if tls {
 			host = fmt.Sprintf("https://%s", host)
