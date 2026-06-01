@@ -16,9 +16,11 @@ package thriftimpl
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/adbc-drivers/apache/go/internal/hiveserver2"
@@ -51,8 +53,10 @@ type ConnectionOpts struct {
 
 	Catalog string
 
-	Username string
-	Password string
+	Username                  string
+	Password                  string
+	Tls                       bool
+	ValidateServerCertificate bool
 
 	Host string
 }
@@ -104,9 +108,21 @@ func NewClient(ctx context.Context, opts ConnectionOpts) (sparkbase.SparkClient,
 	switch opts.Transport {
 	case Http:
 		transportName = "HTTP"
-		// TODO(lidavidm): TLS, configurable HTTP path
-		uri := "http://" + opts.Host + "/cliservice"
-		transport, err = thrift.NewTHttpClient(uri)
+		var uri string
+		if opts.Tls {
+			uri = "https://" + opts.Host + "/cliservice"
+		} else {
+			uri = "http://" + opts.Host + "/cliservice"
+		}
+		httpClientOptions := thrift.THttpClientOptions{}
+		if !opts.ValidateServerCertificate {
+			httpClientOptions.Client = &http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				},
+			}
+		}
+		transport, err = thrift.NewTHttpClientWithOptions(uri, httpClientOptions)
 		if err != nil {
 			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "could not open HTTP thrift client")
 		}

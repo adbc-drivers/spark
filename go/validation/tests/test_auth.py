@@ -90,7 +90,7 @@ def test_auth(subtests, driver, driver_path):
 
     for replacement, error_message in cases:
         new_uri = uri.replace(orig, replacement)
-        if replacement == "auth_type=nosasl":
+        if replacement in ("auth_type=none", "auth_type=nosasl"):
             kwargs = {}
         else:
             kwargs = {
@@ -108,3 +108,84 @@ def test_auth(subtests, driver, driver_path):
                 ) as conn:
                     with conn.cursor() as cursor:
                         cursor.execute("SELECT 1")
+
+
+def test_tls(subtests, driver, driver_path):
+    if driver.short_version.endswith("-connect"):
+        # Spark Connect is "special" and forces plaintext if you don't have a
+        # token and TLS if you do
+        uri = os.environ["SPARK_CONNECT_URI"].replace("15002", "15003")
+        uri = uri.replace("auth_type=none", "auth_type=token")
+        uri += "&tls=true&validateservercertificate=false"
+        # XXX: there is no way to skip certificate checking for spark-connect-go
+
+        with pytest.raises(
+            adbc_driver_manager.Error, match="failed to verify certificate"
+        ):
+            with adbc_driver_manager.dbapi.connect(
+                driver=driver_path,
+                uri=uri,
+                autocommit=True,
+                db_kwargs={
+                    "username": "spark",
+                    "password": "spark",
+                },
+            ) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT 1")
+
+        return
+
+    elif driver.short_version.endswith("-thrift"):
+        return
+    elif driver.short_version.endswith("-thrifthttp"):
+        uri = os.environ["SPARK_THRIFTHTTP_URI"].replace("10001", "10002")
+        uri += "&tls=true&validateservercertificate=false"
+    elif driver.short_version.endswith("-livy"):
+        uri = os.environ["SPARK_LIVY_URI"] + "&tls=true&validateservercertificate=false"
+    else:
+        raise NotImplementedError(driver.short_version)
+
+    with adbc_driver_manager.dbapi.connect(
+        driver=driver_path,
+        uri=uri,
+        autocommit=True,
+        db_kwargs={
+            "username": "spark",
+            "password": "spark",
+        },
+    ) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            assert cursor.fetchall() == [(1,)]
+
+
+def test_tls_verify(subtests, driver, driver_path):
+    if driver.short_version.endswith("-connect"):
+        # Spark Connect is "special" and forces plaintext if you don't have a
+        # token and TLS if you do
+        uri = os.environ["SPARK_CONNECT_URI"].replace("15002", "15003")
+        uri = uri.replace("auth_type=none", "auth_type=token")
+        uri += "&tls=true"
+    elif driver.short_version.endswith("-thrift"):
+        return
+    elif driver.short_version.endswith("-thrifthttp"):
+        uri = os.environ["SPARK_THRIFTHTTP_URI"].replace("10001", "10002")
+        uri += "&tls=true"
+    elif driver.short_version.endswith("-livy"):
+        uri = os.environ["SPARK_LIVY_URI"] + "&tls=true"
+    else:
+        raise NotImplementedError(driver.short_version)
+
+    with pytest.raises(adbc_driver_manager.Error, match="failed to verify certificate"):
+        with adbc_driver_manager.dbapi.connect(
+            driver=driver_path,
+            uri=uri,
+            autocommit=True,
+            db_kwargs={
+                "username": "spark",
+                "password": "spark",
+            },
+        ) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")

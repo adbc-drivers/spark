@@ -52,6 +52,9 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 	}
 
 	for key, values := range queryValues {
+		if key == "validateservercertificate" {
+			key = "validate_server_certificate"
+		}
 		fullKey := fmt.Sprintf("spark.%s", key)
 		if len(values) != 1 {
 			return adbc.Error{
@@ -127,6 +130,23 @@ func parseIntegerOption(key string, options map[string]string, defaultValue uint
 	return uint16(intOpt), nil
 }
 
+func parseBoolOption(key string, options map[string]string, defaultValue bool) (bool, error) {
+	opt, ok := options[key]
+	if !ok {
+		return defaultValue, nil
+	}
+	delete(options, key)
+	opt = strings.ToLower(opt)
+	switch opt {
+	case "true", "1", "yes", "on":
+		return true, nil
+	case "false", "0", "no", "off":
+		return false, nil
+	default:
+		return false, sparkbase.InvalidOptionErr(key, opt)
+	}
+}
+
 // initializeAws sets up AWS configuration for SigV4 authentication
 func awsConfigFromOptions(ctx context.Context, options map[string]string) (aws.Config, error) {
 	// Check if explicit credentials are provided
@@ -176,10 +196,17 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 		return livyOpts, err
 	}
 
-	// TODO: come up with a better way to do this
-	// Allow explicit http://
+	tls, err := parseBoolOption(OptionUseTls, options, false)
+	if err != nil {
+		return livyOpts, err
+	}
+
 	if !strings.Contains(host, "://") {
-		host = fmt.Sprintf("http://%s", host)
+		if tls {
+			host = fmt.Sprintf("https://%s", host)
+		} else {
+			host = fmt.Sprintf("http://%s", host)
+		}
 	}
 	livyOpts.BaseURL = host
 
@@ -258,6 +285,16 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 		connectOpts.Username = username
 	}
 
+	// XXX: ignored, because spark-connect-go doesn't let you configure this
+	_, err = parseBoolOption(OptionUseTls, options, false)
+	if err != nil {
+		return connectOpts, err
+	}
+	_, err = parseBoolOption(OptionValidateServerCertificate, options, true)
+	if err != nil {
+		return connectOpts, err
+	}
+
 	authType, ok := options[OptionAuthType]
 	if !ok {
 		return connectOpts, sparkbase.MissingRequiredOptionErr(OptionAuthType)
@@ -295,6 +332,18 @@ func thriftOptsFromOptions(options map[string]string) (thriftimpl.ConnectionOpts
 		return thriftOpts, err
 	}
 	thriftOpts.Host = host
+
+	tls, err := parseBoolOption(OptionUseTls, options, false)
+	if err != nil {
+		return thriftOpts, err
+	}
+	thriftOpts.Tls = tls
+
+	validateServerCertificate, err := parseBoolOption(OptionValidateServerCertificate, options, true)
+	if err != nil {
+		return thriftOpts, err
+	}
+	thriftOpts.ValidateServerCertificate = validateServerCertificate
 
 	switch authType {
 	case OptionValueAuthTypeNoSasl:

@@ -207,6 +207,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      spark4-connect-tls:
+        condition: service_started
     environment:
       - SPARK_MASTER=spark://spark35-master:7077
     ports:
@@ -309,6 +311,44 @@ services:
       retries: 10
       start_period: 45s
 
+  spark4-connect-tls-init:
+    image: alpine:3.21
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache openssl &&
+        mkdir -p /certs &&
+        if [ ! -f /certs/server.crt ]; then
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout /certs/server.key \
+            -out /certs/server.crt \
+            -days 3650 \
+            -subj "/CN=spark4-connect-tls" \
+            -addext "subjectAltName=DNS:spark4-connect-tls,DNS:localhost"
+        fi
+    volumes:
+      - ./.data/tls:/certs
+
+  spark4-connect-tls:
+    image: caddy:2-alpine
+    depends_on:
+      spark4-connect-tls-init:
+        condition: service_completed_successfully
+    ports:
+      - "15003:15003"  # Spark Connect gRPC over TLS
+      - "8999:8999"    # Livy REST API over TLS
+      - "10002:10002"  # Thrift HTTP over TLS
+    volumes:
+      - ./ci/docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./.data/tls:/etc/caddy/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:2019/config/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
   spark4-connect-server:
     build:
       context: ./ci/docker/
@@ -323,6 +363,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      spark4-connect-tls:
+        condition: service_started
     environment:
       SPARK_MASTER: spark://spark4-master:7077
     ports:
@@ -353,6 +395,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      spark4-connect-tls:
+        condition: service_started
     environment:
       SPARK_MASTER: spark://spark4-master:7077
       SPARK_SERVER_TYPE: thrifthttp

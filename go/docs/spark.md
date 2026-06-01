@@ -104,6 +104,16 @@ These parameters can be specified in the URI as query parameters, or as connecti
   Currently only `sql` is tested/supported.
   :::
 
+`spark.tls` (query parameter: `tls`)
+: **Type** boolean. **Default**: false.
+
+  Whether to use TLS for connecting. Only applies to `connect`, `livy`, and `thrift+http`.
+
+`spark.validate_server_certificate` (query parameter: `validateservercertificate`)
+: **Type** boolean. **Default**: true.
+
+  Whether to validate the server's TLS certificate. Should only be disabled for development/testing.
+
 ## Limitations
 
 Different backends have limitations; some limitations related to data type support are also noted further below.
