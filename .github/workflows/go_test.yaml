@@ -119,6 +119,7 @@ jobs:
               echo "Logs:"
               docker compose logs spark4-thrift-server
               docker compose logs tls-proxy
+              docker inspect --format "{{json .State.Health }}" go-tls-proxy-1
               exit 1
             fi
           fi
