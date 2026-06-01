@@ -68,38 +68,45 @@ Reserved characters in URI elements must be URI-encoded. For example, `@` become
 These parameters can be specified in the URI as query parameters, or as connection parameters:
 
 `spark.api` (query parameter: `api`)
-: **Values**: `connect`, `livy`, or `thrift+binary`.
+: **Values**: `connect`, `livy`, `thrift+binary`, or `thrift+http`.
 
-  How to connect to Spark.
+  The protocol used to connect to Spark.
 
-  | Value           | Backend                |
-  |-----------------|------------------------|
-  | `connect`       | Spark Connect          |
-  | `livy`          | Apache Livy            |
-  | `thrift+binary` | HiveServer2 (over TCP) |
+  | Value           | Backend                        |
+  |-----------------|--------------------------------|
+  | `connect`       | Spark Connect                  |
+  | `livy`          | Apache Livy                    |
+  | `thrift+binary` | HiveServer2 Thrift (over TCP)  |
+  | `thrift+http`   | HiveServer2 Thrift (over HTTP) |
 
 `spark.auth_type` (query parameter: `auth_type`)
 : **Values**: `sql`, `spark`, or `pyspark`.
 
   How to authenticate to Spark.
 
-  | Auth Type   | Applicable Backends |
-  |-------------|---------------------|
-  | `aws_sigv4` | `livy`              |
-  | `basic`     | `connect`, `livy`   |
-  | `none`      | `connect`, `livy`   |
-  | `nosasl`    | `thrift+binary`     |
-  | `plain`     | `thrift+binary`     |
-  | `token`     | `connect`           |
+  | Auth Type   | Applicable Backends            | Description               |
+  |-------------|--------------------------------|---------------------------|
+  | `aws_sigv4` | `livy`                         | Use AWS SDK               |
+  | `basic`     | `livy`                         | Username/password         |
+  | `ldap`      | `thrift+binary`, `thrift+http` | Not yet implemented       |
+  | `kerberos`  | `thrift+binary`, `thrift+http` | Not yet implemented       |
+  | `none`      | `connect`, `livy`              | No authentication         |
+  | `nosasl`    | `thrift+binary`, `thrift+http` | No authentication         |
+  | `plain`     | `thrift+binary`, `thrift+http` | Username/password         |
+  | `token`     | `connect`                      | Username/password (token) |
 
 `spark.livy.session_kind` (query parameter: `livy.session_kind`)
 : **Values**: `sql`, `spark`, or `pyspark`.
 
   For the Livy backend, what kind of session to create.
 
+  :::{warning}
+  Currently only `sql` is tested/supported.
+  :::
+
 ## Limitations
 
-Different backends have limitations; some limitations related to data type support are also noted below.
+Different backends have limitations; some limitations related to data type support are also noted further below.
 
 ### HiveServer2/Thrift Protocol
 
@@ -109,6 +116,7 @@ Different backends have limitations; some limitations related to data type suppo
 ### Livy
 
 - Only the first 1000 rows of a result set can be fetched. This can be tuned by configuring Spark with `spark.sql.repl.eagerEval.maxNumRows`.
+- In general, we have found that performance is worse than with Spark Connect or HiveServer2.
 
 ## Feature & Type Support
 
