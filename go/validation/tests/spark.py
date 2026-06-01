@@ -39,6 +39,7 @@ class Spark3ThriftQuirks(model.DriverQuirks):
     setup = model.DriverSetup(
         database={
             "uri": model.FromEnv("SPARK_URI"),
+            "spark.ingest.s3.use_path_style": "true",
         },
         connection={},
         statement={
@@ -99,6 +100,7 @@ class Spark3LivyQuirks(Spark3ThriftQuirks):
     setup = model.DriverSetup(
         database={
             "uri": model.FromEnv("SPARK_LIVY_URI"),
+            "spark.ingest.s3.use_path_style": "true",
         },
         connection={},
         statement={
@@ -135,6 +137,7 @@ class Spark4ThriftHttpQuirks(Spark4ThriftQuirks):
     setup = model.DriverSetup(
         database={
             "uri": model.FromEnv("SPARK_THRIFTHTTP_URI"),
+            "spark.ingest.s3.use_path_style": "true",
         },
         connection={},
         statement={
@@ -149,6 +152,7 @@ class Spark4ConnectQuirks(Spark4ThriftQuirks):
     setup = model.DriverSetup(
         database={
             "uri": model.FromEnv("SPARK_CONNECT_URI"),
+            "spark.ingest.s3.use_path_style": "true",
         },
         connection={},
         statement={

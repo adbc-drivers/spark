@@ -34,7 +34,9 @@ import (
 type bulkIngestOptions struct {
 	driverbase.BulkIngestOptions
 
-	staging *url.URL
+	staging        *url.URL
+	s3BaseEndpoint string
+	s3UsePathStyle bool
 }
 
 func NewBulkIngestOptions() bulkIngestOptions {

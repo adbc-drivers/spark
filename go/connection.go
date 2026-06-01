@@ -28,7 +28,9 @@ import (
 type connectionImpl struct {
 	driverbase.ConnectionImplBase
 
-	client sparkbase.SparkClient
+	client         sparkbase.SparkClient
+	s3BaseEndpoint string
+	s3UsePathStyle bool
 }
 
 func (c *connectionImpl) Init(client sparkbase.SparkClient) error {
@@ -125,6 +127,8 @@ func (c *connectionImpl) NewStatement(ctx context.Context) (adbc.StatementWithCo
 		cnxn:              c,
 		ingest: bulkIngestOptions{
 			BulkIngestOptions: driverbase.NewBulkIngestOptions(),
+			s3BaseEndpoint:    c.s3BaseEndpoint,
+			s3UsePathStyle:    c.s3UsePathStyle,
 		},
 	}), nil
 }
