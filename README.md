@@ -1,5 +1,5 @@
 <!--
-  Copyright (c) 2025 ADBC Drivers Contributors
+  Copyright (c) 2025-2026 ADBC Drivers Contributors
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -14,9 +14,33 @@
   limitations under the License.
 -->
 
-# Columnar ADBC Drivers for Apache projects
+# ADBC Drivers for Apache Spark
 
-Not affiliated with the Apache Software Foundation.
+This project is not affiliated with the Apache Software Foundation.
 
 This repository contains [ADBC drivers](https://arrow.apache.org/adbc/) for
-Apache projects, currently Apache Spark.
+Apache Spark, implemented in different languages.
+
+## Installation
+
+Pre-packaged builds of the drivers in this repo have been made available for
+various platforms from the [Columnar](https://columnar.tech) CDN. These can be
+installed by any tool that supports [ADBC](https://arrow.apache.org/adbc/)
+Driver Manifests, such as [dbc](https://columnar.tech/dbc):
+
+```sh
+dbc install spark
+```
+
+> [!NOTE]
+> Only prerelease versions of the driver are currently available, so you must use `--pre` with dbc 0.2.0 or newer to install the driver.
+
+See [Building](#building) if you would rather build the drivers yourself.
+
+## Building
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
