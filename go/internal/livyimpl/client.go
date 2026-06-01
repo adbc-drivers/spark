@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -56,13 +57,14 @@ type ConnectionOpts struct {
 	SessionKind SessionKind
 	AuthType    AuthType
 
-	BaseURL                 string
-	HttpTimeoutSeconds      uint
-	HeartbeatTimeoutSeconds uint
-	QueryTimeoutSeconds     uint
-	Username                string
-	Password                string
-	SessionTtl              string
+	BaseURL                   string
+	HttpTimeoutSeconds        uint
+	HeartbeatTimeoutSeconds   uint
+	QueryTimeoutSeconds       uint
+	Username                  string
+	Password                  string
+	SessionTtl                string
+	ValidateServerCertificate bool
 
 	AwsConfig aws.Config
 }
@@ -88,10 +90,18 @@ type livyClient struct {
 
 // NewClient creates a new SparkClient over Livy client
 func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[string]string) (sparkbase.SparkClient, error) {
+	httpClient := &http.Client{
+		Timeout: time.Duration(float64(opts.HttpTimeoutSeconds) * float64(time.Second)),
+	}
+	if !opts.ValidateServerCertificate {
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
 	client := &livyClient{
 		sessionID:        -1,
 		baseURL:          opts.BaseURL,
-		httpClient:       &http.Client{Timeout: time.Duration(float64(opts.HttpTimeoutSeconds) * float64(time.Second))},
+		httpClient:       httpClient,
 		queryTimeout:     time.Duration(float64(opts.QueryTimeoutSeconds) * float64(time.Second)),
 		heartbeatTimeout: time.Duration(float64(opts.HeartbeatTimeoutSeconds) * float64(time.Second)),
 		authType:         opts.AuthType,

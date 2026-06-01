@@ -36,7 +36,9 @@ const (
 	// OptionAuthType specifies the authentication method used by the driver
 	OptionAuthType = "spark.auth_type"
 	// OptionSchema specifies the default schema to connect to
-	OptionSchema = "spark.schema"
+	OptionSchema                    = "spark.schema"
+	OptionUseTls                    = "spark.tls"
+	OptionValidateServerCertificate = "spark.validate_server_certificate"
 
 	// Spark Configuration Prefix
 	// Options starting with this prefix are passed to the Spark session configuration
