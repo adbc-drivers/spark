@@ -142,7 +142,8 @@ def test_tls(subtests, driver, driver_path):
         uri = os.environ["SPARK_THRIFTHTTP_URI"].replace("10001", "10002")
         uri += "&tls=true&validateservercertificate=false"
     elif driver.short_version.endswith("-livy"):
-        uri = os.environ["SPARK_LIVY_URI"] + "&tls=true&validateservercertificate=false"
+        uri = os.environ["SPARK_LIVY_URI"].replace("8998", "8999")
+        uri += "&tls=true&validateservercertificate=false"
     else:
         raise NotImplementedError(driver.short_version)
 
@@ -173,7 +174,8 @@ def test_tls_verify(subtests, driver, driver_path):
         uri = os.environ["SPARK_THRIFTHTTP_URI"].replace("10001", "10002")
         uri += "&tls=true"
     elif driver.short_version.endswith("-livy"):
-        uri = os.environ["SPARK_LIVY_URI"] + "&tls=true"
+        uri = os.environ["SPARK_LIVY_URI"].replace("8998", "8999")
+        uri += "&tls=true"
     else:
         raise NotImplementedError(driver.short_version)
 
