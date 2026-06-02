@@ -27,7 +27,6 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	awscredentials "github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
@@ -252,8 +251,7 @@ func (st *statementImpl) executeIngest(ctx context.Context) (int64, error) {
 	prefix = strings.TrimPrefix(prefix, "/")
 	prefix = strings.TrimSuffix(prefix, "/")
 
-	provider := awscredentials.NewStaticCredentialsProvider("admin", "password", "")
-	sdkConfig, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithCredentialsProvider(provider))
+	sdkConfig, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {
 		return -1, sparkbase.ErrToAdbcErr(adbc.StatusInternal, err, "load AWS SDK config")
 	}
