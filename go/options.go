@@ -47,6 +47,16 @@ const (
 
 	// Ingest options
 
+	// OptionIngestS3BaseEndpoint specifies a custom S3 endpoint URL for
+	// ingestion (e.g., for MinIO or other S3-compatible stores).
+	// May be set at the database level.
+	OptionIngestS3BaseEndpoint = "spark.ingest.s3.base_endpoint"
+
+	// OptionIngestS3UsePathStyle controls whether S3 path-style addressing
+	// is used (as opposed to virtual-hosted-style).  Set to "true" for
+	// S3-compatible stores like MinIO.  May be set at the database level.
+	OptionIngestS3UsePathStyle = "spark.ingest.s3.use_path_style"
+
 	// Kerberos-specific options
 
 	// OptionKerberosServiceName specifies the kerberos service name when

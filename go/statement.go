@@ -26,7 +26,6 @@ import (
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
-	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	awscredentials "github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
@@ -110,6 +109,17 @@ func (st *statementImpl) SetOption(ctx context.Context, key string, val string) 
 		}
 		st.clearQueryState()
 		st.ingest.staging = parsed
+	case OptionIngestS3BaseEndpoint:
+		st.ingest.s3BaseEndpoint = val
+	case OptionIngestS3UsePathStyle:
+		switch strings.ToLower(val) {
+		case "true":
+			st.ingest.s3UsePathStyle = true
+		case "false":
+			st.ingest.s3UsePathStyle = false
+		default:
+			return sparkbase.InvalidOptionErr(key, val)
+		}
 	default:
 		return adbc.Error{
 			Msg:  fmt.Sprintf("[spark] Unknown statement option '%s'", key),
@@ -250,8 +260,10 @@ func (st *statementImpl) executeIngest(ctx context.Context) (int64, error) {
 
 	logger := st.cnxn.Logger.With("op", "bulkingest")
 	s3Client := s3.NewFromConfig(sdkConfig, func(opts *s3.Options) {
-		opts.BaseEndpoint = aws.String("http://localhost:9000/")
-		opts.UsePathStyle = true
+		if st.ingest.s3BaseEndpoint != "" {
+			opts.BaseEndpoint = new(st.ingest.s3BaseEndpoint)
+		}
+		opts.UsePathStyle = st.ingest.s3UsePathStyle
 	})
 	uploader := manager.NewUploader(s3Client, func(u *manager.Uploader) { //nolint:staticcheck
 		u.PartSize = 5 * 1024 * 1024

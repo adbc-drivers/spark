@@ -26,7 +26,9 @@ import (
 type databaseImpl struct {
 	driverbase.DatabaseImplBase
 
-	clientFactory sparkbase.SparkClientFactory
+	clientFactory  sparkbase.SparkClientFactory
+	s3BaseEndpoint string
+	s3UsePathStyle bool
 }
 
 func (d *databaseImpl) GetOption(ctx context.Context, key string) (string, error) {
@@ -39,6 +41,17 @@ func (d *databaseImpl) SetOptions(ctx context.Context, options map[string]string
 	if err != nil {
 		return err
 	}
+
+	if endpoint, ok := options[OptionIngestS3BaseEndpoint]; ok {
+		d.s3BaseEndpoint = endpoint
+		delete(options, OptionIngestS3BaseEndpoint)
+	}
+
+	usePathStyle, err := parseBoolOption(OptionIngestS3UsePathStyle, options, false)
+	if err != nil {
+		return err
+	}
+	d.s3UsePathStyle = usePathStyle
 
 	for key := range options {
 		return adbc.Error{
@@ -53,6 +66,8 @@ func (d *databaseImpl) SetOptions(ctx context.Context, options map[string]string
 func (d *databaseImpl) Open(ctx context.Context) (adbc.ConnectionWithContext, error) {
 	conn := &connectionImpl{
 		ConnectionImplBase: driverbase.NewConnectionImplBase(&d.DatabaseImplBase),
+		s3BaseEndpoint:     d.s3BaseEndpoint,
+		s3UsePathStyle:     d.s3UsePathStyle,
 	}
 
 	client, err := d.clientFactory(ctx)
