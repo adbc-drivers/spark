@@ -252,21 +252,24 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 
 	authType, ok := options[OptionAuthType]
 	if !ok {
-		return livyOpts, sparkbase.MissingRequiredOptionErr(OptionAuthType)
-	}
-	delete(options, OptionAuthType)
-	switch authType {
-	case OptionValueAuthTypeBasic:
-		livyOpts.AuthType = livyimpl.AuthTypeBasic
-	case OptionValueAuthTypeAwsSigv4:
-		livyOpts.AuthType = livyimpl.AuthTypeAwsSigV4
-		cfg, err := awsConfigFromOptions(ctx, options)
-		if err != nil {
-			return livyOpts, err
+		livyOpts.AuthType = livyimpl.AuthTypeNone
+	} else {
+		delete(options, OptionAuthType)
+		switch authType {
+		case OptionValueAuthTypeNone:
+			livyOpts.AuthType = livyimpl.AuthTypeNone
+		case OptionValueAuthTypeBasic:
+			livyOpts.AuthType = livyimpl.AuthTypeBasic
+		case OptionValueAuthTypeAwsSigv4:
+			livyOpts.AuthType = livyimpl.AuthTypeAwsSigV4
+			cfg, err := awsConfigFromOptions(ctx, options)
+			if err != nil {
+				return livyOpts, err
+			}
+			livyOpts.AwsConfig = cfg
+		default:
+			return livyOpts, sparkbase.InvalidOptionErr(OptionAuthType, authType)
 		}
-		livyOpts.AwsConfig = cfg
-	default:
-		return livyOpts, sparkbase.InvalidOptionErr(OptionAuthType, authType)
 	}
 
 	username := options[adbc.OptionKeyUsername]

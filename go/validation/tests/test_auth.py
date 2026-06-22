@@ -70,7 +70,7 @@ def test_auth(subtests, driver, driver_path):
         ]
     elif driver.short_version.endswith("-livy"):
         uri = os.environ["SPARK_LIVY_URI"]
-        orig = "auth_type=basic"
+        orig = "auth_type=none"
         cases = [
             ("auth_type=aws_sigv4", "failed to sign request"),
         ]
@@ -100,9 +100,10 @@ def test_auth(subtests, driver, driver_path):
             }
 
         with subtests.test(auth_type=replacement[10:]):
-            if (
-                driver.short_version.endswith("-livy")
-                and replacement == "auth_type=aws_sigv4"
+            if driver.short_version.endswith("-livy") and replacement in (
+                "auth_type=aws_sigv4",
+                "auth_type=basic",
+                "auth_type=none",
             ):
                 # this seems to succeed, presumably because the local docker
                 # container doesn't actually validate things?
