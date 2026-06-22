@@ -78,7 +78,10 @@ func buildConnectionString(opts ConnectionOpts) string {
 	var b strings.Builder
 	b.WriteString("sc://")
 	b.WriteString(opts.Host)
-	b.WriteString("/")
+	if opts.Token != "" || opts.Username != "" {
+		// spark-connect-go rejects trailing slash when there are no other params
+		b.WriteString("/")
+	}
 	if opts.Token != "" {
 		fmt.Fprintf(&b, ";token=%s", url.QueryEscape(opts.Token))
 	}
