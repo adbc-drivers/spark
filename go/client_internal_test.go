@@ -310,6 +310,15 @@ func TestParseLivyOptionsFromUri(t *testing.T) {
 
 	for _, tc := range []testCase{
 		{
+			uri: "spark://localhost:10000?api=livy&livy.session_kind=sql",
+			options: livyimpl.ConnectionOpts{
+				SessionKind:               livyimpl.SessionKindSql,
+				AuthType:                  livyimpl.AuthTypeNone,
+				BaseURL:                   "http://localhost:10000",
+				ValidateServerCertificate: true,
+			},
+		},
+		{
 			uri: "spark://localhost:10000?api=livy&auth_type=basic&livy.session_kind=sql",
 			options: livyimpl.ConnectionOpts{
 				SessionKind:               livyimpl.SessionKindSql,
