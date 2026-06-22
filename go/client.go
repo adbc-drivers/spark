@@ -295,9 +295,14 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 	}
 	connectOpts.Host = host
 
-	if username, ok := options[adbc.OptionKeyUsername]; ok {
-		delete(options, adbc.OptionKeyUsername)
+	username, hasUsername := options[adbc.OptionKeyUsername]
+	if hasUsername {
 		connectOpts.Username = username
+		delete(options, adbc.OptionKeyUsername)
+	}
+	password, hasPassword := options[adbc.OptionKeyPassword]
+	if hasPassword {
+		delete(options, adbc.OptionKeyPassword)
 	}
 
 	// XXX: ignored, because spark-connect-go doesn't let you configure this
@@ -318,13 +323,17 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 	switch authType {
 	case OptionValueAuthTypeNone:
 		connectOpts.AuthType = connectimpl.AuthTypeNone
+		if password != "" {
+			return connectOpts, adbc.Error{
+				Code: adbc.StatusInvalidArgument,
+				Msg:  fmt.Sprintf("[spark] password provided but auth type is '%s'", authType),
+			}
+		}
 	case OptionValueAuthTypeToken:
 		connectOpts.AuthType = connectimpl.AuthTypeToken
-		password, hasPassword := options[adbc.OptionKeyPassword]
 		if !hasPassword || password == "" {
 			return connectOpts, sparkbase.MissingRequiredOptionErr(adbc.OptionKeyPassword)
 		}
-		delete(options, adbc.OptionKeyPassword)
 		connectOpts.Token = password
 	default:
 		return connectOpts, sparkbase.InvalidOptionErr(OptionAuthType, authType)

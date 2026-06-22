@@ -57,8 +57,6 @@ func (s *SparkQuirks) TearDownDriver(t *testing.T, _ driverbase.DriverWithContex
 func (s *SparkQuirks) DatabaseOptions() map[string]string {
 	return map[string]string{
 		adbc.OptionKeyURI: s.dsn,
-		"username":        "spark",
-		"password":        "spark",
 	}
 }
 
