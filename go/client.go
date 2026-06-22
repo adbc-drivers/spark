@@ -323,13 +323,7 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 	switch authType {
 	case OptionValueAuthTypeNone:
 		connectOpts.AuthType = connectimpl.AuthTypeNone
-		if hasUsername {
-			return connectOpts, adbc.Error{
-				Code: adbc.StatusInvalidArgument,
-				Msg:  fmt.Sprintf("[spark] username provided but auth type is '%s'", authType),
-			}
-		}
-		if hasPassword {
+		if password != "" {
 			return connectOpts, adbc.Error{
 				Code: adbc.StatusInvalidArgument,
 				Msg:  fmt.Sprintf("[spark] password provided but auth type is '%s'", authType),
