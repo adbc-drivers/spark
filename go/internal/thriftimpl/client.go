@@ -489,4 +489,12 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 	return tables, nil
 }
 
+func (c *thriftClient) GetOption(_ context.Context, _ string) (string, bool, error) {
+	return "", false, nil
+}
+
+func (c *thriftClient) GetOptionInt(_ context.Context, _ string) (int64, bool, error) {
+	return 0, false, nil
+}
+
 var _ sparkbase.SparkClient = (*thriftClient)(nil)

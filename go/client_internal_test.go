@@ -22,6 +22,7 @@ import (
 	"github.com/adbc-drivers/apache/go/internal/connectimpl"
 	"github.com/adbc-drivers/apache/go/internal/livyimpl"
 	"github.com/adbc-drivers/apache/go/internal/thriftimpl"
+	"github.com/adbc-drivers/apache/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/stretchr/testify/require"
 )
@@ -428,8 +429,8 @@ func TestParseThriftOptionsFromUri(t *testing.T) {
 		err = parseOptionsFromUri(u, options)
 		require.NoError(t, err, "failed to parse options from URI %s", tc.uri)
 
-		api := options[OptionApi]
-		delete(options, OptionApi)
+		api := options[sparkutil.OptionApi]
+		delete(options, sparkutil.OptionApi)
 
 		parsedOptions, err := thriftOptsFromOptions(api, options)
 		require.NoError(t, err, "failed to parse thrift options from URI %s", tc.uri)

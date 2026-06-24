@@ -50,6 +50,9 @@ type SparkClient interface {
 	SetCurrentSchema(ctx context.Context, mem memory.Allocator, schema string) error
 
 	VendorVersion(ctx context.Context, mem memory.Allocator) (string, error)
+
+	GetOption(ctx context.Context, key string) (string, bool, error)
+	GetOptionInt(ctx context.Context, key string) (int64, bool, error)
 }
 
 type SparkClientFactory func(context.Context) (SparkClient, error)

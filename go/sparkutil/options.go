@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package spark
+package sparkutil
 
 const (
 	// STATEMENT OPTION KEYS
@@ -78,6 +78,12 @@ const (
 
 	// OptionHeartbeatTimeout specifies the Livy session heartbeat timeout in seconds
 	OptionLivyHeartbeatTimeout = "spark.livy.heartbeat_timeout"
+
+	// OptionLivySessionId specifies the Livy session ID to connect to an existing session
+	OptionLivySessionId = "spark.livy.session_id"
+
+	// OptionLivySessionId specifies whether to delete the session when the connection is closed (default true)
+	OptionLivyDeleteSession = "spark.livy.delete_session"
 
 	// Basic Authentication Options (when auth_type=basic)
 	// These use the standard ADBC `username` and `password`

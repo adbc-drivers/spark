@@ -139,3 +139,21 @@ func (c *connectionImpl) ReadPartition(ctx context.Context, serializedPartition 
 		Msg:  "[spark] ReadPartition not supported",
 	}
 }
+
+func (c *connectionImpl) GetOption(ctx context.Context, key string) (string, error) {
+	if val, ok, err := c.client.GetOption(ctx, key); err != nil {
+		return "", err
+	} else if ok {
+		return val, nil
+	}
+	return c.ConnectionImplBase.GetOption(ctx, key)
+}
+
+func (c *connectionImpl) GetOptionInt(ctx context.Context, key string) (int64, error) {
+	if val, ok, err := c.client.GetOptionInt(ctx, key); err != nil {
+		return 0, err
+	} else if ok {
+		return val, nil
+	}
+	return c.ConnectionImplBase.GetOptionInt(ctx, key)
+}

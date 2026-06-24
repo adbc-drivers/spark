@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/adbc-drivers/apache/go/internal/sparkbase"
+	"github.com/adbc-drivers/apache/go/sparkutil"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase/arrowext"
 	"github.com/apache/arrow-adbc/go/adbc"
@@ -101,16 +102,16 @@ func (st *statementImpl) SetOption(ctx context.Context, key string, val string) 
 	}
 
 	switch key {
-	case StatementOptionIngestStagingAreaURI:
+	case sparkutil.StatementOptionIngestStagingAreaURI:
 		parsed, err := url.Parse(val)
 		if err != nil {
 			return sparkbase.ErrToAdbcErr(adbc.StatusInternal, err, "parse staging area URI `%s`", val)
 		}
 		st.clearQueryState()
 		st.ingest.staging = parsed
-	case OptionIngestS3BaseEndpoint:
+	case sparkutil.OptionIngestS3BaseEndpoint:
 		st.ingest.s3BaseEndpoint = val
-	case OptionIngestS3UsePathStyle:
+	case sparkutil.OptionIngestS3UsePathStyle:
 		switch strings.ToLower(val) {
 		case "true":
 			st.ingest.s3UsePathStyle = true
@@ -241,7 +242,7 @@ func (st *statementImpl) ExecutePartitions(ctx context.Context) (*arrow.Schema, 
 
 func (st *statementImpl) executeIngest(ctx context.Context) (int64, error) {
 	if st.ingest.staging == nil {
-		return -1, st.ErrorHelper.InvalidState("must set %s to ingest data", StatementOptionIngestStagingAreaURI)
+		return -1, st.ErrorHelper.InvalidState("must set %s to ingest data", sparkutil.StatementOptionIngestStagingAreaURI)
 	} else if st.ingest.staging.Scheme != "s3" && st.ingest.staging.Scheme != "s3a" {
 		return -1, st.ErrorHelper.NotImplemented("staging area scheme `%s` not supported", st.ingest.staging.Scheme)
 	}

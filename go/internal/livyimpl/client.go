@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/adbc-drivers/apache/go/internal/sparkbase"
+	"github.com/adbc-drivers/apache/go/sparkutil"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
@@ -64,6 +65,8 @@ type ConnectionOpts struct {
 	Username                  string
 	Password                  string
 	SessionTtl                string
+	ExistingSessionId         *int64
+	DeleteSessionOnClose      bool
 	ValidateServerCertificate bool
 
 	AwsConfig aws.Config
@@ -71,21 +74,22 @@ type ConnectionOpts struct {
 
 // livyClient handles communication with the Livy REST API
 type livyClient struct {
-	sessionID int
+	sessionID int64
 	catalog   string //nolint:unused
 	schema    string //nolint:unused
 
-	sessionConfig    map[string]string
-	sessionTtl       string
-	httpClient       *http.Client
-	heartbeatTimeout time.Duration
-	queryTimeout     time.Duration
-	baseURL          string
-	sessionKind      SessionKind
-	authType         AuthType
-	awsConfig        aws.Config
-	username         string
-	password         string
+	sessionConfig        map[string]string
+	sessionTtl           string
+	httpClient           *http.Client
+	heartbeatTimeout     time.Duration
+	queryTimeout         time.Duration
+	baseURL              string
+	sessionKind          SessionKind
+	authType             AuthType
+	awsConfig            aws.Config
+	username             string
+	password             string
+	deleteSessionOnClose bool
 }
 
 // NewClient creates a new SparkClient over Livy client
@@ -99,21 +103,22 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 		}
 	}
 	client := &livyClient{
-		sessionID:        -1,
-		baseURL:          opts.BaseURL,
-		httpClient:       httpClient,
-		queryTimeout:     time.Duration(float64(opts.QueryTimeoutSeconds) * float64(time.Second)),
-		heartbeatTimeout: time.Duration(float64(opts.HeartbeatTimeoutSeconds) * float64(time.Second)),
-		authType:         opts.AuthType,
-		sessionKind:      opts.SessionKind,
-		sessionTtl:       opts.SessionTtl,
-		awsConfig:        opts.AwsConfig,
-		username:         opts.Username,
-		password:         opts.Password,
-		sessionConfig:    sessionConfig,
+		sessionID:            -1,
+		sessionConfig:        sessionConfig,
+		baseURL:              opts.BaseURL,
+		httpClient:           httpClient,
+		queryTimeout:         time.Duration(float64(opts.QueryTimeoutSeconds) * float64(time.Second)),
+		heartbeatTimeout:     time.Duration(float64(opts.HeartbeatTimeoutSeconds) * float64(time.Second)),
+		authType:             opts.AuthType,
+		sessionKind:          opts.SessionKind,
+		sessionTtl:           opts.SessionTtl,
+		awsConfig:            opts.AwsConfig,
+		username:             opts.Username,
+		password:             opts.Password,
+		deleteSessionOnClose: opts.DeleteSessionOnClose,
 	}
 
-	err := client.openSession(ctx)
+	err := client.openSession(ctx, opts.ExistingSessionId)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +132,7 @@ func (c *livyClient) BackendName() string {
 
 // Session represents a Livy session
 type Session struct {
-	ID                  int            `json:"id"`
+	ID                  int64          `json:"id"`
 	AppID               string         `json:"appId"`
 	Owner               string         `json:"owner"`
 	ProxyUser           string         `json:"proxyUser"`
@@ -213,7 +218,21 @@ type CreateStatementRequest struct {
 	Kind string `json:"kind,omitempty"`
 }
 
-func (c *livyClient) openSession(ctx context.Context) error {
+func (c *livyClient) openSession(ctx context.Context, existingSessionId *int64) error {
+	if existingSessionId != nil {
+		c.sessionID = *existingSessionId
+		// Wait for session to be ready (TODO: configurable timeout)
+		timeout := time.Duration(5 * 60 * float64(time.Second))
+		if err := c.WaitForSessionReady(ctx, timeout); err != nil {
+			// TODO: try to list existing sessions?
+			return adbc.Error{
+				Code: adbc.StatusIO,
+				Msg:  fmt.Sprintf("[spark] session %d failed to start: %v", *existingSessionId, err),
+			}
+		}
+		return nil
+	}
+
 	// Create session request
 	req := CreateSessionRequest{
 		Kind:         string(c.sessionKind),
@@ -262,10 +281,7 @@ func (c *livyClient) openSession(ctx context.Context) error {
 	// Create session
 	session, err := c.CreateSession(ctx, req)
 	if err != nil {
-		return adbc.Error{
-			Code: adbc.StatusIO,
-			Msg:  fmt.Sprintf("failed to create Livy session: %v", err),
-		}
+		return err
 	}
 	c.sessionID = session.ID
 
@@ -286,7 +302,10 @@ func (c *livyClient) openSession(ctx context.Context) error {
 func (c *livyClient) CreateSession(ctx context.Context, req CreateSessionRequest) (*Session, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal session request: %w", err)
+		return nil, adbc.Error{
+			Code: adbc.StatusInternal,
+			Msg:  fmt.Sprintf("[spark] failed to serialize CreateSesssionRequest: %v", err),
+		}
 	}
 
 	resp, err := c.doRequest(ctx, "POST", "/sessions", bytes.NewReader(data))
@@ -298,19 +317,35 @@ func (c *livyClient) CreateSession(ctx context.Context, req CreateSessionRequest
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("failed to create session: status=%d, body=%s", resp.StatusCode, string(body))
+
+		if resp.StatusCode == http.StatusBadRequest && strings.Contains(c.baseURL, "amazonaws.com") {
+			_, ok := c.sessionConfig["emr-serverless.session.executionRoleArn"]
+			if !ok {
+				return nil, adbc.Error{
+					Code: adbc.StatusInvalidArgument,
+					Msg:  fmt.Sprintf("failed to create session: (%d) %s. If using AWS EMR Serverless, you must set 'spark.opt.emr-serverless.session.executionRoleArn'", resp.StatusCode, string(body)),
+				}
+			}
+		}
+
+		return nil, adbc.Error{
+			Code: sparkutil.HttpStatusToCode(resp.StatusCode),
+			Msg:  fmt.Sprintf("[spark] failed to create session: (%d) %s", resp.StatusCode, string(body)),
+		}
 	}
 
 	var session Session
 	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
-		return nil, fmt.Errorf("failed to decode session response: %w", err)
+		return nil, adbc.Error{
+			Code: adbc.StatusInternal,
+			Msg:  fmt.Sprintf("[spark] failed to decode CreateSesssion response: %v", err),
+		}
 	}
-
 	return &session, nil
 }
 
 // GetSession retrieves session information
-func (c *livyClient) GetSession(ctx context.Context, sessionID int) (*Session, error) {
+func (c *livyClient) GetSession(ctx context.Context, sessionID int64) (*Session, error) {
 	url := fmt.Sprintf("/sessions/%d", sessionID)
 	resp, err := c.doRequest(ctx, "GET", url, nil)
 	if err != nil {
@@ -326,7 +361,7 @@ func (c *livyClient) GetSession(ctx context.Context, sessionID int) (*Session, e
 
 	var session Session
 	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
-		return nil, fmt.Errorf("failed to decode session response: %w", err)
+		return nil, fmt.Errorf("failed to decode GetSesssion response: %w", err)
 	}
 
 	return &session, nil
@@ -353,17 +388,19 @@ func (c *livyClient) DeleteSession(ctx context.Context) error {
 }
 
 func (c *livyClient) Close() error {
-	url := fmt.Sprintf("/sessions/%d", c.sessionID)
-	resp, err := c.doRequest(context.Background(), "DELETE", url, nil)
-	if err != nil {
-		return err
-	}
-	// TODO: don't swallow error
-	defer resp.Body.Close() //nolint:errcheck
+	if c.deleteSessionOnClose {
+		url := fmt.Sprintf("/sessions/%d", c.sessionID)
+		resp, err := c.doRequest(context.Background(), "DELETE", url, nil)
+		if err != nil {
+			return err
+		}
+		// TODO: don't swallow error
+		defer resp.Body.Close() //nolint:errcheck
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to delete session: status=%d, body=%s", resp.StatusCode, string(body))
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("failed to delete session: status=%d, body=%s", resp.StatusCode, string(body))
+		}
 	}
 
 	return nil
@@ -435,7 +472,7 @@ func (c *livyClient) CreateStatement(ctx context.Context, req CreateStatementReq
 }
 
 // GetStatement retrieves statement information
-func (c *livyClient) GetStatement(ctx context.Context, sessionID, statementID int) (*Statement, error) {
+func (c *livyClient) GetStatement(ctx context.Context, sessionID int64, statementID int) (*Statement, error) {
 	url := fmt.Sprintf("/sessions/%d/statements/%d", sessionID, statementID)
 	resp, err := c.doRequest(ctx, "GET", url, nil)
 	if err != nil {
@@ -688,6 +725,24 @@ func (c *livyClient) GetDBSchemasForCatalog(ctx context.Context, catalog string,
 
 func (c *livyClient) GetTablesForDBSchema(ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string, includeColumns bool) ([]driverbase.TableInfo, error) {
 	return sparkbase.DefaultGetTablesForDBSchemaImpl(c, ctx, catalog, schema, tableFilter, columnFilter, includeColumns)
+}
+
+func (c *livyClient) GetOption(_ context.Context, key string) (string, bool, error) {
+	switch key {
+	case sparkutil.OptionLivySessionId:
+		return strconv.FormatInt(c.sessionID, 10), true, nil
+	default:
+		return "", false, nil
+	}
+}
+
+func (c *livyClient) GetOptionInt(_ context.Context, key string) (int64, bool, error) {
+	switch key {
+	case sparkutil.OptionLivySessionId:
+		return c.sessionID, true, nil
+	default:
+		return 0, false, nil
+	}
 }
 
 // parseSchemaFromSQLResult extracts schema from SQL session result

@@ -21,6 +21,7 @@ import (
 	"github.com/adbc-drivers/apache/go/internal/livyimpl"
 	"github.com/adbc-drivers/apache/go/internal/sparkbase"
 	"github.com/adbc-drivers/apache/go/internal/thriftimpl"
+	"github.com/adbc-drivers/apache/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -35,10 +36,10 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 	split := strings.Split(uri.Host, ":")
 	switch len(split) {
 	case 1:
-		options[OptionHost] = split[0]
+		options[sparkutil.OptionHost] = split[0]
 	case 2:
-		options[OptionHost] = split[0]
-		options[OptionPort] = split[1]
+		options[sparkutil.OptionHost] = split[0]
+		options[sparkutil.OptionPort] = split[1]
 	default:
 		return adbc.Error{
 			Code: adbc.StatusInvalidArgument,
@@ -75,18 +76,18 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 	}
 
 	scheme := uri.Scheme
-	api := options[OptionApi]
+	api := options[sparkutil.OptionApi]
 	switch scheme {
-	case "sc", OptionValueApiConnect:
+	case "sc", sparkutil.OptionValueApiConnect:
 		// Spark Connect's native URI scheme is `sc`. Map it onto our internal
 		// api-name convention so `sc://host:port` works out of the box.
-		if api != "" && api != OptionValueApiConnect {
+		if api != "" && api != sparkutil.OptionValueApiConnect {
 			return adbc.Error{
 				Code: adbc.StatusInvalidArgument,
-				Msg:  fmt.Sprintf("[spark] URI scheme 'sc' cannot be used with explicit API option %s=%s", OptionApi, api),
+				Msg:  fmt.Sprintf("[spark] URI scheme 'sc' cannot be used with explicit API option %s=%s", sparkutil.OptionApi, api),
 			}
 		}
-		options[OptionApi] = OptionValueApiConnect
+		options[sparkutil.OptionApi] = sparkutil.OptionValueApiConnect
 	case "spark":
 		// This scheme doesn't imply an API; default to thrift+http if
 		// it isn't already set
@@ -94,31 +95,31 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 		// example:
 		// spark:// => thrift + binary
 		// spark://?api=thrift%2Bhttp => thrift + http
-		if _, ok := options[OptionApi]; !ok {
-			options[OptionApi] = OptionValueApiThriftBinary
+		if _, ok := options[sparkutil.OptionApi]; !ok {
+			options[sparkutil.OptionApi] = sparkutil.OptionValueApiThriftBinary
 		}
-	case OptionValueApiThriftBinary, OptionValueApiThriftHttp, OptionValueApiLivy:
+	case sparkutil.OptionValueApiThriftBinary, sparkutil.OptionValueApiThriftHttp, sparkutil.OptionValueApiLivy:
 		if api != "" && api != scheme {
 			return adbc.Error{
 				Code: adbc.StatusInvalidArgument,
-				Msg:  fmt.Sprintf("[spark] URI scheme '%s' cannot be used with explicit API option %s=%s", scheme, OptionApi, api),
+				Msg:  fmt.Sprintf("[spark] URI scheme '%s' cannot be used with explicit API option %s=%s", scheme, sparkutil.OptionApi, api),
 			}
 		}
-		options[OptionApi] = scheme
+		options[sparkutil.OptionApi] = scheme
 	}
 
 	return nil
 }
 
 func parseHostPortFromOptions(options map[string]string) (string, error) {
-	host, ok := options[OptionHost]
+	host, ok := options[sparkutil.OptionHost]
 	if !ok {
-		return "", sparkbase.MissingRequiredOptionErr(OptionHost)
+		return "", sparkbase.MissingRequiredOptionErr(sparkutil.OptionHost)
 	}
-	delete(options, OptionHost)
+	delete(options, sparkutil.OptionHost)
 
-	if port, hasPort := options[OptionPort]; hasPort {
-		delete(options, OptionPort)
+	if port, hasPort := options[sparkutil.OptionPort]; hasPort {
+		delete(options, sparkutil.OptionPort)
 		host = fmt.Sprintf("%s:%s", host, port)
 	}
 	return host, nil
@@ -159,23 +160,23 @@ func parseBoolOption(key string, options map[string]string, defaultValue bool) (
 // initializeAws sets up AWS configuration for SigV4 authentication
 func awsConfigFromOptions(ctx context.Context, options map[string]string) (aws.Config, error) {
 	// Check if explicit credentials are provided
-	accessKey := options[OptionLivyAWSAccessKeyID]
-	secretKey := options[OptionLivyAWSSecretAccessKey]
-	sessionToken := options[OptionLivyAWSSessionToken]
-	delete(options, OptionLivyAWSAccessKeyID)
-	delete(options, OptionLivyAWSSecretAccessKey)
-	delete(options, OptionLivyAWSSessionToken)
+	accessKey := options[sparkutil.OptionLivyAWSAccessKeyID]
+	secretKey := options[sparkutil.OptionLivyAWSSecretAccessKey]
+	sessionToken := options[sparkutil.OptionLivyAWSSessionToken]
+	delete(options, sparkutil.OptionLivyAWSAccessKeyID)
+	delete(options, sparkutil.OptionLivyAWSSecretAccessKey)
+	delete(options, sparkutil.OptionLivyAWSSessionToken)
 
 	var loadOpts []func(*awsconfig.LoadOptions) error
 
 	// Set region if provided
-	if region, ok := options[OptionLivyAWSRegion]; ok {
+	if region, ok := options[sparkutil.OptionLivyAWSRegion]; ok {
 		loadOpts = append(loadOpts, awsconfig.WithRegion(region))
-		delete(options, OptionLivyAWSRegion)
+		delete(options, sparkutil.OptionLivyAWSRegion)
 	}
 
 	// Set profile if specified
-	if profile := options[OptionLivyAWSProfile]; profile != "" {
+	if profile := options[sparkutil.OptionLivyAWSProfile]; profile != "" {
 		loadOpts = append(loadOpts, awsconfig.WithSharedConfigProfile(profile))
 	}
 
@@ -205,12 +206,12 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 		return livyOpts, err
 	}
 
-	tls, err := parseBoolOption(OptionUseTls, options, false)
+	tls, err := parseBoolOption(sparkutil.OptionUseTls, options, false)
 	if err != nil {
 		return livyOpts, err
 	}
 
-	validateServerCertificate, err := parseBoolOption(OptionValidateServerCertificate, options, true)
+	validateServerCertificate, err := parseBoolOption(sparkutil.OptionValidateServerCertificate, options, true)
 	if err != nil {
 		return livyOpts, err
 	}
@@ -225,7 +226,7 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 	}
 	livyOpts.BaseURL = host
 
-	timeout, err := parseIntegerOption(OptionLivyTimeout, options, 0)
+	timeout, err := parseIntegerOption(sparkutil.OptionLivyTimeout, options, 0)
 	if err != nil {
 		return livyOpts, err
 	}
@@ -233,34 +234,54 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 	// TODO(serramatutu): query timeout
 	livyOpts.QueryTimeoutSeconds = 0
 
-	if sessionTtl, ok := options[OptionLivySessionTTL]; ok {
-		delete(options, OptionLivySessionTTL)
+	if sessionTtl, ok := options[sparkutil.OptionLivySessionTTL]; ok {
+		delete(options, sparkutil.OptionLivySessionTTL)
 		livyOpts.SessionTtl = sessionTtl
 	}
 
-	sessionKind, ok := options[OptionLivySessionKind]
-	if !ok {
-		return livyOpts, sparkbase.MissingRequiredOptionErr(OptionLivySessionKind)
-	}
-	delete(options, OptionLivySessionKind)
-	switch sessionKind {
-	case OptionValueSessionKindSql, OptionValueSessionKindSpark, OptionValueSessionKindPySpark:
-		livyOpts.SessionKind = livyimpl.SessionKind(sessionKind)
-	default:
-		return livyOpts, sparkbase.InvalidOptionErr(OptionLivySessionKind, sessionKind)
+	if sessionId, ok := options[sparkutil.OptionLivySessionId]; ok {
+		delete(options, sparkutil.OptionLivySessionId)
+		intId, err := strconv.ParseInt(sessionId, 10, 64)
+		if err != nil {
+			return livyOpts, sparkbase.InvalidOptionErr(sparkutil.OptionLivySessionId, sessionId)
+		}
+		livyOpts.ExistingSessionId = new(intId)
 	}
 
-	authType, ok := options[OptionAuthType]
+	if deleteSession, ok := options[sparkutil.OptionLivyDeleteSession]; ok {
+		delete(options, sparkutil.OptionLivyDeleteSession)
+		deleteSessionBool, err := strconv.ParseBool(deleteSession)
+		if err != nil {
+			return livyOpts, sparkbase.InvalidOptionErr(sparkutil.OptionLivyDeleteSession, deleteSession)
+		}
+		livyOpts.DeleteSessionOnClose = deleteSessionBool
+	} else {
+		livyOpts.DeleteSessionOnClose = true
+	}
+
+	sessionKind, ok := options[sparkutil.OptionLivySessionKind]
+	if !ok {
+		return livyOpts, sparkbase.MissingRequiredOptionErr(sparkutil.OptionLivySessionKind)
+	}
+	delete(options, sparkutil.OptionLivySessionKind)
+	switch sessionKind {
+	case sparkutil.OptionValueSessionKindSql, sparkutil.OptionValueSessionKindSpark, sparkutil.OptionValueSessionKindPySpark:
+		livyOpts.SessionKind = livyimpl.SessionKind(sessionKind)
+	default:
+		return livyOpts, sparkbase.InvalidOptionErr(sparkutil.OptionLivySessionKind, sessionKind)
+	}
+
+	authType, ok := options[sparkutil.OptionAuthType]
 	if !ok {
 		livyOpts.AuthType = livyimpl.AuthTypeNone
 	} else {
-		delete(options, OptionAuthType)
+		delete(options, sparkutil.OptionAuthType)
 		switch authType {
-		case OptionValueAuthTypeNone:
+		case sparkutil.OptionValueAuthTypeNone:
 			livyOpts.AuthType = livyimpl.AuthTypeNone
-		case OptionValueAuthTypeBasic:
+		case sparkutil.OptionValueAuthTypeBasic:
 			livyOpts.AuthType = livyimpl.AuthTypeBasic
-		case OptionValueAuthTypeAwsSigv4:
+		case sparkutil.OptionValueAuthTypeAwsSigv4:
 			livyOpts.AuthType = livyimpl.AuthTypeAwsSigV4
 			cfg, err := awsConfigFromOptions(ctx, options)
 			if err != nil {
@@ -268,7 +289,7 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 			}
 			livyOpts.AwsConfig = cfg
 		default:
-			return livyOpts, sparkbase.InvalidOptionErr(OptionAuthType, authType)
+			return livyOpts, sparkbase.InvalidOptionErr(sparkutil.OptionAuthType, authType)
 		}
 	}
 
@@ -281,9 +302,9 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 	delete(options, adbc.OptionKeyPassword)
 
 	// AWS-specific options
-	if executionRole, ok := options[OptionLivyAWSExecutionRoleArn]; ok {
-		delete(options, OptionLivyAWSExecutionRoleArn)
-		options[OptionSparkConfigPrefix+"emr-serverless.session.executionRoleArn"] = executionRole
+	if executionRole, ok := options[sparkutil.OptionLivyAWSExecutionRoleArn]; ok {
+		delete(options, sparkutil.OptionLivyAWSExecutionRoleArn)
+		options[sparkutil.OptionSparkConfigPrefix+"emr-serverless.session.executionRoleArn"] = executionRole
 	}
 
 	return livyOpts, nil
@@ -309,22 +330,22 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 	}
 
 	// XXX: ignored, because spark-connect-go doesn't let you configure this
-	_, err = parseBoolOption(OptionUseTls, options, false)
+	_, err = parseBoolOption(sparkutil.OptionUseTls, options, false)
 	if err != nil {
 		return connectOpts, err
 	}
-	_, err = parseBoolOption(OptionValidateServerCertificate, options, true)
+	_, err = parseBoolOption(sparkutil.OptionValidateServerCertificate, options, true)
 	if err != nil {
 		return connectOpts, err
 	}
 
-	authType, ok := options[OptionAuthType]
+	authType, ok := options[sparkutil.OptionAuthType]
 	if !ok {
-		return connectOpts, sparkbase.MissingRequiredOptionErr(OptionAuthType)
+		return connectOpts, sparkbase.MissingRequiredOptionErr(sparkutil.OptionAuthType)
 	}
-	delete(options, OptionAuthType)
+	delete(options, sparkutil.OptionAuthType)
 	switch authType {
-	case OptionValueAuthTypeNone:
+	case sparkutil.OptionValueAuthTypeNone:
 		connectOpts.AuthType = connectimpl.AuthTypeNone
 		if password != "" {
 			return connectOpts, adbc.Error{
@@ -332,14 +353,14 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 				Msg:  fmt.Sprintf("[spark] password provided but auth type is '%s'", authType),
 			}
 		}
-	case OptionValueAuthTypeToken:
+	case sparkutil.OptionValueAuthTypeToken:
 		connectOpts.AuthType = connectimpl.AuthTypeToken
 		if !hasPassword || password == "" {
 			return connectOpts, sparkbase.MissingRequiredOptionErr(adbc.OptionKeyPassword)
 		}
 		connectOpts.Token = password
 	default:
-		return connectOpts, sparkbase.InvalidOptionErr(OptionAuthType, authType)
+		return connectOpts, sparkbase.InvalidOptionErr(sparkutil.OptionAuthType, authType)
 	}
 
 	return connectOpts, nil
@@ -348,19 +369,19 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 func thriftOptsFromOptions(api string, options map[string]string) (thriftimpl.ConnectionOpts, error) {
 	thriftOpts := thriftimpl.ConnectionOpts{}
 	switch api {
-	case OptionValueApiThriftBinary:
+	case sparkutil.OptionValueApiThriftBinary:
 		thriftOpts.Transport = thriftimpl.Binary
-	case OptionValueApiThriftHttp:
+	case sparkutil.OptionValueApiThriftHttp:
 		thriftOpts.Transport = thriftimpl.Http
 	default:
-		return thriftOpts, sparkbase.InvalidOptionErr(OptionApi, api)
+		return thriftOpts, sparkbase.InvalidOptionErr(sparkutil.OptionApi, api)
 	}
 
-	authType, ok := options[OptionAuthType]
+	authType, ok := options[sparkutil.OptionAuthType]
 	if !ok {
-		return thriftOpts, sparkbase.MissingRequiredOptionErr(OptionAuthType)
+		return thriftOpts, sparkbase.MissingRequiredOptionErr(sparkutil.OptionAuthType)
 	}
-	delete(options, OptionAuthType)
+	delete(options, sparkutil.OptionAuthType)
 
 	host, err := parseHostPortFromOptions(options)
 	if err != nil {
@@ -368,22 +389,22 @@ func thriftOptsFromOptions(api string, options map[string]string) (thriftimpl.Co
 	}
 	thriftOpts.Host = host
 
-	tls, err := parseBoolOption(OptionUseTls, options, false)
+	tls, err := parseBoolOption(sparkutil.OptionUseTls, options, false)
 	if err != nil {
 		return thriftOpts, err
 	}
 	thriftOpts.Tls = tls
 
-	validateServerCertificate, err := parseBoolOption(OptionValidateServerCertificate, options, true)
+	validateServerCertificate, err := parseBoolOption(sparkutil.OptionValidateServerCertificate, options, true)
 	if err != nil {
 		return thriftOpts, err
 	}
 	thriftOpts.ValidateServerCertificate = validateServerCertificate
 
 	switch authType {
-	case OptionValueAuthTypeNoSasl:
+	case sparkutil.OptionValueAuthTypeNoSasl:
 		thriftOpts.Auth = thriftimpl.NoSasl
-	case OptionValueAuthTypePlain:
+	case sparkutil.OptionValueAuthTypePlain:
 		thriftOpts.Auth = thriftimpl.Plain
 
 		username := options[adbc.OptionKeyUsername]
@@ -394,13 +415,13 @@ func thriftOptsFromOptions(api string, options map[string]string) (thriftimpl.Co
 		thriftOpts.Password = password
 		delete(options, adbc.OptionKeyPassword)
 
-	case OptionValueAuthTypeLdap, OptionValueAuthTypeKerberos:
+	case sparkutil.OptionValueAuthTypeLdap, sparkutil.OptionValueAuthTypeKerberos:
 		return thriftOpts, adbc.Error{
 			Code: adbc.StatusInvalidArgument,
 			Msg:  fmt.Sprintf("[spark] auth type '%s' has not been implemented yet", authType),
 		}
 	default:
-		return thriftOpts, sparkbase.InvalidOptionErr(OptionAuthType, authType)
+		return thriftOpts, sparkbase.InvalidOptionErr(sparkutil.OptionAuthType, authType)
 	}
 
 	return thriftOpts, nil
@@ -409,7 +430,7 @@ func thriftOptsFromOptions(api string, options map[string]string) (thriftimpl.Co
 func sessionOptionsFromOptions(options map[string]string) map[string]string {
 	sessionOptions := make(map[string]string)
 	for k, v := range options {
-		if after, ok := strings.CutPrefix(k, OptionSparkConfigPrefix); ok {
+		if after, ok := strings.CutPrefix(k, sparkutil.OptionSparkConfigPrefix); ok {
 			trimmedKey := after
 			sessionOptions[trimmedKey] = v
 			delete(options, k)
@@ -434,14 +455,14 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 		delete(options, adbc.OptionKeyURI)
 	}
 
-	api, ok := options[OptionApi]
+	api, ok := options[sparkutil.OptionApi]
 	if !ok {
-		return nil, sparkbase.MissingRequiredOptionErr(OptionApi)
+		return nil, sparkbase.MissingRequiredOptionErr(sparkutil.OptionApi)
 	}
-	delete(options, OptionApi)
+	delete(options, sparkutil.OptionApi)
 
 	switch api {
-	case OptionValueApiThriftBinary, OptionValueApiThriftHttp:
+	case sparkutil.OptionValueApiThriftBinary, sparkutil.OptionValueApiThriftHttp:
 		thriftOpts, err := thriftOptsFromOptions(api, options)
 		if err != nil {
 			return nil, err
@@ -452,7 +473,7 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 			return thriftimpl.NewClient(ctx, thriftOpts, sessionOptions)
 		}, nil
 
-	case OptionValueApiLivy:
+	case sparkutil.OptionValueApiLivy:
 		livyOpts, err := livyOptsFromOptions(ctx, options)
 		if err != nil {
 			return nil, err
@@ -463,7 +484,7 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 			return livyimpl.NewClient(ctx, livyOpts, sessionOptions)
 		}, nil
 
-	case OptionValueApiConnect:
+	case sparkutil.OptionValueApiConnect:
 		connectOpts, err := connectOptsFromOptions(options)
 		if err != nil {
 			return nil, err
@@ -475,6 +496,6 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 		}, nil
 
 	default:
-		return nil, sparkbase.InvalidOptionErr(OptionApi, api)
+		return nil, sparkbase.InvalidOptionErr(sparkutil.OptionApi, api)
 	}
 }
