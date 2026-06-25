@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/adbc-drivers/spark/go/connectclient/client"
+	"github.com/adbc-drivers/spark/go/connectclient/client/channel"
 	"github.com/adbc-drivers/spark/go/connectclient/client/testutils"
 	proto "github.com/adbc-drivers/spark/go/connectclient/internal/generated"
 	"github.com/adbc-drivers/spark/go/connectclient/mocks"
@@ -95,16 +96,18 @@ func TestSQLCallsExecutePlanWithSQLOnClient(t *testing.T) {
 
 func TestNewSessionBuilderCreatesASession(t *testing.T) {
 	ctx := context.Background()
-	spark, err := NewSessionBuilder().Remote("sc://connection").Build(ctx)
+	cb, err := channel.NewBuilder(channel.ConnectionParameters{Host: "connection"})
+	require.NoError(t, err)
+	spark, err := NewSessionBuilder().WithChannelBuilder(cb).Build(ctx)
 	assert.NoError(t, err)
 	assert.NotNil(t, spark)
 }
 
-func TestNewSessionBuilderFailsIfConnectionStringIsInvalid(t *testing.T) {
+func TestNewSessionBuilderFailsWithoutChannelBuilder(t *testing.T) {
 	ctx := context.Background()
-	spark, err := NewSessionBuilder().Remote("invalid").Build(ctx)
+	spark, err := NewSessionBuilder().Build(ctx)
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, sparkerrors.InvalidInputError)
+	assert.ErrorIs(t, err, sparkerrors.ConnectionError)
 	assert.Nil(t, spark)
 }
 

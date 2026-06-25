@@ -30,41 +30,30 @@ import (
 	"github.com/adbc-drivers/spark/go/connectclient/client/channel"
 	"github.com/adbc-drivers/spark/go/connectclient/sparkerrors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-const goodChannelURL = "sc://host:15002/;user_id=a;token=b;x-other-header=c"
-
 func TestBasicChannelBuilder(t *testing.T) {
-	cb, _ := channel.NewBuilder(goodChannelURL)
+	cb, _ := channel.NewBuilder(channel.ConnectionParameters{Host: "host"})
 	if cb == nil {
 		t.Error("ChannelBuilder must not be null")
 	}
 }
 
 func TestBasicChannelParsing(t *testing.T) {
-	_, err := channel.NewBuilder("abc://asdada:1333")
-	assert.False(t, strings.Contains(err.Error(), "scheme"),
-		"Channel build should fail with wrong scheme")
-
-	_, err = channel.NewBuilder("sc://:1333")
-	assert.False(t, strings.Contains(err.Error(), "scheme"),
-		"Should not have an error for a proper URL")
-
-	cb, err := channel.NewBuilder("sc://empty")
-	assert.Nilf(t, err, "Valid path should not fail: %v", err)
+	cb, err := channel.NewBuilder(channel.ConnectionParameters{Host: "empty"})
+	assert.Nilf(t, err, "Valid parameters should not fail: %v", err)
 	assert.Equalf(t, 15002, cb.Port(), "Default port must be set, but got %v", cb.Port)
 
-	_, err = channel.NewBuilder("sc://empty:port")
-	assert.NotNilf(t, err, "Port must be a valid integer %v", err)
-
-	_, err = channel.NewBuilder("sc://empty:9999999999999")
-	assert.Nilf(t, err, "Port must be a valid number %v", err)
-
-	_, err = channel.NewBuilder("sc://abcd/this")
-	assert.True(t, strings.Contains(err.Error(), "URL path"), "URL path elements are not allowed")
-	assert.ErrorIs(t, err, sparkerrors.InvalidInputError)
-
-	cb, err = channel.NewBuilder(goodChannelURL)
+	cb, err = channel.NewBuilder(channel.ConnectionParameters{
+		Host:  "host",
+		Port:  15002,
+		User:  "a",
+		Token: "b",
+		Headers: map[string]string{
+			"x-other-header": "c",
+		},
+	})
 	assert.Nilf(t, err, "Should not have an error for a proper URL")
 	assert.Equal(t, "host", cb.Host())
 	assert.Equal(t, 15002, cb.Port())
@@ -73,7 +62,16 @@ func TestBasicChannelParsing(t *testing.T) {
 	assert.Equal(t, "a", cb.User())
 	assert.Equal(t, "b", cb.Token())
 
-	cb, err = channel.NewBuilder("sc://localhost:443/;token=token;user_id=user_id;cluster_id=a;session_id=session")
+	cb, err = channel.NewBuilder(channel.ConnectionParameters{
+		Host:      "localhost",
+		Port:      443,
+		Token:     "token",
+		User:      "user_id",
+		SessionID: "session",
+		Headers: map[string]string{
+			"cluster_id": "a",
+		},
+	})
 	assert.NoError(t, err)
 	assert.Equal(t, 443, cb.Port())
 	assert.Equal(t, "localhost", cb.Host())
@@ -84,7 +82,7 @@ func TestBasicChannelParsing(t *testing.T) {
 
 func TestChannelBuildConnect(t *testing.T) {
 	ctx := context.Background()
-	cb, err := channel.NewBuilder("sc://localhost")
+	cb, err := channel.NewBuilder(channel.ConnectionParameters{Host: "localhost"})
 	assert.NoError(t, err)
 	id := cb.SessionId()
 	_, err = uuid.Parse(id)
@@ -94,7 +92,12 @@ func TestChannelBuildConnect(t *testing.T) {
 	assert.Nil(t, err, "no error for proper connection")
 	assert.NotNil(t, conn)
 
-	cb, err = channel.NewBuilder("sc://localhost:443/;token=abcd;user_id=a")
+	cb, err = channel.NewBuilder(channel.ConnectionParameters{
+		Host:  "localhost",
+		Port:  443,
+		Token: "abcd",
+		User:  "a",
+	})
 	assert.Nil(t, err, "Should not have an error for a proper URL.")
 	conn, err = cb.Build(ctx)
 	assert.Nil(t, err, "no error for proper connection")
@@ -102,15 +105,21 @@ func TestChannelBuildConnect(t *testing.T) {
 }
 
 func TestChannelBulder_UserAgent(t *testing.T) {
-	cb, err := channel.NewBuilder("sc://localhost")
+	cb, err := channel.NewBuilder(channel.ConnectionParameters{Host: "localhost"})
 	assert.NoError(t, err)
 	assert.True(t, strings.Contains(cb.UserAgent(), "_SPARK_CONNECT_GO"))
 	assert.True(t, strings.Contains(cb.UserAgent(), "go/"))
 	assert.True(t, strings.Contains(cb.UserAgent(), "os/"))
 
-	cb, err = channel.NewBuilder("sc://localhost/;user_agent=custom")
+	cb, err = channel.NewBuilder(channel.ConnectionParameters{Host: "localhost", UserAgent: "custom"})
 	assert.NoError(t, err)
 	assert.True(t, strings.Contains(cb.UserAgent(), "custom"))
 	assert.True(t, strings.Contains(cb.UserAgent(), "go/"))
 	assert.True(t, strings.Contains(cb.UserAgent(), "os/"))
+}
+
+func TestBasicChannelParsingRejectsMissingHost(t *testing.T) {
+	_, err := channel.NewBuilder(channel.ConnectionParameters{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sparkerrors.InvalidInputError)
 }
