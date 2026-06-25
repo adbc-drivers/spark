@@ -107,7 +107,7 @@ func TestNewSessionBuilderFailsWithoutChannelBuilder(t *testing.T) {
 	ctx := context.Background()
 	spark, err := NewSessionBuilder().Build(ctx)
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, sparkerrors.ConnectionError)
+	assert.ErrorIs(t, err, sparkerrors.InvalidArgumentError)
 	assert.Nil(t, spark)
 }
 
