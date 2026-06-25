@@ -276,17 +276,49 @@ func TestParseConnectOptionsFromUri(t *testing.T) {
 		{
 			uri: "spark://localhost:10000?api=connect&auth_type=none",
 			options: connectimpl.ConnectionOpts{
-				Host:     "localhost:10000",
-				AuthType: connectimpl.AuthTypeNone,
+				Host:                      "localhost:10000",
+				AuthType:                  connectimpl.AuthTypeNone,
+				ValidateServerCertificate: true,
 			},
 		},
 		{
 			uri: "spark://foo:bar@localhost:10000?api=connect&auth_type=token",
 			options: connectimpl.ConnectionOpts{
-				Host:     "localhost:10000",
-				AuthType: connectimpl.AuthTypeToken,
-				Username: "foo",
-				Token:    "bar",
+				Host:                      "localhost:10000",
+				AuthType:                  connectimpl.AuthTypeToken,
+				Username:                  "foo",
+				Token:                     "bar",
+				ValidateServerCertificate: true,
+			},
+		},
+		{
+			uri: "spark://localhost:10000?api=connect&auth_type=none&tls=true",
+			options: connectimpl.ConnectionOpts{
+				Host:                      "localhost:10000",
+				AuthType:                  connectimpl.AuthTypeNone,
+				Tls:                       true,
+				ValidateServerCertificate: true,
+			},
+		},
+		{
+			uri: "spark://foo:bar@localhost:10000?api=connect&auth_type=token&tls=true&validateservercertificate=false",
+			options: connectimpl.ConnectionOpts{
+				Host:                      "localhost:10000",
+				AuthType:                  connectimpl.AuthTypeToken,
+				Username:                  "foo",
+				Token:                     "bar",
+				Tls:                       true,
+				ValidateServerCertificate: false,
+			},
+		},
+		{
+			uri: "spark://:aws-proxy-token@abc.emr-serverless-services.us-east-1.amazonaws.com:443?api=connect&auth_type=token&tls=true",
+			options: connectimpl.ConnectionOpts{
+				Host:                      "abc.emr-serverless-services.us-east-1.amazonaws.com:443",
+				AuthType:                  connectimpl.AuthTypeToken,
+				AwsProxyAuth:              "aws-proxy-token",
+				Tls:                       true,
+				ValidateServerCertificate: true,
 			},
 		},
 	} {

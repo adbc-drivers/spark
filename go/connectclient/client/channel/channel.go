@@ -23,7 +23,6 @@ package channel
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -72,13 +71,15 @@ type Builder interface {
 //
 //	https://github.com/apache/spark/blob/master/connector/connect/docs/client-connection-string.md
 type BaseBuilder struct {
-	host      string
-	port      int
-	token     string
-	user      string
-	headers   map[string]string
-	sessionId string
-	userAgent string
+	host                      string
+	port                      int
+	token                     string
+	user                      string
+	useSSL                    bool
+	validateServerCertificate bool
+	headers                   map[string]string
+	sessionId                 string
+	userAgent                 string
 }
 
 func (cb *BaseBuilder) Host() string {
@@ -116,24 +117,21 @@ func (cb *BaseBuilder) Build(ctx context.Context) (*grpc.ClientConn, error) {
 	var opts []grpc.DialOption
 
 	opts = append(opts, grpc.WithAuthority(cb.host))
-	if cb.token == "" {
+	if cb.token == "" && !cb.useSSL {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else {
-		// Note: On the Windows platform, use of x509.SystemCertPool() requires
-		// go version 1.18 or higher.
-		systemRoots, err := x509.SystemCertPool()
-		if err != nil {
-			return nil, err
+		config := &tls.Config{
+			InsecureSkipVerify: !cb.validateServerCertificate,
 		}
-		cred := credentials.NewTLS(&tls.Config{
-			RootCAs: systemRoots,
-		})
+		cred := credentials.NewTLS(config)
 		opts = append(opts, grpc.WithTransportCredentials(cred))
-		ts := oauth2.StaticTokenSource(&oauth2.Token{
-			AccessToken: cb.token,
-			TokenType:   "bearer",
-		})
-		opts = append(opts, grpc.WithPerRPCCredentials(oauth.TokenSource{TokenSource: ts}))
+		if cb.token != "" {
+			ts := oauth2.StaticTokenSource(&oauth2.Token{
+				AccessToken: cb.token,
+				TokenType:   "bearer",
+			})
+			opts = append(opts, grpc.WithPerRPCCredentials(oauth.TokenSource{TokenSource: ts}))
+		}
 	}
 
 	remote := fmt.Sprintf("%v:%v", cb.host, cb.port)
@@ -148,8 +146,9 @@ func (cb *BaseBuilder) Build(ctx context.Context) (*grpc.ClientConn, error) {
 // NewBuilder creates a new instance of the BaseBuilder. This constructor effectively
 // parses the connection string and extracts the relevant parameters directly.
 //
-// The following parameters to the connection string are reserved: user_id, session_id, use_ssl,
-// and token. These parameters are not allowed to be injected as headers.
+// The following parameters to the connection string are reserved: user_id,
+// session_id, use_ssl, validate_server_certificate, and token. These
+// parameters are not allowed to be injected as headers.
 func NewBuilder(connection string) (*BaseBuilder, error) {
 	u, err := url.Parse(connection)
 	if err != nil {
@@ -188,28 +187,43 @@ func NewBuilder(connection string) (*BaseBuilder, error) {
 	}
 
 	cb := &BaseBuilder{
-		host:      host,
-		port:      port,
-		headers:   map[string]string{},
-		sessionId: uuid.NewString(),
-		userAgent: "",
+		host:                      host,
+		port:                      port,
+		validateServerCertificate: true,
+		headers:                   map[string]string{},
+		sessionId:                 uuid.NewString(),
+		userAgent:                 "",
 	}
 
 	elements := strings.SplitSeq(u.Path, ";")
 	for e := range elements {
 		props := strings.Split(e, "=")
 		if len(props) == 2 {
+			value, err := url.QueryUnescape(props[1])
+			if err != nil {
+				return nil, err
+			}
 			switch props[0] {
 			case "token":
-				cb.token = props[1]
+				cb.token = value
+			case "use_ssl":
+				cb.useSSL, err = strconv.ParseBool(value)
+				if err != nil {
+					return nil, err
+				}
+			case "validate_server_certificate":
+				cb.validateServerCertificate, err = strconv.ParseBool(value)
+				if err != nil {
+					return nil, err
+				}
 			case "user_id":
-				cb.user = props[1]
+				cb.user = value
 			case "session_id":
-				cb.sessionId = props[1]
+				cb.sessionId = value
 			case "user_agent":
-				cb.userAgent = props[1]
+				cb.userAgent = value
 			default:
-				cb.headers[props[0]] = props[1]
+				cb.headers[props[0]] = value
 			}
 		}
 	}

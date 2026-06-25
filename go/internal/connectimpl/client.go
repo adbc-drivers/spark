@@ -44,6 +44,10 @@ type ConnectionOpts struct {
 	// Token is the OAuth2 bearer token used when AuthType is AuthTypeToken.
 	// The spark-connect-go client enables TLS when a token is present.
 	Token string
+
+	Tls                       bool
+	ValidateServerCertificate bool
+	AwsProxyAuth              string
 }
 
 type connectClient struct {
@@ -78,7 +82,7 @@ func buildConnectionString(opts ConnectionOpts) string {
 	var b strings.Builder
 	b.WriteString("sc://")
 	b.WriteString(opts.Host)
-	if opts.Token != "" || opts.Username != "" {
+	if opts.Token != "" || opts.Username != "" || opts.Tls || !opts.ValidateServerCertificate || opts.AwsProxyAuth != "" {
 		// spark-connect-go rejects trailing slash when there are no other params
 		b.WriteString("/")
 	}
@@ -87,6 +91,15 @@ func buildConnectionString(opts ConnectionOpts) string {
 	}
 	if opts.Username != "" {
 		fmt.Fprintf(&b, ";user_id=%s", url.QueryEscape(opts.Username))
+	}
+	if opts.Tls {
+		b.WriteString(";use_ssl=true")
+	}
+	if !opts.ValidateServerCertificate {
+		b.WriteString(";validate_server_certificate=false")
+	}
+	if opts.AwsProxyAuth != "" {
+		fmt.Fprintf(&b, ";x-aws-proxy-auth=%s", url.QueryEscape(opts.AwsProxyAuth))
 	}
 	return b.String()
 }

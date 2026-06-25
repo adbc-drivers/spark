@@ -329,15 +329,17 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 		delete(options, adbc.OptionKeyPassword)
 	}
 
-	// XXX: ignored, because spark-connect-go doesn't let you configure this
-	_, err = parseBoolOption(sparkutil.OptionUseTls, options, false)
+	tls, err := parseBoolOption(sparkutil.OptionUseTls, options, false)
 	if err != nil {
 		return connectOpts, err
 	}
-	_, err = parseBoolOption(sparkutil.OptionValidateServerCertificate, options, true)
+	connectOpts.Tls = tls
+
+	validateServerCertificate, err := parseBoolOption(sparkutil.OptionValidateServerCertificate, options, true)
 	if err != nil {
 		return connectOpts, err
 	}
+	connectOpts.ValidateServerCertificate = validateServerCertificate
 
 	authType, ok := options[sparkutil.OptionAuthType]
 	if !ok {
@@ -358,12 +360,22 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 		if !hasPassword || password == "" {
 			return connectOpts, sparkbase.MissingRequiredOptionErr(adbc.OptionKeyPassword)
 		}
-		connectOpts.Token = password
+		if isAwsEmrServerlessHost(connectOpts.Host) {
+			connectOpts.Username = ""
+			connectOpts.AwsProxyAuth = password
+		} else {
+			connectOpts.Token = password
+		}
 	default:
 		return connectOpts, sparkbase.InvalidOptionErr(sparkutil.OptionAuthType, authType)
 	}
 
 	return connectOpts, nil
+}
+
+func isAwsEmrServerlessHost(host string) bool {
+	host = strings.ToLower(host)
+	return strings.Contains(host, "amazonaws.com") && strings.Contains(host, "emr-serverless-services")
 }
 
 func thriftOptsFromOptions(api string, options map[string]string) (thriftimpl.ConnectionOpts, error) {
