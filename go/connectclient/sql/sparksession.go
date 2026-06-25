@@ -23,6 +23,7 @@ package sql
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -60,14 +61,7 @@ func NewSessionBuilder() *SparkSessionBuilder {
 }
 
 type SparkSessionBuilder struct {
-	connectionString string
-	channelBuilder   channel.Builder
-}
-
-// Remote sets the connection string for remote connection
-func (s *SparkSessionBuilder) Remote(connectionString string) *SparkSessionBuilder {
-	s.connectionString = connectionString
-	return s
+	channelBuilder channel.Builder
 }
 
 func (s *SparkSessionBuilder) WithChannelBuilder(cb channel.Builder) *SparkSessionBuilder {
@@ -77,17 +71,11 @@ func (s *SparkSessionBuilder) WithChannelBuilder(cb channel.Builder) *SparkSessi
 
 func (s *SparkSessionBuilder) Build(ctx context.Context) (SparkSession, error) {
 	if s.channelBuilder == nil {
-		cb, err := channel.NewBuilder(s.connectionString)
-		if err != nil {
-			return nil, sparkerrors.WithType(fmt.Errorf(
-				"failed to connect to remote %s: %w", s.connectionString, err), sparkerrors.ConnectionError)
-		}
-		s.channelBuilder = cb
+		return nil, sparkerrors.WithType(errors.New("channel builder must be configured"), sparkerrors.InvalidArgumentError)
 	}
 	conn, err := s.channelBuilder.Build(ctx)
 	if err != nil {
-		return nil, sparkerrors.WithType(fmt.Errorf("failed to connect to remote %s: %w",
-			s.connectionString, err), sparkerrors.ConnectionError)
+		return nil, sparkerrors.WithType(fmt.Errorf("failed to build channel: %w", err), sparkerrors.ConnectionError)
 	}
 
 	// Add metadata to the request.

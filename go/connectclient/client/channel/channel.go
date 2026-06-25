@@ -25,12 +25,9 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
+	"maps"
 	"os"
 	"runtime"
-	"strconv"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -66,10 +63,7 @@ type Builder interface {
 	UserAgent() string
 }
 
-// BaseBuilder is used to parse the different parameters of the connection
-// string according to the specification documented here:
-//
-//	https://github.com/apache/spark/blob/master/connector/connect/docs/client-connection-string.md
+// BaseBuilder stores the parameters used to create a Spark Connect channel.
 type BaseBuilder struct {
 	host                      string
 	port                      int
@@ -80,6 +74,18 @@ type BaseBuilder struct {
 	headers                   map[string]string
 	sessionId                 string
 	userAgent                 string
+}
+
+type ConnectionParameters struct {
+	Host                      string
+	Port                      int
+	Token                     string
+	User                      string
+	UseSSL                    bool
+	ValidateServerCertificate *bool
+	Headers                   map[string]string
+	SessionID                 string
+	UserAgent                 string
 }
 
 func (cb *BaseBuilder) Host() string {
@@ -143,92 +149,49 @@ func (cb *BaseBuilder) Build(ctx context.Context) (*grpc.ClientConn, error) {
 	return conn, nil
 }
 
-// NewBuilder creates a new instance of the BaseBuilder. This constructor effectively
-// parses the connection string and extracts the relevant parameters directly.
-//
-// The following parameters to the connection string are reserved: user_id,
-// session_id, use_ssl, validate_server_certificate, and token. These
-// parameters are not allowed to be injected as headers.
-func NewBuilder(connection string) (*BaseBuilder, error) {
-	u, err := url.Parse(connection)
-	if err != nil {
-		return nil, err
+// NewBuilder creates a new instance of the BaseBuilder from typed connection
+// parameters.
+func NewBuilder(params ConnectionParameters) (*BaseBuilder, error) {
+	if params.Host == "" {
+		return nil, sparkerrors.WithType(errors.New("connection parameters must contain a hostname"), sparkerrors.InvalidInputError)
 	}
 
-	if u.Hostname() == "" {
-		return nil, sparkerrors.WithType(errors.New("URL must contain a hostname"), sparkerrors.InvalidInputError)
+	port := params.Port
+	if port == 0 {
+		port = 15002
 	}
 
-	if u.Scheme != "sc" {
-		return nil, sparkerrors.WithType(errors.New("URL schema must be set to `sc`"), sparkerrors.InvalidInputError)
+	if port < 0 {
+		return nil, sparkerrors.WithType(errors.New("port must be non-negative"), sparkerrors.InvalidInputError)
 	}
 
-	port := 15002
-	host := u.Host
-	// Check if the host part of the URL contains a port and extract.
-	if strings.Contains(u.Host, ":") {
-		// We can ignore the error here already since the url parsing
-		// raises the error about invalid port.
-		hostStr, portStr, _ := net.SplitHostPort(u.Host)
-		host = hostStr
-		if len(portStr) != 0 {
-			port, err = strconv.Atoi(portStr)
-			if err != nil {
-				return nil, err
-			}
-		}
+	validateServerCertificate := true
+	if params.ValidateServerCertificate != nil {
+		validateServerCertificate = *params.ValidateServerCertificate
 	}
 
-	// Validate that the URL path is empty or follows the right format.
-	if u.Path != "" && !strings.HasPrefix(u.Path, "/;") {
-		return nil, sparkerrors.WithType(
-			fmt.Errorf("the URL path (%v) must be empty or have a proper parameter syntax", u.Path),
-			sparkerrors.InvalidInputError)
+	headers := make(map[string]string, len(params.Headers))
+	maps.Copy(headers, params.Headers)
+
+	sessionId := params.SessionID
+	if sessionId == "" {
+		sessionId = uuid.NewString()
 	}
 
 	cb := &BaseBuilder{
-		host:                      host,
+		host:                      params.Host,
 		port:                      port,
-		validateServerCertificate: true,
-		headers:                   map[string]string{},
-		sessionId:                 uuid.NewString(),
-		userAgent:                 "",
-	}
-
-	elements := strings.SplitSeq(u.Path, ";")
-	for e := range elements {
-		props := strings.Split(e, "=")
-		if len(props) == 2 {
-			value, err := url.QueryUnescape(props[1])
-			if err != nil {
-				return nil, err
-			}
-			switch props[0] {
-			case "token":
-				cb.token = value
-			case "use_ssl":
-				cb.useSSL, err = strconv.ParseBool(value)
-				if err != nil {
-					return nil, err
-				}
-			case "validate_server_certificate":
-				cb.validateServerCertificate, err = strconv.ParseBool(value)
-				if err != nil {
-					return nil, err
-				}
-			case "user_id":
-				cb.user = value
-			case "session_id":
-				cb.sessionId = value
-			case "user_agent":
-				cb.userAgent = value
-			default:
-				cb.headers[props[0]] = value
-			}
-		}
+		token:                     params.Token,
+		user:                      params.User,
+		useSSL:                    params.UseSSL,
+		validateServerCertificate: validateServerCertificate,
+		headers:                   headers,
+		sessionId:                 sessionId,
+		userAgent:                 params.UserAgent,
 	}
 
 	// Set default user ID if not set.
+	// TODO(lidavidm): should we be doing this? what does pyspark do?
 	if cb.user == "" {
 		cb.user = os.Getenv("USER")
 		if cb.user == "" {
@@ -237,6 +200,7 @@ func NewBuilder(connection string) (*BaseBuilder, error) {
 	}
 
 	// Update the user agent if it is not set or set to a custom value.
+	// TODO(lidavidm): hardcode the appropriate user-agent for this driver
 	val := os.Getenv("SPARK_CONNECT_USER_AGENT")
 	if cb.userAgent == "" && val != "" {
 		cb.userAgent = os.Getenv("SPARK_CONNECT_USER_AGENT")

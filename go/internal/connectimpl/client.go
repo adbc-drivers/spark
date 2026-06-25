@@ -16,11 +16,12 @@ package connectimpl
 
 import (
 	"context"
-	"fmt"
-	"net/url"
+	"net"
+	"strconv"
 	"strings"
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
+	"github.com/adbc-drivers/spark/go/connectclient/client/channel"
 	sparksql "github.com/adbc-drivers/spark/go/connectclient/sql"
 	"github.com/adbc-drivers/spark/go/internal/sparkbase"
 	"github.com/apache/arrow-adbc/go/adbc"
@@ -60,9 +61,17 @@ func (c *connectClient) BackendName() string {
 
 // NewClient creates a SparkClient backed by a Spark Connect gRPC session.
 func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[string]string) (sparkbase.SparkClient, error) {
-	connStr := buildConnectionString(opts)
+	params, err := channelParametersFromConnectionOpts(opts)
+	if err != nil {
+		return nil, err
+	}
 
-	session, err := sparksql.NewSessionBuilder().Remote(connStr).Build(ctx)
+	channelBuilder, err := channel.NewBuilder(params)
+	if err != nil {
+		return nil, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "build Spark Connect channel")
+	}
+
+	session, err := sparksql.NewSessionBuilder().WithChannelBuilder(channelBuilder).Build(ctx)
 	if err != nil {
 		return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "build Spark Connect session")
 	}
@@ -78,30 +87,37 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 	return &connectClient{session: session}, nil
 }
 
-func buildConnectionString(opts ConnectionOpts) string {
-	var b strings.Builder
-	b.WriteString("sc://")
-	b.WriteString(opts.Host)
-	if opts.Token != "" || opts.Username != "" || opts.Tls || !opts.ValidateServerCertificate || opts.AwsProxyAuth != "" {
-		// spark-connect-go rejects trailing slash when there are no other params
-		b.WriteString("/")
+func channelParametersFromConnectionOpts(opts ConnectionOpts) (channel.ConnectionParameters, error) {
+	params := channel.ConnectionParameters{
+		Host:                      opts.Host,
+		Token:                     opts.Token,
+		User:                      opts.Username,
+		UseSSL:                    opts.Tls,
+		ValidateServerCertificate: &opts.ValidateServerCertificate,
 	}
-	if opts.Token != "" {
-		fmt.Fprintf(&b, ";token=%s", url.QueryEscape(opts.Token))
+
+	if strings.Contains(opts.Host, ":") {
+		host, port, err := net.SplitHostPort(opts.Host)
+		if err != nil {
+			return params, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse Spark Connect host")
+		}
+		params.Host = host
+		if port != "" {
+			portValue, err := strconv.Atoi(port)
+			if err != nil {
+				return params, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse Spark Connect port")
+			}
+			params.Port = portValue
+		}
 	}
-	if opts.Username != "" {
-		fmt.Fprintf(&b, ";user_id=%s", url.QueryEscape(opts.Username))
-	}
-	if opts.Tls {
-		b.WriteString(";use_ssl=true")
-	}
-	if !opts.ValidateServerCertificate {
-		b.WriteString(";validate_server_certificate=false")
-	}
+
 	if opts.AwsProxyAuth != "" {
-		fmt.Fprintf(&b, ";x-aws-proxy-auth=%s", url.QueryEscape(opts.AwsProxyAuth))
+		params.Headers = map[string]string{
+			"x-aws-proxy-auth": opts.AwsProxyAuth,
+		}
 	}
-	return b.String()
+
+	return params, nil
 }
 
 func (c *connectClient) Close() error {
