@@ -26,7 +26,13 @@ def pytest_generate_tests(metafunc) -> None:
     if quirks.short_version.endswith("-livy"):
         combinations = [pytest.param(driver_param, id=driver_param)]
     else:
-        combinations = []
+        combinations = [
+            pytest.param(
+                driver_param,
+                id=driver_param,
+                marks=[pytest.mark.skip(reason="test is only for Livy")],
+            )
+        ]
     metafunc.parametrize(
         "driver",
         combinations,
