@@ -1,0 +1,116 @@
+// Copyright (c) 2026 ADBC Drivers Contributors
+//
+// This file has been modified from its original version, which is
+// under the Apache License:
+//
+// Licensed to the Apache Software Foundation (ASF) under one or more
+// contributor license agreements.  See the NOTICE file distributed with
+// this work for additional information regarding copyright ownership.
+// The ASF licenses this file to You under the Apache License, Version 2.0
+// (the "License"); you may not use this file except in compliance with
+// the License.  You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package types
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/apache/arrow-go/v18/arrow"
+)
+
+// StructField represents a field in a StructType.
+type StructField struct {
+	Name     string
+	DataType DataType
+	Nullable bool // default should be true
+	Metadata *string
+}
+
+func (t *StructField) ToArrowType() arrow.Field {
+	return arrow.Field{
+		Name:     t.Name,
+		Type:     t.DataType.ToArrowType(),
+		Nullable: t.Nullable,
+	}
+}
+
+func (t *StructField) buildFormattedString(prefix string, target *string) {
+	if target == nil {
+		return
+	}
+
+	switch t.DataType.(type) {
+	case ArrayType:
+		*target += fmt.Sprintf("%s-- %s: array (nullable = %t)\n",
+			prefix, t.Name, t.Nullable)
+		*target += fmt.Sprintf("%s    |-- element: %s (valueContainsNull = %t)\n",
+			prefix, t.DataType.(ArrayType).ElementType.TypeName(), t.Nullable)
+	case MapType:
+		*target += fmt.Sprintf("%s-- %s: map (nullable = %t)\n",
+			prefix, t.Name, t.Nullable)
+		*target += fmt.Sprintf("%s    |-- key: %s\n",
+			prefix, t.DataType.(MapType).KeyType.TypeName())
+		*target += fmt.Sprintf("%s    |-- value: %s (valueContainsNull = %t)\n",
+			prefix, t.DataType.(MapType).ValueType.TypeName(), t.Nullable)
+	case StructType:
+		*target += fmt.Sprintf("%s-- %s: structtype (nullable = %t)\n",
+			prefix, t.Name, t.Nullable)
+		for _, field := range t.DataType.(StructType).Fields {
+			field.buildFormattedString(prefix+"    |", target)
+		}
+	default:
+		*target += fmt.Sprintf("%s-- %s: %s (nullable = %t)\n", prefix, t.Name,
+			strings.ToLower(t.DataType.TypeName()), t.Nullable)
+	}
+}
+
+// StructType represents a struct type.
+type StructType struct {
+	Fields []StructField
+}
+
+func (t StructType) TypeName() string {
+	return "structtype"
+}
+
+func (t StructType) IsNumeric() bool {
+	return false
+}
+
+func (t StructType) ToArrowType() arrow.DataType {
+	fields := make([]arrow.Field, len(t.Fields))
+	for i, f := range t.Fields {
+		fields[i] = f.ToArrowType()
+	}
+	return arrow.StructOf(fields...)
+}
+
+func (t *StructType) TreeString() string {
+	tree := string("root\n")
+	prefix := " |"
+	for _, f := range t.Fields {
+		f.buildFormattedString(prefix, &tree)
+	}
+	return tree + "\n"
+}
+
+func StructOf(fields ...StructField) *StructType {
+	return &StructType{Fields: fields}
+}
+
+func NewStructField(name string, dataType DataType) StructField {
+	return StructField{
+		Name:     name,
+		DataType: dataType,
+		Nullable: true,
+	}
+}

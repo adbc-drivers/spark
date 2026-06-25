@@ -26,10 +26,10 @@ import (
 	// "strings"
 	"testing"
 
-	driver "github.com/adbc-drivers/apache/go"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/driverbase-go/testutil"
 	"github.com/adbc-drivers/driverbase-go/validation"
+	driver "github.com/adbc-drivers/spark/go"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"

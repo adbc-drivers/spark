@@ -66,7 +66,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	spark "github.com/adbc-drivers/apache/go"
+	spark "github.com/adbc-drivers/spark/go"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow/array"

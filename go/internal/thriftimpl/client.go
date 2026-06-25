@@ -23,10 +23,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/adbc-drivers/apache/go/internal/hiveserver2"
-	"github.com/adbc-drivers/apache/go/internal/sasl"
-	"github.com/adbc-drivers/apache/go/internal/sparkbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
+	"github.com/adbc-drivers/spark/go/internal/hiveserver2"
+	"github.com/adbc-drivers/spark/go/internal/sasl"
+	"github.com/adbc-drivers/spark/go/internal/sparkbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"

@@ -216,11 +216,29 @@ Copyright: 2022 The Apache Software Foundation.
 Home page: https://arrow.apache.org/
 License: http://www.apache.org/licenses/LICENSE-2.0
 
+--------------------------------------------------------------------------------
+
+This project includes code from Apache Spark.
+
+Commit: 6a3f1e67af4abee7e377d32ba5d71f7a9c4a1687
+Copyright 2014 and onwards The Apache Software Foundation.
+Home page: https://spark.apache.org/
+License: http://www.apache.org/licenses/LICENSE-2.0
+
+--------------------------------------------------------------------------------
+
+This project includes code from Apache Spark Connect Client for Golang.
+
+Commit: 0e3d565b63e6af9383555e41e5073a17c20eeabf
+Copyright 2014 and onwards The Apache Software Foundation.
+Home page: https://spark.apache.org/
+License: http://www.apache.org/licenses/LICENSE-2.0
+
 {{ range .}}
 --------------------------------------------------------------------------------
 
 3rdparty dependency {{ .Name }}
-is statically linked in certain binary distributions, like the Python wheels.
+is statically linked.
 {{ .Name }} is under the {{ .LicenseName }} license.
 {{ if ne .LicenseName "Apache-2.0" -}}
 {{.LicenseText}}

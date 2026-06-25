@@ -12,8 +12,6 @@ github.com/apache/arrow-adbc/go/adbc v1.11.0 h1:zcSLtV8CQ27chkYWZmySvd4+pkkDtWhR
 github.com/apache/arrow-adbc/go/adbc v1.11.0/go.mod h1:7BIIq4XHzttQVG293LRurIhF/UH+IWlgGRR6hUqPLG8=
 github.com/apache/arrow-go/v18 v18.6.0 h1:GX/Jyd3R7mCLiECAwY9FWbbaYblie2WXBSz4Sw8fNpM=
 github.com/apache/arrow-go/v18 v18.6.0/go.mod h1:gm3MiPpY82fLYK5VKPB3WoJbsiLVDfT7flD5/vHReKw=
-github.com/apache/spark-connect-go/v40 v40.0.0-20250609164624-defb85250881 h1:ZgPVr9gbMzmTHU+QuejQWGTNSpAdzFDZGqcFye0ONZU=
-github.com/apache/spark-connect-go/v40 v40.0.0-20250609164624-defb85250881/go.mod h1:WS2AYlDqsswl4zzIQN0SqjmIuQQ5evunPE0G/wFD47Q=
 github.com/apache/thrift v0.23.0 h1:wKR6YnefQSEnxpEfmgTPuJibNG4bF0p2TK34tHLWi3s=
 github.com/apache/thrift v0.23.0/go.mod h1:zPt6WxgvTOM6hF92y8C+MkEM5LMxZuk4JcQOiU4Esvs=
 github.com/aws/aws-sdk-go-v2 v1.41.7 h1:DWpAJt66FmnnaRIOT/8ASTucrvuDPZASqhhLey6tLY8=
