@@ -18,9 +18,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/adbc-drivers/apache/go/internal/sparkbase"
-	"github.com/adbc-drivers/apache/go/sparkutil"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
+	"github.com/adbc-drivers/spark/go/internal/sparkbase"
+	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
 )
 

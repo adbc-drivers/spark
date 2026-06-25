@@ -20,10 +20,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/adbc-drivers/apache/go/internal/sparkbase"
-	"github.com/adbc-drivers/apache/go/sparkutil"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase/arrowext"
+	"github.com/adbc-drivers/spark/go/internal/sparkbase"
+	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"

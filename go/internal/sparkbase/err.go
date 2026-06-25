@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/adbc-drivers/apache/go/internal/hiveserver2"
+	"github.com/adbc-drivers/spark/go/internal/hiveserver2"
 	"github.com/apache/arrow-adbc/go/adbc"
 )
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-module github.com/adbc-drivers/apache/go
+module github.com/adbc-drivers/spark/go
 
 go 1.26.1
 
@@ -22,7 +22,6 @@ require (
 	github.com/adbc-drivers/driverbase-go/validation v0.0.0-20260527232004-01eba0d29345
 	github.com/apache/arrow-adbc/go/adbc v1.11.0
 	github.com/apache/arrow-go/v18 v18.6.0
-	github.com/apache/spark-connect-go/v40 v40.0.0-20250609164624-defb85250881
 	github.com/apache/thrift v0.23.0
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.18

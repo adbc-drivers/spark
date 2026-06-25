@@ -19,10 +19,10 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/adbc-drivers/apache/go/internal/connectimpl"
-	"github.com/adbc-drivers/apache/go/internal/livyimpl"
-	"github.com/adbc-drivers/apache/go/internal/thriftimpl"
-	"github.com/adbc-drivers/apache/go/sparkutil"
+	"github.com/adbc-drivers/spark/go/internal/connectimpl"
+	"github.com/adbc-drivers/spark/go/internal/livyimpl"
+	"github.com/adbc-drivers/spark/go/internal/thriftimpl"
+	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/stretchr/testify/require"
 )

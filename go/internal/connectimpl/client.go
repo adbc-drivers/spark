@@ -20,12 +20,12 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/adbc-drivers/apache/go/internal/sparkbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
+	sparksql "github.com/adbc-drivers/spark/go/connectclient/sql"
+	"github.com/adbc-drivers/spark/go/internal/sparkbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	sparksql "github.com/apache/spark-connect-go/v40/spark/sql"
 )
 
 type AuthType uint8

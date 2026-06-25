@@ -32,7 +32,8 @@ repos:
     exclude: >
         (?x)^(
             .*go\.sum|
-            go/hiveserver2\.thrift
+            go/hiveserver2\.thrift|
+            go/connectclient/internal/generated/.*\.go
         )$
 
 - repo: https://github.com/golangci/golangci-lint
