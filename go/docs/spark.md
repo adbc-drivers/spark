@@ -137,7 +137,19 @@ Different backends and cluster configurations have limitations; some limitations
 
 ### Spark Connect
 
-- In our testing, connecting to an Amazon EMR (Serverless) cluster via Spark Connect does not work; we believe it is an incompatibility in the Spark Connect client library and plan to address this in a future version of the driver.
+- The connection URI should look like this:
+
+  ```
+  spark://:<AUTH TOKEN>@<SESSION ID>.s.emr-serverless-services.<REGION>.amazonaws.com:443?tls=true&auth_type=token&api=connect
+  ```
+
+  The full hostname can be obtained from the AWS API, e.g. via the CLI:
+
+  ```
+  aws emr-serverless get-session-endpoint --application-id <APPLICATION ID> --session-id <SESSION ID>
+  ```
+
+  This command will also give you the auth token.
 
 ### Amazon EMR (Serverless)
 
