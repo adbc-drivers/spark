@@ -131,7 +131,9 @@ Different backends and cluster configurations have limitations; some limitations
 
 - Only the first 1000 rows of a result set can be fetched. This can be tuned by configuring Spark with `spark.sql.repl.eagerEval.maxNumRows`.
 - In general, we have found that performance is worse than with Spark Connect or HiveServer2.
-- Connecting to an Amazon EMR (Serverless) cluster via Livy requires setting the `emr-serverless.session.executionRoleArn` session config option to an appropriate role ARN.
+- Connecting to an Amazon EMR (Serverless) cluster via Livy requires setting the `emr-serverless.session.executionRoleArn` session config option to an appropriate role ARN. This can be set via the ADBC option `spark.opt.emr-serverless.session.executionRoleArn`.
+- By default, the driver will attempt to start a new Livy session, which tends to take some time (~a few minutes). To amortize this time across multiple connections, the option `spark.livy.session_id` can be used to fetch the session ID, and to provide it upon connection, bypassing creating a new session.
+- By default, the driver will close the session when the connection is closed. Setting `spark.livy.delete_session` to `false` on connection will avoid this, making it easier to reuse the session.
 
 ### Spark Connect
 
