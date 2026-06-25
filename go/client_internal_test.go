@@ -317,6 +317,7 @@ func TestParseLivyOptionsFromUri(t *testing.T) {
 				AuthType:                  livyimpl.AuthTypeNone,
 				BaseURL:                   "http://localhost:10000",
 				ValidateServerCertificate: true,
+				DeleteSessionOnClose:      true,
 			},
 		},
 		{
@@ -326,6 +327,7 @@ func TestParseLivyOptionsFromUri(t *testing.T) {
 				AuthType:                  livyimpl.AuthTypeBasic,
 				BaseURL:                   "http://localhost:10000",
 				ValidateServerCertificate: true,
+				DeleteSessionOnClose:      true,
 			},
 		},
 		{
@@ -337,6 +339,7 @@ func TestParseLivyOptionsFromUri(t *testing.T) {
 				Username:                  "foo",
 				Password:                  "bar",
 				ValidateServerCertificate: true,
+				DeleteSessionOnClose:      true,
 			},
 		},
 		{
@@ -348,6 +351,7 @@ func TestParseLivyOptionsFromUri(t *testing.T) {
 				Username:                  "foo",
 				Password:                  "bar",
 				ValidateServerCertificate: true,
+				DeleteSessionOnClose:      true,
 			},
 		},
 		{
@@ -359,6 +363,7 @@ func TestParseLivyOptionsFromUri(t *testing.T) {
 				Username:                  "foo",
 				Password:                  "bar",
 				ValidateServerCertificate: false,
+				DeleteSessionOnClose:      true,
 			},
 		},
 	} {
