@@ -160,4 +160,12 @@ func (c *connectClient) GetTablesForDBSchema(ctx context.Context, catalog string
 	return sparkbase.DefaultGetTablesForDBSchemaImpl(c, ctx, catalog, schema, tableFilter, columnFilter, includeColumns)
 }
 
+func (c *connectClient) GetOption(_ context.Context, _ string) (string, bool, error) {
+	return "", false, nil
+}
+
+func (c *connectClient) GetOptionInt(_ context.Context, _ string) (int64, bool, error) {
+	return 0, false, nil
+}
+
 var _ sparkbase.SparkClient = (*connectClient)(nil)

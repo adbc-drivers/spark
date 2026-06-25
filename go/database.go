@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	"github.com/adbc-drivers/apache/go/internal/sparkbase"
+	"github.com/adbc-drivers/apache/go/sparkutil"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 )
@@ -42,12 +43,12 @@ func (d *databaseImpl) SetOptions(ctx context.Context, options map[string]string
 		return err
 	}
 
-	if endpoint, ok := options[OptionIngestS3BaseEndpoint]; ok {
+	if endpoint, ok := options[sparkutil.OptionIngestS3BaseEndpoint]; ok {
 		d.s3BaseEndpoint = endpoint
-		delete(options, OptionIngestS3BaseEndpoint)
+		delete(options, sparkutil.OptionIngestS3BaseEndpoint)
 	}
 
-	usePathStyle, err := parseBoolOption(OptionIngestS3UsePathStyle, options, false)
+	usePathStyle, err := parseBoolOption(sparkutil.OptionIngestS3UsePathStyle, options, false)
 	if err != nil {
 		return err
 	}
