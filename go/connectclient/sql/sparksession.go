@@ -71,7 +71,7 @@ func (s *SparkSessionBuilder) WithChannelBuilder(cb channel.Builder) *SparkSessi
 
 func (s *SparkSessionBuilder) Build(ctx context.Context) (SparkSession, error) {
 	if s.channelBuilder == nil {
-		return nil, sparkerrors.WithType(errors.New("channel builder must be configured"), sparkerrors.ConnectionError)
+		return nil, sparkerrors.WithType(errors.New("channel builder must be configured"), sparkerrors.InvalidArgumentError)
 	}
 	conn, err := s.channelBuilder.Build(ctx)
 	if err != nil {

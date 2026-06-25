@@ -191,6 +191,7 @@ func NewBuilder(params ConnectionParameters) (*BaseBuilder, error) {
 	}
 
 	// Set default user ID if not set.
+	// TODO(lidavidm): should we be doing this? what does pyspark do?
 	if cb.user == "" {
 		cb.user = os.Getenv("USER")
 		if cb.user == "" {
@@ -199,6 +200,7 @@ func NewBuilder(params ConnectionParameters) (*BaseBuilder, error) {
 	}
 
 	// Update the user agent if it is not set or set to a custom value.
+	// TODO(lidavidm): hardcode the appropriate user-agent for this driver
 	val := os.Getenv("SPARK_CONNECT_USER_AGENT")
 	if cb.userAgent == "" && val != "" {
 		cb.userAgent = os.Getenv("SPARK_CONNECT_USER_AGENT")
