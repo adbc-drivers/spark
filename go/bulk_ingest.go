@@ -35,6 +35,7 @@ type bulkIngestOptions struct {
 	driverbase.BulkIngestOptions
 
 	staging        *url.URL
+	location       string
 	s3BaseEndpoint string
 	s3UsePathStyle bool
 }
@@ -258,6 +259,10 @@ func (bi *bulkIngestImpl) createTableStatement(schema *arrow.Schema, ifTableExis
 		}
 
 		b.WriteString(")")
+		if bi.options.location != "" {
+			b.WriteString(" LOCATION ")
+			b.WriteString(sparkbase.QuoteString(bi.options.location))
+		}
 		stmts = append(stmts, b.String())
 	}
 	return stmts, nil

@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import contextlib
 import functools
 import re
+import uuid
 from pathlib import Path
 
 from adbc_drivers_validation import model, quirks
+from adbc_drivers_validation.tests import ingest
 
 
 class Spark3ThriftQuirks(model.DriverQuirks):
@@ -169,8 +172,60 @@ class Spark4ConnectQuirks(Spark4ThriftQuirks):
         )
 
 
+class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
+    vendor_version = re.compile(r"4\.0\.\d+.*\(Spark Connect\)")
+    short_version = "8.0-connect"
+
+    setup = model.DriverSetup(
+        database={
+            "uri": model.FromEnv("SPARK_CONNECT_URI"),
+        },
+        connection={},
+        statement={
+            "spark.ingest.staging_area_uri": "s3://columnar-lidavidm-redshift-test/temp",
+        },
+    )
+
+    @property
+    def queries_paths(self) -> tuple[Path]:
+        return (
+            Path(__file__).parent.parent / "queries/base",
+            Path(__file__).parent.parent / "queries/spark40",
+            Path(__file__).parent.parent / "queries/spark40-connect",
+            Path(__file__).parent.parent / "queries/emr-spark8",
+        )
+
+    @contextlib.contextmanager
+    def setup_statement(self, query, cursor):
+        with super().setup_statement(query, cursor):
+            if isinstance(query, model.Query) and isinstance(
+                query.query, model.IngestQuery
+            ):
+                prefix = str(uuid.uuid4())
+                name = ingest.make_table_name(prefix, query)
+                location = f"s3://columnar-lidavidm-redshift-test/emr/{name}"
+                cursor.adbc_statement.set_options(
+                    **{
+                        "spark.ingest.location": location,
+                    }
+                )
+                print(f"{query.name}: spark.ingest.location =", location)
+            elif isinstance(query, str) and query.startswith("TestIngest"):
+                prefix = str(uuid.uuid4())
+                name = ingest.make_table_name(prefix, query.split(".")[-1])
+                location = f"s3://columnar-lidavidm-redshift-test/emr/{name}"
+                cursor.adbc_statement.set_options(
+                    **{
+                        "spark.ingest.location": location,
+                    }
+                )
+                print(f"{query}: spark.ingest.location =", location)
+
+            yield
+
+
 _VERSION_RE = re.compile(
-    r"^(spark3|spark4)(?:_|:)(\d+\.\d+-(connect|livy|thrift|thrifthttp))$"
+    r"^(spark3|spark4|emr)(?:_|:)(\d+\.\d+-(connect|livy|thrift|thrifthttp))$"
 )
 
 
@@ -194,4 +249,7 @@ def get_quirks(combined_version: str) -> model.DriverQuirks:
             return Spark4ThriftHttpQuirks()
         elif version == "4.0-connect":
             return Spark4ConnectQuirks()
+    elif vendor in ("emr",):
+        if version == "8.0-connect":
+            return SparkEmr8ConnectQuirks()
     raise ValueError(f"unsupported Spark {vendor} {version}")
