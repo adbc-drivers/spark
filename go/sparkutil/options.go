@@ -25,6 +25,10 @@ const (
 	// documentation.
 	StatementOptionIngestStagingAreaURI = "spark.ingest.staging_area_uri"
 
+	// The LOCATION clause for Spark's CREATE TABLE. Some implementations,
+	// like Amazon EMR, require this to be set to create a table.
+	OptionIngestLocation = "spark.ingest.location"
+
 	// CONNECTION OPTION KEYS
 
 	// OptionHost specifies the host to connect to

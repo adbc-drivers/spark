@@ -109,6 +109,9 @@ func (st *statementImpl) SetOption(ctx context.Context, key string, val string) 
 		}
 		st.clearQueryState()
 		st.ingest.staging = parsed
+	case sparkutil.OptionIngestLocation:
+		st.clearQueryState()
+		st.ingest.location = val
 	case sparkutil.OptionIngestS3BaseEndpoint:
 		st.ingest.s3BaseEndpoint = val
 	case sparkutil.OptionIngestS3UsePathStyle:

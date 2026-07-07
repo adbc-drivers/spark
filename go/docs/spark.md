@@ -132,12 +132,12 @@ Different backends and cluster configurations have limitations; some limitations
 - Only the first 1000 rows of a result set can be fetched. This can be tuned by configuring Spark with `spark.sql.repl.eagerEval.maxNumRows`.
 - In general, we have found that performance is worse than with Spark Connect or HiveServer2.
 - Connecting to an Amazon EMR (Serverless) cluster via Livy requires setting the `emr-serverless.session.executionRoleArn` session config option to an appropriate role ARN. This can be set via the ADBC option `spark.opt.emr-serverless.session.executionRoleArn`.
-- By default, the driver will attempt to start a new Livy session, which tends to take some time (~a few minutes). To amortize this time across multiple connections, the option `spark.livy.session_id` can be used to fetch the session ID, and to provide it upon connection, bypassing creating a new session.
+- By default, the driver will attempt to start a new Livy session, which tends to take some time (~a few minutes), especially when using Amazon EMR. To amortize this time across multiple connections, the option `spark.livy.session_id` can be used to fetch the session ID, and to provide it upon connection, bypassing creating a new session.
 - By default, the driver will close the session when the connection is closed. Setting `spark.livy.delete_session` to `false` on connection will avoid this, making it easier to reuse the session.
 
 ### Spark Connect
 
-- The connection URI should look like this:
+- To connect to Amazon EMR, the connection URI should look like this:
 
   ```
   spark://:<AUTH TOKEN>@<SESSION ID>.s.emr-serverless-services.<REGION>.amazonaws.com:443?tls=true&auth_type=token&api=connect
@@ -153,8 +153,10 @@ Different backends and cluster configurations have limitations; some limitations
 
 ### Amazon EMR (Serverless)
 
-- Bulk ingest with an AWS Glue catalog is not currently supported as there is no way to specify the `LOCATION` clause.
 - Amazon EMR is not currently enabled in our automated integration testing.
+- To use bulk ingest, set `spark.ingest.location` to a path on S3 where the table data will be stored.
+
+Also see the above caveats for specific ways to connect to EMR.
 
 ## Feature & Type Support
 
