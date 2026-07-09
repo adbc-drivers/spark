@@ -71,22 +71,22 @@ jobs:
           # https://github.com/actions/runner-images/issues/2840
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
           submodules: 'recursive'
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
           cache: true
           cache-dependency-path: go/go.sum
           check-latest: true
           go-version-file: go/go.mod
 
-      - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11  # v0.9.6
+      - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f  # v0.10.0
         with:
-          pixi-version: v0.63.2
+          pixi-version: v0.72.0
           run-install: false
 
 
@@ -118,8 +118,6 @@ jobs:
               echo "Service failed to start"
               echo "Logs:"
               docker compose logs spark4-thrift-server
-              docker compose logs tls-proxy
-              docker inspect --format "{{json .State.Health }}" go-tls-proxy-1
               exit 1
             fi
           fi
@@ -141,7 +139,7 @@ jobs:
 
           if [[ -f ci/scripts/pre-test.sh ]]; then
             echo "Loading pre-test"
-            ./ci/scripts/pre-test.sh ${{ matrix.platform }} ${{ matrix.arch }}
+            ./ci/scripts/pre-test.sh ${{ matrix.platform }} ${{ matrix.arch }} "spark4-thrift-server"
           fi
 
           go test -tags assert -v ./...
@@ -164,11 +162,12 @@ jobs:
       matrix:
         include:
           # I think we only need to test one platform, but we can change that later
-          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark35-thrift-server", vendor_version: "spark3_3.5-thrift" }
-          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark35-livy", vendor_version: "spark3_3.5-livy" }
-          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrift-server", vendor_version: "spark4_4.0-thrift" }
-          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrifthttp-server", vendor_version: "spark4_4.0-thrifthttp" }
-          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-connect-server", vendor_version: "spark4_4.0-connect" }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark35-thrift-server", vendor_version: "spark3_3.5-thrift", environment: null, azure: false }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark35-livy", vendor_version: "spark3_3.5-livy", environment: null, azure: false }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrift-server", vendor_version: "spark4_4.0-thrift", environment: null, azure: false }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrifthttp-server", vendor_version: "spark4_4.0-thrifthttp", environment: null, azure: false }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-connect-server", vendor_version: "spark4_4.0-connect", environment: null, azure: false }
+    environment: ${{ matrix.environment }}
     permissions:
       contents: read
     steps:
@@ -179,22 +178,22 @@ jobs:
           # https://github.com/actions/runner-images/issues/2840
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
           submodules: 'recursive'
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
           cache: true
           cache-dependency-path: go/go.sum
           check-latest: true
           go-version-file: go/go.mod
 
-      - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11  # v0.9.6
+      - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f  # v0.10.0
         with:
-          pixi-version: v0.63.2
+          pixi-version: v0.72.0
           run-install: false
 
 
@@ -227,13 +226,11 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: go
         run: |
-          if [[ -f compose.yaml ]]; then
+          if [[ -f compose.yaml ]] && [[ -n "${{ matrix.service_name }}" ]]; then
             if ! docker compose up --detach --wait ${{ matrix.service_name }}; then
               echo "Service failed to start"
               echo "Logs:"
               docker compose logs ${{ matrix.service_name }}
-              docker compose logs tls-proxy
-              docker inspect --format "{{json .State.Health }}" go-tls-proxy-1
               exit 1
             fi
           fi
@@ -306,22 +303,22 @@ jobs:
       packages: read
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
           submodules: 'recursive'
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
           cache: true
           cache-dependency-path: go/go.sum
           check-latest: true
           go-version-file: go/go.mod
 
-      - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11  # v0.9.6
+      - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f  # v0.10.0
         with:
-          pixi-version: v0.63.2
+          pixi-version: v0.72.0
           run-install: false
 
       - name: Install dev tools
@@ -368,21 +365,21 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
           submodules: 'recursive'
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
           cache: true
           check-latest: true
           go-version: "stable"
 
-      - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11  # v0.9.6
+      - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f  # v0.10.0
         with:
-          pixi-version: v0.63.2
+          pixi-version: v0.72.0
           run-install: false
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -454,13 +451,13 @@ jobs:
           - { platform: windows, arch: amd64, runner: windows-latest }
     steps:
       # for now, install dbc from main
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
         with:
           cache: true
           go-version: 'stable'
-      - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11  # v0.9.6
+      - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f  # v0.10.0
         with:
-          pixi-version: v0.63.2
+          pixi-version: v0.72.0
           run-install: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
@@ -479,7 +476,7 @@ jobs:
           echo "Installing ${driver_pkg}"
           ./dbc install --no-verify "${driver_pkg}"
           echo "Installed ${driver_pkg}"
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 1
           persist-credentials: false
@@ -513,15 +510,15 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
           submodules: 'recursive'
 
-      - uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11  # v0.9.6
+      - uses: prefix-dev/setup-pixi@a09b6247153796b190642a2b53fac4241043cf6f  # v0.10.0
         with:
-          pixi-version: v0.63.2
+          pixi-version: v0.72.0
           run-install: false
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
