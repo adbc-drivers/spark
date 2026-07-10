@@ -223,6 +223,10 @@ class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
 
             yield
 
+    def split_statement(self, statement: str) -> list[str]:
+        parts = super().split_statement(statement)
+        return [part.replace("{uuid}", str(uuid.uuid4())) for part in parts if part]
+
 
 _VERSION_RE = re.compile(
     r"^(spark3|spark4|emr)(?:_|:)(\d+\.\d+-(connect|livy|thrift|thrifthttp))$"
