@@ -44,7 +44,9 @@ func (c *connectionImpl) Close(ctx context.Context) error {
 	}
 
 	if err := c.client.Close(ctx); err != nil {
-		return err
+		// Prefer to log/warn so that connection object can be closed
+		c.Logger.WarnContext(ctx, "error closing spark client", "err", err)
+		return nil
 	}
 	c.client = nil
 	return nil
