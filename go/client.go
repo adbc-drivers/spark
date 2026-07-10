@@ -248,11 +248,11 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 		livyOpts.ExistingSessionId = new(intId)
 	}
 
-	if deleteSession, ok := options[sparkutil.OptionLivyDeleteSession]; ok {
-		delete(options, sparkutil.OptionLivyDeleteSession)
+	if deleteSession, ok := options[sparkutil.OptionLivyReleaseSession]; ok {
+		delete(options, sparkutil.OptionLivyReleaseSession)
 		deleteSessionBool, err := strconv.ParseBool(deleteSession)
 		if err != nil {
-			return livyOpts, sparkbase.InvalidOptionErr(sparkutil.OptionLivyDeleteSession, deleteSession)
+			return livyOpts, sparkbase.InvalidOptionErr(sparkutil.OptionLivyReleaseSession, deleteSession)
 		}
 		livyOpts.DeleteSessionOnClose = deleteSessionBool
 	} else {
@@ -340,6 +340,17 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 		return connectOpts, err
 	}
 	connectOpts.ValidateServerCertificate = validateServerCertificate
+
+	if sessionID, ok := options[sparkutil.OptionConnectSessionId]; ok {
+		connectOpts.SessionID = sessionID
+		delete(options, sparkutil.OptionConnectSessionId)
+	}
+
+	releaseSession, err := parseBoolOption(sparkutil.OptionConnectReleaseSession, options, true)
+	if err != nil {
+		return connectOpts, err
+	}
+	connectOpts.ReleaseSession = releaseSession
 
 	authType, ok := options[sparkutil.OptionAuthType]
 	if !ok {

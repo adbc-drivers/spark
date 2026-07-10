@@ -43,7 +43,7 @@ func (c *connectionImpl) Close(ctx context.Context) error {
 		return c.ErrorHelper.Errorf(adbc.StatusInvalidState, "connection not initialized or already closed")
 	}
 
-	if err := c.client.Close(); err != nil {
+	if err := c.client.Close(ctx); err != nil {
 		return err
 	}
 	c.client = nil

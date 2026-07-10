@@ -387,10 +387,10 @@ func (c *livyClient) DeleteSession(ctx context.Context) error {
 	return nil
 }
 
-func (c *livyClient) Close() error {
+func (c *livyClient) Close(ctx context.Context) error {
 	if c.deleteSessionOnClose {
 		url := fmt.Sprintf("/sessions/%d", c.sessionID)
-		resp, err := c.doRequest(context.Background(), "DELETE", url, nil)
+		resp, err := c.doRequest(ctx, "DELETE", url, nil)
 		if err != nil {
 			return err
 		}

@@ -279,6 +279,7 @@ func TestParseConnectOptionsFromUri(t *testing.T) {
 				Host:                      "localhost:10000",
 				AuthType:                  connectimpl.AuthTypeNone,
 				ValidateServerCertificate: true,
+				ReleaseSession:            true,
 			},
 		},
 		{
@@ -289,6 +290,7 @@ func TestParseConnectOptionsFromUri(t *testing.T) {
 				Username:                  "foo",
 				Token:                     "bar",
 				ValidateServerCertificate: true,
+				ReleaseSession:            true,
 			},
 		},
 		{
@@ -298,6 +300,7 @@ func TestParseConnectOptionsFromUri(t *testing.T) {
 				AuthType:                  connectimpl.AuthTypeNone,
 				Tls:                       true,
 				ValidateServerCertificate: true,
+				ReleaseSession:            true,
 			},
 		},
 		{
@@ -309,6 +312,7 @@ func TestParseConnectOptionsFromUri(t *testing.T) {
 				Token:                     "bar",
 				Tls:                       true,
 				ValidateServerCertificate: false,
+				ReleaseSession:            true,
 			},
 		},
 		{
@@ -319,6 +323,17 @@ func TestParseConnectOptionsFromUri(t *testing.T) {
 				AwsProxyAuth:              "aws-proxy-token",
 				Tls:                       true,
 				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			uri: "spark://localhost:10000?api=connect&auth_type=none&connect.session_id=session-id&connect.release_session=false",
+			options: connectimpl.ConnectionOpts{
+				Host:                      "localhost:10000",
+				AuthType:                  connectimpl.AuthTypeNone,
+				ValidateServerCertificate: true,
+				SessionID:                 "session-id",
+				ReleaseSession:            false,
 			},
 		},
 	} {
@@ -333,6 +348,17 @@ func TestParseConnectOptionsFromUri(t *testing.T) {
 
 		require.Equal(t, tc.options, parsedOptions, "unexpected options for URI %s", tc.uri)
 	}
+}
+
+func TestParseConnectOptionsRejectsInvalidReleaseSession(t *testing.T) {
+	u, err := url.Parse("spark://localhost:10000?api=connect&auth_type=none&connect.release_session=invalid")
+	require.NoError(t, err)
+	options := map[string]string{}
+	err = parseOptionsFromUri(u, options)
+	require.NoError(t, err)
+
+	_, err = connectOptsFromOptions(options)
+	require.Error(t, err)
 }
 
 func TestParseLivyOptionsFromUri(t *testing.T) {

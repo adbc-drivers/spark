@@ -35,10 +35,10 @@ type QueryContext struct {
 }
 
 type SparkClient interface {
-	io.Closer
 	driverbase.DbObjectsEnumerator
 
 	BackendName() string
+	Close(ctx context.Context) error
 
 	ExecuteQuery(ctx context.Context, query QueryContext) (array.RecordReader, int64, error)
 	ExecuteUpdate(ctx context.Context, query QueryContext) (int64, error)

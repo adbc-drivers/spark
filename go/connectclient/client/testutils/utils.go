@@ -35,6 +35,7 @@ type connectServiceClient struct {
 
 	analysePlanResponse *proto.AnalyzePlanResponse
 	executePlanClient   proto.SparkConnectService_ExecutePlanClient
+	releaseSessionFunc  func(context.Context, *proto.ReleaseSessionRequest) (*proto.ReleaseSessionResponse, error)
 
 	err error
 }
@@ -51,6 +52,9 @@ func (c *connectServiceClient) FetchErrorDetails(ctx context.Context,
 func (c *connectServiceClient) ReleaseSession(ctx context.Context, in *proto.ReleaseSessionRequest,
 	opts ...grpc.CallOption,
 ) (*proto.ReleaseSessionResponse, error) {
+	if c.releaseSessionFunc != nil {
+		return c.releaseSessionFunc(ctx, in)
+	}
 	require.FailNow(c.t, "unexpected ReleaseSession call")
 	return nil, c.err
 }
@@ -119,5 +123,15 @@ func NewConnectServiceClientMock(epc proto.SparkConnectService_ExecutePlanClient
 		analysePlanResponse: apr,
 		executePlanClient:   epc,
 		err:                 err,
+	}
+}
+
+func NewConnectServiceClientMockWithReleaseSession(
+	releaseSessionFunc func(context.Context, *proto.ReleaseSessionRequest) (*proto.ReleaseSessionResponse, error),
+	t *testing.T,
+) proto.SparkConnectServiceClient {
+	return &connectServiceClient{
+		t:                  t,
+		releaseSessionFunc: releaseSessionFunc,
 	}
 }
