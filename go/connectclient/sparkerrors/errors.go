@@ -105,7 +105,7 @@ type InvalidServerSideSessionDetailsError struct {
 }
 
 func (e InvalidServerSideSessionDetailsError) Error() string {
-	return fmt.Sprintf("Received invalid session id %s, expected %s", e.ReceivedSessionId, e.OwnSessionId)
+	return fmt.Sprintf("Received invalid session id `%s`, expected `%s`", e.ReceivedSessionId, e.OwnSessionId)
 }
 
 // SparkError represents an error that is returned from Spark itself. It captures details of the

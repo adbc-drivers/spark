@@ -43,8 +43,10 @@ func (c *connectionImpl) Close(ctx context.Context) error {
 		return c.ErrorHelper.Errorf(adbc.StatusInvalidState, "connection not initialized or already closed")
 	}
 
-	if err := c.client.Close(); err != nil {
-		return err
+	if err := c.client.Close(ctx); err != nil {
+		// Prefer to log/warn so that connection object can be closed
+		c.Logger.WarnContext(ctx, "error closing spark client", "err", err)
+		return nil
 	}
 	c.client = nil
 	return nil

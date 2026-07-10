@@ -103,12 +103,59 @@ func TestNewSessionBuilderCreatesASession(t *testing.T) {
 	assert.NotNil(t, spark)
 }
 
+func TestNewSessionBuilderUsesChannelSessionID(t *testing.T) {
+	ctx := context.Background()
+	cb, err := channel.NewBuilder(channel.ConnectionParameters{
+		Host:      "connection",
+		SessionID: "session-id",
+	})
+	require.NoError(t, err)
+
+	spark, err := NewSessionBuilder().WithChannelBuilder(cb).Build(ctx)
+	require.NoError(t, err)
+	session, ok := spark.(*sparkSessionImpl)
+	require.True(t, ok)
+	require.Equal(t, "session-id", session.sessionId)
+}
+
 func TestNewSessionBuilderFailsWithoutChannelBuilder(t *testing.T) {
 	ctx := context.Background()
 	spark, err := NewSessionBuilder().Build(ctx)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, sparkerrors.InvalidArgumentError)
 	assert.Nil(t, spark)
+}
+
+func TestSparkSessionStopReleasesSession(t *testing.T) {
+	releaseCalled := false
+	s := testutils.NewConnectServiceClientMockWithReleaseSession(
+		func(ctx context.Context, in *proto.ReleaseSessionRequest) (*proto.ReleaseSessionResponse, error) {
+			releaseCalled = true
+			require.Equal(t, "session-id", in.GetSessionId())
+			return &proto.ReleaseSessionResponse{SessionId: in.GetSessionId()}, nil
+		},
+		t,
+	)
+	c := client.NewSparkExecutorFromClient(s, nil, "session-id")
+	session := &sparkSessionImpl{
+		sessionId:     "session-id",
+		client:        c,
+		releaseOnStop: true,
+	}
+	require.NoError(t, session.Stop(context.Background()))
+	require.True(t, releaseCalled)
+}
+
+func TestSparkSessionStopSkipsReleaseSessionWhenDisabled(t *testing.T) {
+	s := testutils.NewConnectServiceClientMock(nil, nil, nil, t)
+	c := client.NewSparkExecutorFromClient(s, nil, "session-id")
+	session := &sparkSessionImpl{
+		sessionId:     "session-id",
+		client:        c,
+		releaseOnStop: false,
+	}
+
+	require.NoError(t, session.Stop(context.Background()))
 }
 
 func TestWriteResultStreamsArrowResultToCollector(t *testing.T) {

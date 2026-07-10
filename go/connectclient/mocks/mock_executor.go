@@ -94,3 +94,7 @@ func (t *TestExecutor) SemanticHash(ctx context.Context, plan *generated.Plan) (
 func (t *TestExecutor) Config(ctx context.Context, configRequest *generated.ConfigRequest_Operation) (*generated.ConfigResponse, error) {
 	return nil, errors.New("not implemented")
 }
+
+func (t *TestExecutor) ReleaseSession(ctx context.Context) error {
+	return errors.New("not implemented")
+}

@@ -23,14 +23,14 @@ from . import spark
 def pytest_generate_tests(metafunc) -> None:
     quirks = spark.get_quirks(metafunc.config.getoption("vendor_version"))
     driver_param = f"{quirks.name}:{quirks.short_version}"
-    if quirks.short_version.endswith("-livy"):
+    if quirks.short_version.endswith("-connect"):
         combinations = [pytest.param(driver_param, id=driver_param)]
     else:
         combinations = [
             pytest.param(
                 driver_param,
                 id=driver_param,
-                marks=[pytest.mark.skip(reason="test is only for Livy")],
+                marks=[pytest.mark.skip(reason="test is only for Spark Connect")],
             )
         ]
     metafunc.parametrize(
@@ -42,19 +42,19 @@ def pytest_generate_tests(metafunc) -> None:
 
 
 def test_session_id(driver, conn, db_kwargs, driver_path):
-    session_id = conn.adbc_connection.get_option("spark.livy.session_id")
-    assert re.match(r"^\d+$", session_id), f"Invalid session ID: {session_id}"
+    session_id = conn.adbc_connection.get_option("spark.connect.session_id")
+    assert re.match(r"^[a-z0-9\-]+$", session_id), f"Invalid session ID: {session_id}"
 
     with adbc_driver_manager.dbapi.connect(
         driver_path,
         db_kwargs={
             **db_kwargs,
-            "spark.livy.session_id": session_id,
-            "spark.livy.release_session": False,
+            "spark.connect.session_id": session_id,
+            "spark.connect.release_session": False,
         },
         autocommit=True,
     ) as conn2:
-        session_id2 = conn2.adbc_connection.get_option("spark.livy.session_id")
+        session_id2 = conn2.adbc_connection.get_option("spark.connect.session_id")
         assert session_id == session_id2
 
         with conn2.cursor() as cur:

@@ -319,6 +319,25 @@ func (s *sparkConnectClientImpl) Config(ctx context.Context,
 	return resp, nil
 }
 
+func (s *sparkConnectClientImpl) ReleaseSession(ctx context.Context) error {
+	request := &proto.ReleaseSessionRequest{
+		SessionId: s.sessionId,
+		UserContext: &proto.UserContext{
+			UserId: s.opts.UserId,
+		},
+		ClientType: &s.opts.UserAgent,
+	}
+	ctx = metadata.NewOutgoingContext(ctx, s.metadata)
+	if _, err := s.client.ReleaseSession(ctx, request); err != nil {
+		if se := sparkerrors.FromRPCError(err); se != nil {
+			return sparkerrors.WithType(se, sparkerrors.ExecutionError)
+		}
+		return sparkerrors.WithType(fmt.Errorf(
+			"failed to call ReleaseSession in session %s: %w", s.sessionId, err), sparkerrors.ExecutionError)
+	}
+	return nil
+}
+
 func NewSparkExecutor(conn *grpc.ClientConn, md metadata.MD, sessionId string, opts options.SparkClientOptions) base.SparkConnectClient {
 	var client base.SparkConnectRPCClient
 	if opts.ReattachExecution {

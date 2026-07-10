@@ -86,8 +86,7 @@ const (
 	// OptionLivySessionId specifies the Livy session ID to connect to an existing session
 	OptionLivySessionId = "spark.livy.session_id"
 
-	// OptionLivySessionId specifies whether to delete the session when the connection is closed (default true)
-	OptionLivyDeleteSession = "spark.livy.delete_session"
+	OptionLivyReleaseSession = "spark.livy.release_session"
 
 	// Basic Authentication Options (when auth_type=basic)
 	// These use the standard ADBC `username` and `password`
@@ -114,6 +113,14 @@ const (
 	// OptionLivyAWSEMRExecutionRoleArn specifies the AWS EMR Serverless execution role ARN
 	// This is required when connecting to AWS EMR Serverless
 	OptionLivyAWSExecutionRoleArn = "spark.livy.aws.emr_serverless.execution_role_arn"
+
+	// Spark Connect-specific options
+
+	// OptionConnectSessionId specifies the Spark Connect session ID to reuse
+	OptionConnectSessionId = "spark.connect.session_id"
+
+	// OptionConnectReleaseSession specifies whether to release the Spark Connect session when closed
+	OptionConnectReleaseSession = "spark.connect.release_session"
 
 	// OPTION VALUES
 

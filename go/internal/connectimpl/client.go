@@ -24,6 +24,7 @@ import (
 	"github.com/adbc-drivers/spark/go/connectclient/client/channel"
 	sparksql "github.com/adbc-drivers/spark/go/connectclient/sql"
 	"github.com/adbc-drivers/spark/go/internal/sparkbase"
+	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -49,6 +50,8 @@ type ConnectionOpts struct {
 	Tls                       bool
 	ValidateServerCertificate bool
 	AwsProxyAuth              string
+	SessionID                 string
+	ReleaseSession            bool
 }
 
 type connectClient struct {
@@ -71,7 +74,10 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 		return nil, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "build Spark Connect channel")
 	}
 
-	session, err := sparksql.NewSessionBuilder().WithChannelBuilder(channelBuilder).Build(ctx)
+	session, err := sparksql.NewSessionBuilder().
+		WithChannelBuilder(channelBuilder).
+		WithReleaseSession(opts.ReleaseSession).
+		Build(ctx)
 	if err != nil {
 		return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "build Spark Connect session")
 	}
@@ -79,7 +85,7 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 	cfg := session.Config()
 	for k, v := range sessionConfig {
 		if err := cfg.Set(ctx, k, v); err != nil {
-			_ = session.Stop()
+			_ = session.Stop(ctx)
 			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "set Spark config %s", k)
 		}
 	}
@@ -94,6 +100,7 @@ func channelParametersFromConnectionOpts(opts ConnectionOpts) (channel.Connectio
 		User:                      opts.Username,
 		UseSSL:                    opts.Tls,
 		ValidateServerCertificate: &opts.ValidateServerCertificate,
+		SessionID:                 opts.SessionID,
 	}
 
 	if strings.Contains(opts.Host, ":") {
@@ -120,11 +127,11 @@ func channelParametersFromConnectionOpts(opts ConnectionOpts) (channel.Connectio
 	return params, nil
 }
 
-func (c *connectClient) Close() error {
+func (c *connectClient) Close(ctx context.Context) error {
 	if c.session == nil {
 		return nil
 	}
-	err := c.session.Stop()
+	err := c.session.Stop(ctx)
 	c.session = nil
 	if err != nil {
 		return sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "close Spark Connect session")
@@ -189,8 +196,13 @@ func (c *connectClient) GetTablesForDBSchema(ctx context.Context, catalog string
 	return sparkbase.DefaultGetTablesForDBSchemaImpl(c, ctx, catalog, schema, tableFilter, columnFilter, includeColumns)
 }
 
-func (c *connectClient) GetOption(_ context.Context, _ string) (string, bool, error) {
-	return "", false, nil
+func (c *connectClient) GetOption(_ context.Context, key string) (string, bool, error) {
+	switch key {
+	case sparkutil.OptionConnectSessionId:
+		return c.session.GetSessionId(), true, nil
+	default:
+		return "", false, nil
+	}
 }
 
 func (c *connectClient) GetOptionInt(_ context.Context, _ string) (int64, bool, error) {

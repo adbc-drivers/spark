@@ -166,7 +166,7 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionOptions map[stri
 	return wrapThriftTransport(ctx, cfg, transport, transportName, sessionOptions)
 }
 
-func (c *thriftClient) Close() error {
+func (c *thriftClient) Close(_ context.Context) error {
 	if c.transport == nil {
 		return adbc.Error{
 			Msg:  "[spark] connection not initialized or already closed",

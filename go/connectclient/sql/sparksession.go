@@ -41,18 +41,18 @@ import (
 	"github.com/adbc-drivers/spark/go/connectclient/client/channel"
 	proto "github.com/adbc-drivers/spark/go/connectclient/internal/generated"
 	"github.com/adbc-drivers/spark/go/connectclient/sparkerrors"
-	"github.com/google/uuid"
 	"google.golang.org/grpc/metadata"
 )
 
 type SparkSession interface {
 	Read() DataFrameReader
 	Sql(ctx context.Context, query string) (DataFrame, error)
-	Stop() error
+	Stop(ctx context.Context) error
 	Table(name string) (DataFrame, error)
 	CreateDataFrameFromArrow(ctx context.Context, data arrow.Table) (DataFrame, error)
 	CreateDataFrame(ctx context.Context, data [][]any, schema *types.StructType) (DataFrame, error)
 	Config() client.RuntimeConfig
+	GetSessionId() string
 }
 
 // NewSessionBuilder creates a new session builder for starting a new spark session
@@ -61,11 +61,19 @@ func NewSessionBuilder() *SparkSessionBuilder {
 }
 
 type SparkSessionBuilder struct {
-	channelBuilder channel.Builder
+	channelBuilder   channel.Builder
+	releaseSession   bool
+	releaseOnStopSet bool
 }
 
 func (s *SparkSessionBuilder) WithChannelBuilder(cb channel.Builder) *SparkSessionBuilder {
 	s.channelBuilder = cb
+	return s
+}
+
+func (s *SparkSessionBuilder) WithReleaseSession(releaseSession bool) *SparkSessionBuilder {
+	s.releaseSession = releaseSession
+	s.releaseOnStopSet = true
 	return s
 }
 
@@ -84,22 +92,33 @@ func (s *SparkSessionBuilder) Build(ctx context.Context) (SparkSession, error) {
 		meta[k] = append(meta[k], v)
 	}
 
-	sessionId := uuid.NewString()
+	sessionId := s.channelBuilder.SessionId()
 
 	// Update the options according to the configuration.
 	opts := options.NewSparkClientOptions(options.DefaultSparkClientOptions.ReattachExecution)
 	opts.UserAgent = s.channelBuilder.UserAgent()
 	opts.UserId = s.channelBuilder.User()
 
+	releaseSession := true
+	if s.releaseOnStopSet {
+		releaseSession = s.releaseSession
+	}
+
 	return &sparkSessionImpl{
-		sessionId: sessionId,
-		client:    client.NewSparkExecutor(conn, meta, sessionId, opts),
+		sessionId:     sessionId,
+		client:        client.NewSparkExecutor(conn, meta, sessionId, opts),
+		releaseOnStop: releaseSession,
 	}, nil
 }
 
 type sparkSessionImpl struct {
-	sessionId string
-	client    base.SparkConnectClient
+	sessionId     string
+	client        base.SparkConnectClient
+	releaseOnStop bool
+}
+
+func (s *sparkSessionImpl) GetSessionId() string {
+	return s.sessionId
 }
 
 func (s *sparkSessionImpl) Config() client.RuntimeConfig {
@@ -155,7 +174,10 @@ func (s *sparkSessionImpl) Sql(ctx context.Context, query string) (DataFrame, er
 	}
 }
 
-func (s *sparkSessionImpl) Stop() error {
+func (s *sparkSessionImpl) Stop(ctx context.Context) error {
+	if s.releaseOnStop {
+		return s.client.ReleaseSession(ctx)
+	}
 	return nil
 }
 
