@@ -179,6 +179,22 @@ Different backends and cluster configurations have limitations; some limitations
 
 Also see the above caveats for specific ways to connect to EMR.
 
+### Azure Synapse Analytics
+
+:::{warning}
+We have not yet confirmed driver functionality with Azure Synapse Analytics.
+:::
+
+- Only Livy is supported.
+- The hostname/port to use in the connection URI is `<WORKSPACE NAME>.dev.azuresynapse.net:443`. This can be found as the "Development endpoint" in the Azure portal.
+- The connection URI must contain a path component like this:
+
+  ```
+  /livyApi/versions/2024-09-20/sparkpools/<NAME OF SPARK POOL>
+  ```
+
+- Your user or service principal must have the "Synapse Compute Operator" role. Synapse roles can only be assigned from Synapse Studio, not Azure Portal. See the [Azure documentation](https://learn.microsoft.com/azure/synapse-analytics/security/how-to-manage-synapse-rbac-role-assignments) for more details.
+
 ## Feature & Type Support
 
 {{ features|safe }}

@@ -108,6 +108,10 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 		options[sparkutil.OptionApi] = scheme
 	}
 
+	if uri.Path != "" && uri.Path != "/" {
+		options[sparkutil.OptionLivyBaseURL] = uri.Path
+	}
+
 	return nil
 }
 
@@ -224,7 +228,9 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 			host = fmt.Sprintf("http://%s", host)
 		}
 	}
-	livyOpts.BaseURL = host
+	baseURL := options[sparkutil.OptionLivyBaseURL]
+	delete(options, sparkutil.OptionLivyBaseURL)
+	livyOpts.BaseURL = fmt.Sprintf("%s%s", host, baseURL)
 
 	timeout, err := parseIntegerOption(sparkutil.OptionLivyTimeout, options, 0)
 	if err != nil {
@@ -288,6 +294,8 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 				return livyOpts, err
 			}
 			livyOpts.AwsConfig = cfg
+		case sparkutil.OptionValueAuthTypeAzureToken:
+			livyOpts.AuthType = livyimpl.AuthTypeAzureToken
 		default:
 			return livyOpts, sparkbase.InvalidOptionErr(sparkutil.OptionAuthType, authType)
 		}

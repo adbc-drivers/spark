@@ -76,6 +76,8 @@ const (
 	// OptionLivyTimeout specifies the HTTP request timeout in seconds
 	OptionLivyTimeout = "spark.livy.timeout"
 
+	OptionLivyBaseURL = "spark.livy.base_url"
+
 	// OptionLivySessionTTL specifies the session time-to-live (e.g., "2h", "30m")
 	// Available in EMR 7.8.0+
 	OptionLivySessionTTL = "spark.livy.session_ttl"
@@ -144,8 +146,9 @@ const (
 
 	// Spark Livy auth types
 
-	OptionValueAuthTypeBasic    = "basic"
-	OptionValueAuthTypeAwsSigv4 = "aws_sigv4"
+	OptionValueAuthTypeBasic      = "basic"
+	OptionValueAuthTypeAwsSigv4   = "aws_sigv4"
+	OptionValueAuthTypeAzureToken = "azure_token"
 
 	// Spark Connect auth types
 
