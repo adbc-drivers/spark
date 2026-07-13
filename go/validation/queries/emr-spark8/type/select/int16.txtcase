@@ -17,7 +17,7 @@
 CREATE TABLE test_int16 (
     idx INTEGER,
     res SMALLINT
-) USING parquet LOCATION 's3://columnar-lidavidm-redshift-test/emr/type/select/{uuid}';
+) USING parquet LOCATION 's3://{bucket}/emr/type/select/{uuid}';
 
 INSERT INTO test_int16 (idx, res) VALUES
   (1, 16384),

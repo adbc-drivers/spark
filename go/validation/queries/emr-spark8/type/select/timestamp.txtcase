@@ -17,7 +17,7 @@
 CREATE TABLE test_timestamp (
     idx INTEGER,
     res TIMESTAMP
-) USING parquet LOCATION 's3://columnar-lidavidm-redshift-test/emr/type/select/{uuid}';
+) USING parquet LOCATION 's3://{bucket}/emr/type/select/{uuid}';
 
 INSERT INTO test_timestamp (idx, res) VALUES
   (1, TIMESTAMP '2023-05-15 13:45:30'),

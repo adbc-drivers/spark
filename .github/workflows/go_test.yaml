@@ -125,6 +125,11 @@ jobs:
       - name: Test
         working-directory: go
         run: |
+          if [[ -f ci/scripts/pre-test.sh ]]; then
+            echo "Loading pre-test"
+            ./ci/scripts/pre-test.sh ${{ matrix.platform }} ${{ matrix.arch }} "spark4-thrift-server"
+          fi
+
           set -a
           if [[ -f .env ]]; then
             source .env
@@ -136,11 +141,6 @@ jobs:
             source .env.ci
           fi
           set +a
-
-          if [[ -f ci/scripts/pre-test.sh ]]; then
-            echo "Loading pre-test"
-            ./ci/scripts/pre-test.sh ${{ matrix.platform }} ${{ matrix.arch }} "spark4-thrift-server"
-          fi
 
           go test -tags assert -v ./...
 
@@ -170,6 +170,8 @@ jobs:
     environment: ${{ matrix.environment }}
     permissions:
       contents: read
+    env:
+      FOUNDRY_GH_ENVIRONMENT: ${{ matrix.environment || '' }}
     steps:
       - name: free up disk space
         if: runner.os != 'Windows'
@@ -239,6 +241,11 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: go
         run: |
+          if [[ -f ci/scripts/pre-test.sh ]]; then
+            echo "Loading pre-test"
+            ./ci/scripts/pre-test.sh ${{ matrix.platform }} ${{ matrix.arch }} ${{ matrix.service_name }}
+          fi
+
           set -a
           if [[ -f .env ]]; then
             source .env
@@ -250,11 +257,6 @@ jobs:
             source .env.ci
           fi
           set +a
-
-          if [[ -f ci/scripts/pre-test.sh ]]; then
-            echo "Loading pre-test"
-            ./ci/scripts/pre-test.sh ${{ matrix.platform }} ${{ matrix.arch }} ${{ matrix.service_name }}
-          fi
 
           docker ps
           if [[ -n "${{ matrix.vendor_version }}" ]]; then
