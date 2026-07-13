@@ -17,7 +17,7 @@
 CREATE TABLE test_float64 (
     idx INTEGER,
     res DOUBLE
-) USING parquet LOCATION 's3://columnar-lidavidm-redshift-test/emr/type/select/{uuid}';
+) USING parquet LOCATION 's3://{bucket}/emr/type/select/{uuid}';
 
 INSERT INTO test_float64 (idx, res) VALUES
   (1, 3.14159265358979),

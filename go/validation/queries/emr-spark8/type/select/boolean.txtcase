@@ -17,7 +17,7 @@
 CREATE TABLE test_boolean (
     idx INTEGER,
     res BOOLEAN
-) USING parquet LOCATION 's3://columnar-lidavidm-redshift-test/emr/type/select/{uuid}';
+) USING parquet LOCATION 's3://{bucket}/emr/type/select/{uuid}';
 
 INSERT INTO test_boolean (idx, res) VALUES
   (1, TRUE),

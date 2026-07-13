@@ -14,6 +14,7 @@
 
 import contextlib
 import functools
+import os
 import re
 import uuid
 from pathlib import Path
@@ -181,7 +182,9 @@ class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
         },
         connection={},
         statement={
-            "spark.ingest.staging_area_uri": "s3://columnar-lidavidm-redshift-test/temp",
+            "spark.ingest.staging_area_uri": model.FromEnv(
+                "STAGING_S3_BUCKET", template="s3://{}/emr/staging"
+            ),
         },
     )
 
@@ -196,13 +199,14 @@ class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
 
     @contextlib.contextmanager
     def setup_statement(self, query, cursor):
+        prefix = str(uuid.uuid4())
+        location = model.FromEnv("STAGING_S3_BUCKET", template="s3://{}/emr/")
         with super().setup_statement(query, cursor):
             if isinstance(query, model.Query) and isinstance(
                 query.query, model.IngestQuery
             ):
-                prefix = str(uuid.uuid4())
                 name = ingest.make_table_name(prefix, query)
-                location = f"s3://columnar-lidavidm-redshift-test/emr/{name}"
+                location = location.get_or_raise() + name
                 cursor.adbc_statement.set_options(
                     **{
                         "spark.ingest.location": location,
@@ -212,7 +216,7 @@ class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
             elif isinstance(query, str) and query.startswith("TestIngest"):
                 prefix = str(uuid.uuid4())
                 name = ingest.make_table_name(prefix, query.split(".")[-1])
-                location = f"s3://columnar-lidavidm-redshift-test/emr/{name}"
+                location = location.get_or_raise() + name
                 cursor.adbc_statement.set_options(
                     **{
                         "spark.ingest.location": location,
@@ -224,7 +228,14 @@ class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
 
     def split_statement(self, statement: str) -> list[str]:
         parts = super().split_statement(statement)
-        return [part.replace("{uuid}", str(uuid.uuid4())) for part in parts if part]
+        bucket = os.environ.get("STAGING_S3_BUCKET")
+        if bucket is None or not bucket:
+            raise ValueError("STAGING_S3_BUCKET environment variable is not set")
+        return [
+            part.replace("{uuid}", str(uuid.uuid4())).replace("{bucket}", bucket)
+            for part in parts
+            if part
+        ]
 
 
 _VERSION_RE = re.compile(

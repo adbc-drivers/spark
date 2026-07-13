@@ -15,3 +15,16 @@
 -->
 
 # Validation Suite Setup
+
+Set up necessary environment variables:
+
+```bash
+# If you intend to test Amazon EMR: set these variables appropriately
+# export EMR_SERVERLESS_APPLICATION_ID=...
+# export EMR_SERVERLESS_EXECUTION_ROLE_ARN=...
+# export STAGING_S3_BUCKET=...
+
+./ci/scripts/pre-test.sh
+source .env.linux
+source .env.ci
+```

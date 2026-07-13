@@ -16,7 +16,7 @@
 CREATE TABLE test_binary (
     idx INTEGER,
     res BINARY
-) USING parquet LOCATION 's3://columnar-lidavidm-redshift-test/emr/type/select/{uuid}';
+) USING parquet LOCATION 's3://{bucket}/emr/type/select/{uuid}';
 
 INSERT INTO test_binary (idx, res) VALUES
   (1, X'e38193e38293e381abe381a1e381afe38081e4b896e7958cefbc81'),
