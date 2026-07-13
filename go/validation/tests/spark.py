@@ -173,8 +173,7 @@ class Spark4ConnectQuirks(Spark4ThriftQuirks):
 
 
 class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
-    vendor_version = re.compile(r"4\.0\.\d+.*\(Spark Connect\)")
-    short_version = "8.0-connect"
+    short_version = "emr-8.0-connect"
 
     setup = model.DriverSetup(
         database={

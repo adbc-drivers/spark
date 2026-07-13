@@ -175,6 +175,7 @@ Different backends and cluster configurations have limitations; some limitations
 
 - Amazon EMR is not currently enabled in our automated integration testing.
 - To use bulk ingest, set `spark.ingest.location` to a path on S3 where the table data will be stored.
+- In our testing, once 25 sessions have been created via Spark Connect (note that this is distinct from an EMR "session"), the server will reject further connections with `Maximum allowed sessions (25) exceeded`, even if prior sessions have been released. (In other words, the maximum session limit is not a maximum _concurrent_ session limit.) A new EMR session must be created to continue.
 
 Also see the above caveats for specific ways to connect to EMR.
 

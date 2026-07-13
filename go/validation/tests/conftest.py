@@ -35,8 +35,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @pytest.fixture(scope="session")
 def driver(request, pytestconfig) -> adbc_drivers_validation.model.DriverQuirks:
-    driver = request.param
-    assert driver.startswith("spark")
     return spark.get_quirks(pytestconfig.getoption("vendor_version"))
 
 

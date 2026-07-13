@@ -61,6 +61,15 @@ def test_auth(subtests, driver, driver_path):
             ("auth_type=ldap", "auth type 'ldap' has not been implemented"),
             ("auth_type=kerberos", "auth type 'kerberos' has not been implemented"),
         ]
+    elif driver.short_version.startswith("emr-") and driver.short_version.endswith(
+        "-connect"
+    ):
+        uri = os.environ["SPARK_CONNECT_URI"]
+        orig = "auth_type=token"
+        cases = [
+            # EMR accepts no token but instead of a 403 it gives an odd error about missing session ID
+            ("auth_type=none", "Could not execute query"),
+        ]
     elif driver.short_version.endswith("-connect"):
         uri = os.environ["SPARK_CONNECT_URI"]
         orig = "auth_type=none"
@@ -92,7 +101,8 @@ def test_auth(subtests, driver, driver_path):
         new_uri = uri.replace(orig, replacement)
         if replacement in ("auth_type=none", "auth_type=nosasl"):
             kwargs = {}
-            uri = uri.replace("spark:spark@", "")
+            # take just "spark://" and everything after "@"
+            new_uri = f"spark://{new_uri.split('@', 1)[-1]}"
         else:
             kwargs = {
                 "username": "spark",
@@ -135,7 +145,8 @@ def test_tls(subtests, driver, driver_path):
         # token and TLS if you do
         uri = os.environ["SPARK_CONNECT_URI"].replace("15002", "15003")
         uri = uri.replace("auth_type=none", "auth_type=token")
-        uri += "&tls=true&validateservercertificate=false"
+        if "tls=true" not in uri:
+            uri += "&tls=true&validateservercertificate=false"
     elif driver.short_version.endswith("-thrift"):
         return
     elif driver.short_version.endswith("-thrifthttp"):
@@ -167,7 +178,8 @@ def test_tls_verify(subtests, driver, driver_path):
         # token and TLS if you do
         uri = os.environ["SPARK_CONNECT_URI"].replace("15002", "15003")
         uri = uri.replace("auth_type=none", "auth_type=token")
-        uri += "&tls=true"
+        if "tls=true" not in uri:
+            uri += "&tls=true"
     elif driver.short_version.endswith("-thrift"):
         return
     elif driver.short_version.endswith("-thrifthttp"):
@@ -179,15 +191,19 @@ def test_tls_verify(subtests, driver, driver_path):
     else:
         raise NotImplementedError(driver.short_version)
 
-    with pytest.raises(adbc_driver_manager.Error, match="failed to verify certificate"):
-        with adbc_driver_manager.dbapi.connect(
-            driver=driver_path,
-            uri=uri,
-            autocommit=True,
-            db_kwargs={
-                "username": "spark",
-                "password": "spark",
-            },
-        ) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT 1")
+    # No point testing EMR - the certificate is valid
+    if not driver.short_version.startswith("emr-"):
+        with pytest.raises(
+            adbc_driver_manager.Error, match="failed to verify certificate"
+        ):
+            with adbc_driver_manager.dbapi.connect(
+                driver=driver_path,
+                uri=uri,
+                autocommit=True,
+                db_kwargs={
+                    "username": "spark",
+                    "password": "spark",
+                },
+            ) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT 1")
