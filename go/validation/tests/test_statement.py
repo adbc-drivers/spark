@@ -31,4 +31,6 @@ class TestStatement(adbc_drivers_validation.tests.statement.TestStatement):
             pytest.skip(
                 "Spark 3.5 returns -1 for rows affected instead of actual count"
             )
+        if driver.short_version.startswith("emr-"):
+            pytest.skip("EMR Spark does not support UPDATE etc.")
         super().test_rows_affected(driver, conn)
