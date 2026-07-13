@@ -28,6 +28,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/spark/go/internal/sparkbase"
 	"github.com/adbc-drivers/spark/go/sparkutil"
@@ -43,9 +46,10 @@ type AuthType uint8
 type SessionKind string
 
 const (
-	AuthTypeAwsSigV4 AuthType = iota
+	AuthTypeNone AuthType = iota
 	AuthTypeBasic
-	AuthTypeNone
+	AuthTypeAwsSigV4
+	AuthTypeAzureToken
 )
 
 const (
@@ -90,6 +94,7 @@ type livyClient struct {
 	username             string
 	password             string
 	deleteSessionOnClose bool
+	azCred               azcore.TokenCredential
 }
 
 // NewClient creates a new SparkClient over Livy client
@@ -102,6 +107,18 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 	}
+
+	var azCred azcore.TokenCredential
+	if opts.AuthType == AuthTypeAzureToken {
+		// TODO: add option (like MSSQL) to use various credential types
+		var err error
+		options := &azidentity.AzureCLICredentialOptions{}
+		azCred, err = azidentity.NewAzureCLICredential(options)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	client := &livyClient{
 		sessionID:            -1,
 		sessionConfig:        sessionConfig,
@@ -116,6 +133,7 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 		username:             opts.Username,
 		password:             opts.Password,
 		deleteSessionOnClose: opts.DeleteSessionOnClose,
+		azCred:               azCred,
 	}
 
 	err := client.openSession(ctx, opts.ExistingSessionId)
@@ -549,6 +567,15 @@ func (c *livyClient) doRequest(ctx context.Context, method, path string, body io
 		if err := c.signRequestWithSigV4(ctx, req); err != nil {
 			return nil, fmt.Errorf("failed to sign request: %w", err)
 		}
+	case AuthTypeAzureToken:
+		options := policy.TokenRequestOptions{
+			Scopes: []string{"https://dev.azuresynapse.net/"},
+		}
+		token, err := c.azCred.GetToken(ctx, options)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get Azure token: %w", err)
+		}
+		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token.Token))
 	case AuthTypeBasic:
 		req.SetBasicAuth(c.username, c.password)
 	case AuthTypeNone:
