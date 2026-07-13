@@ -239,7 +239,7 @@ class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
 
 
 _VERSION_RE = re.compile(
-    r"^(spark3|spark4|emr)(?:_|:)(\d+\.\d+-(connect|livy|thrift|thrifthttp))$"
+    r"^(spark3|spark4|emr)(?:_|:)((?:emr-)?\d+\.\d+-(?:connect|livy|thrift|thrifthttp))$"
 )
 
 
@@ -263,7 +263,9 @@ def get_quirks(combined_version: str) -> model.DriverQuirks:
             return Spark4ThriftHttpQuirks()
         elif version == "4.0-connect":
             return Spark4ConnectQuirks()
+        elif version in ("emr-8.0-connect"):
+            return SparkEmr8ConnectQuirks()
     elif vendor in ("emr",):
-        if version == "8.0-connect":
+        if version in ("8.0-connect"):
             return SparkEmr8ConnectQuirks()
     raise ValueError(f"unsupported Spark {vendor} {version}")

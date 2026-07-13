@@ -38,6 +38,27 @@ on:
       - "go/**"
       - .github/workflows/go_test.yaml
 
+  workflow_call:
+    inputs:
+      repository:
+        description: "The repository to checkout (in owner/repo short format)"
+        required: true
+        type: string
+      ref:
+        description: "The ref to checkout"
+        required: true
+        type: string
+    secrets:
+      EMR_SERVERLESS_APPLICATION_ID:
+        required: true
+      EMR_SERVERLESS_EXECUTION_ROLE_ARN:
+        required: true
+      STAGING_S3_BUCKET:
+        required: true
+      AWS_ROLE:
+        required: true
+      AWS_ROLE_SESSION_NAME:
+        required: true
 
 concurrency:
   group: ${{ github.repository }}-${{ github.ref }}-${{ github.workflow }}
@@ -63,6 +84,7 @@ jobs:
           - { platform: windows, arch: amd64, runner: windows-latest }
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: free up disk space
         if: runner.os != 'Windows'
@@ -72,7 +94,18 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: github.event_name != 'workflow_dispatch'
         with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: 'recursive'
+
+      - name: "checkout remote"
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
           persist-credentials: false
           submodules: 'recursive'
@@ -162,14 +195,16 @@ jobs:
       matrix:
         include:
           # I think we only need to test one platform, but we can change that later
-          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark35-thrift-server", vendor_version: "spark3_3.5-thrift", environment: null, azure: false }
-          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark35-livy", vendor_version: "spark3_3.5-livy", environment: null, azure: false }
-          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrift-server", vendor_version: "spark4_4.0-thrift", environment: null, azure: false }
-          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrifthttp-server", vendor_version: "spark4_4.0-thrifthttp", environment: null, azure: false }
-          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-connect-server", vendor_version: "spark4_4.0-connect", environment: null, azure: false }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark35-thrift-server", vendor_version: "spark3_3.5-thrift", environment: null, aws: false, azure: false, gcloud: false }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark35-livy", vendor_version: "spark3_3.5-livy", environment: null, aws: false, azure: false, gcloud: false }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrift-server", vendor_version: "spark4_4.0-thrift", environment: null, aws: false, azure: false, gcloud: false }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrifthttp-server", vendor_version: "spark4_4.0-thrifthttp", environment: null, aws: false, azure: false, gcloud: false }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-connect-server", vendor_version: "spark4_4.0-connect", environment: null, aws: false, azure: false, gcloud: false }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "", vendor_version: "emr_8.0-connect", environment: "aws-emr-serverless", aws: true, azure: false, gcloud: false }
     environment: ${{ matrix.environment }}
     permissions:
       contents: read
+      id-token: write
     env:
       FOUNDRY_GH_ENVIRONMENT: ${{ matrix.environment || '' }}
     steps:
@@ -181,7 +216,18 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: github.event_name != 'workflow_dispatch'
         with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: 'recursive'
+
+      - name: "checkout remote"
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
           persist-credentials: false
           submodules: 'recursive'
@@ -198,6 +244,13 @@ jobs:
           pixi-version: v0.72.0
           run-install: false
 
+      - name: AWS Login
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
+        if: matrix.aws
+        with:
+          aws-region: us-east-1
+          role-to-assume: ${{ secrets.aws_role }}
+          role-session-name: ${{ secrets.aws_role_session_name }}
 
       - name: Log in to ghcr.io
         if: runner.os == 'Linux'
@@ -239,6 +292,10 @@ jobs:
 
       - name: Validate
         if: runner.os == 'Linux'
+        env:
+          EMR_SERVERLESS_APPLICATION_ID: ${{ secrets.EMR_SERVERLESS_APPLICATION_ID }} # zizmor: ignore[secrets-outside-env]
+          EMR_SERVERLESS_EXECUTION_ROLE_ARN: ${{ secrets.EMR_SERVERLESS_EXECUTION_ROLE_ARN }} # zizmor: ignore[secrets-outside-env]
+          STAGING_S3_BUCKET: ${{ secrets.STAGING_S3_BUCKET }} # zizmor: ignore[secrets-outside-env]
         working-directory: go
         run: |
           if [[ -f ci/scripts/pre-test.sh ]]; then
@@ -306,7 +363,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: github.event_name != 'workflow_dispatch'
         with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: 'recursive'
+
+      - name: "checkout remote"
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
           persist-credentials: false
           submodules: 'recursive'
@@ -368,7 +436,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: github.event_name != 'workflow_dispatch'
         with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: 'recursive'
+
+      - name: "checkout remote"
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
           persist-credentials: false
           submodules: 'recursive'
@@ -479,7 +558,17 @@ jobs:
           ./dbc install --no-verify "${driver_pkg}"
           echo "Installed ${driver_pkg}"
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: github.event_name != 'workflow_dispatch'
         with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: 'recursive'
+      - name: "checkout remote"
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
           fetch-depth: 1
           persist-credentials: false
           submodules: 'recursive'
@@ -513,7 +602,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: github.event_name != 'workflow_dispatch'
         with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: 'recursive'
+
+      - name: "checkout remote"
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
           persist-credentials: false
           submodules: 'recursive'

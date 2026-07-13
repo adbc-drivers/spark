@@ -16,6 +16,9 @@
 driver = "spark"
 repository = "apache"
 
+[aws]
+region = "us-east-1"
+
 [lang.go.test]
 service-name = "spark4-thrift-server"
 
@@ -38,3 +41,14 @@ vendor_version = "spark4_4.0-thrifthttp"
 [[lang.go.validation.configs]]
 service_name = "spark4-connect-server"
 vendor_version = "spark4_4.0-connect"
+
+[[lang.go.validation.configs]]
+service_name = ""
+vendor_version = "emr_8.0-connect"
+aws = true
+environment = "aws-emr-serverless"
+
+[secrets]
+EMR_SERVERLESS_APPLICATION_ID = { secret = "EMR_SERVERLESS_APPLICATION_ID", contexts = ["validate"] }
+EMR_SERVERLESS_EXECUTION_ROLE_ARN = { secret = "EMR_SERVERLESS_EXECUTION_ROLE_ARN", contexts = ["validate"] }
+STAGING_S3_BUCKET = { secret = "STAGING_S3_BUCKET", contexts = ["validate"] }
