@@ -91,7 +91,7 @@ class Spark3ThriftQuirks(model.DriverQuirks):
         )
 
     def is_table_not_found(self, table_name: str, error: Exception) -> bool:
-        return "TABLE_OR_VIEW_NOT_FOUND" in str(error) and table_name in str(error)
+        return ("TABLE_OR_VIEW_NOT_FOUND" in str(error) or "Failed to get table info from metastore" in str(error)) and table_name in str(error)
 
     def split_statement(self, statement: str) -> list[str]:
         return quirks.split_statement(statement)
