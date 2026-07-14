@@ -23,6 +23,7 @@ import (
 	"github.com/adbc-drivers/spark/go/internal/thriftimpl"
 	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	awscredentials "github.com/aws/aws-sdk-go-v2/credentials"
@@ -66,6 +67,9 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 			key = "validate_server_certificate"
 		}
 		fullKey := fmt.Sprintf("spark.%s", key)
+		if key == "catalog" {
+			fullKey = adbc.OptionKeyCurrentCatalog
+		}
 		if len(values) != 1 {
 			return adbc.Error{
 				Code: adbc.StatusInvalidArgument,
@@ -458,7 +462,7 @@ func thriftOptsFromOptions(api string, options map[string]string) (thriftimpl.Co
 	return thriftOpts, nil
 }
 
-func sessionOptionsFromOptions(options map[string]string) map[string]string {
+func sessionOptionsFromOptions(options map[string]string, catalog string) map[string]string {
 	sessionOptions := make(map[string]string)
 	for k, v := range options {
 		if after, ok := strings.CutPrefix(k, sparkutil.OptionSparkConfigPrefix); ok {
@@ -467,7 +471,41 @@ func sessionOptionsFromOptions(options map[string]string) map[string]string {
 			delete(options, k)
 		}
 	}
+	if catalog != "" {
+		sessionOptions["spark.sql.defaultCatalog"] = catalog
+	}
 	return sessionOptions
+}
+
+func validateStartupCatalog(factory sparkbase.SparkClientFactory, catalog string) sparkbase.SparkClientFactory {
+	if catalog == "" {
+		return factory
+	}
+
+	return func(ctx context.Context) (sparkbase.SparkClient, error) {
+		client, err := factory(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		currentCatalog, err := client.CurrentCatalog(ctx, memory.DefaultAllocator)
+		if err != nil {
+			_ = client.Close(ctx)
+			return nil, adbc.Error{
+				Code: adbc.StatusNotFound,
+				Msg:  fmt.Sprintf("[spark] catalog not found: %s: %s", catalog, err),
+			}
+		}
+		if currentCatalog == catalog {
+			return client, nil
+		}
+
+		_ = client.Close(ctx)
+		return nil, adbc.Error{
+			Code: adbc.StatusNotFound,
+			Msg:  fmt.Sprintf("[spark] catalog not found: %s", catalog),
+		}
+	}
 }
 
 func newSparkClientFactory(ctx context.Context, options map[string]string) (func(context.Context) (sparkbase.SparkClient, error), error) {
@@ -486,6 +524,9 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 		delete(options, adbc.OptionKeyURI)
 	}
 
+	catalog := options[adbc.OptionKeyCurrentCatalog]
+	delete(options, adbc.OptionKeyCurrentCatalog)
+
 	api, ok := options[sparkutil.OptionApi]
 	if !ok {
 		return nil, sparkbase.MissingRequiredOptionErr(sparkutil.OptionApi)
@@ -499,10 +540,11 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 			return nil, err
 		}
 
-		sessionOptions := sessionOptionsFromOptions(options)
-		return func(ctx context.Context) (sparkbase.SparkClient, error) {
+		sessionOptions := sessionOptionsFromOptions(options, catalog)
+		factory := func(ctx context.Context) (sparkbase.SparkClient, error) {
 			return thriftimpl.NewClient(ctx, thriftOpts, sessionOptions)
-		}, nil
+		}
+		return validateStartupCatalog(factory, catalog), nil
 
 	case sparkutil.OptionValueApiLivy:
 		livyOpts, err := livyOptsFromOptions(ctx, options)
@@ -510,10 +552,11 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 			return nil, err
 		}
 
-		sessionOptions := sessionOptionsFromOptions(options)
-		return func(ctx context.Context) (sparkbase.SparkClient, error) {
+		sessionOptions := sessionOptionsFromOptions(options, catalog)
+		factory := func(ctx context.Context) (sparkbase.SparkClient, error) {
 			return livyimpl.NewClient(ctx, livyOpts, sessionOptions)
-		}, nil
+		}
+		return validateStartupCatalog(factory, catalog), nil
 
 	case sparkutil.OptionValueApiConnect:
 		connectOpts, err := connectOptsFromOptions(options)
@@ -521,10 +564,11 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 			return nil, err
 		}
 
-		sessionOptions := sessionOptionsFromOptions(options)
-		return func(ctx context.Context) (sparkbase.SparkClient, error) {
+		sessionOptions := sessionOptionsFromOptions(options, catalog)
+		factory := func(ctx context.Context) (sparkbase.SparkClient, error) {
 			return connectimpl.NewClient(ctx, connectOpts, sessionOptions)
-		}, nil
+		}
+		return validateStartupCatalog(factory, catalog), nil
 
 	default:
 		return nil, sparkbase.InvalidOptionErr(sparkutil.OptionApi, api)
