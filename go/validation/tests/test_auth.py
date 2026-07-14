@@ -30,7 +30,7 @@ def connect_uri(driver) -> str | None:
 
 
 @pytest.fixture(scope="module")
-def connect_tls_uri(driver, validate_server_certificate: bool) -> str | None:
+def connect_tls_uri(driver) -> str | None:
     if driver.short_version == "4.1-connect":
         uri = os.environ["SPARK41_CONNECT_URI"].replace("15004", "15003")
     elif driver.short_version == "emr-8.0-connect":
