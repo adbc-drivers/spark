@@ -188,6 +188,26 @@ class Spark41ConnectQuirks(Spark4ConnectQuirks):
     )
 
 
+class Spark41ConnectIcebergQuirks(Spark41ConnectQuirks):
+    name = "spark4iceberg"
+    setup = model.DriverSetup(
+        database={
+            "uri": model.FromEnv("SPARK41_CONNECT_URI"),
+            "spark.ingest.s3.use_path_style": "true",
+            "adbc.connection.catalog": "iceberg",
+        },
+        connection={},
+        statement={
+            "spark.ingest.staging_area_uri": "s3://test/temporary",
+        },
+    )
+
+    features = Spark41ConnectQuirks.features.with_values(
+        current_catalog="iceberg",
+        current_schema="",
+    )
+
+
 class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
     short_version = "emr-8.0-connect"
 
@@ -254,7 +274,7 @@ class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
 
 
 _VERSION_RE = re.compile(
-    r"^(spark3|spark4|emr)(?:_|:)((?:emr-)?\d+\.\d+-(?:connect|livy|thrift|thrifthttp))$"
+    r"^(spark3|spark4|emr|spark4iceberg)(?:_|:)((?:emr-)?\d+\.\d+-(?:connect|livy|thrift|thrifthttp))$"
 )
 
 
@@ -282,6 +302,9 @@ def get_quirks(combined_version: str) -> model.DriverQuirks:
             return Spark41ConnectQuirks()
         elif version in ("emr-8.0-connect"):
             return SparkEmr8ConnectQuirks()
+    elif vendor in ("spark4iceberg",):
+        if version == "4.1-connect":
+            return Spark41ConnectIcebergQuirks()
     elif vendor in ("emr",):
         if version in ("8.0-connect"):
             return SparkEmr8ConnectQuirks()

@@ -51,6 +51,15 @@ func TestParseOptionsFromUri(t *testing.T) {
 			},
 		},
 		{
+			uri: "spark://localhost:10000?catalog=analytics",
+			options: map[string]string{
+				"spark.host":                 "localhost",
+				"spark.port":                 "10000",
+				"spark.api":                  "thrift+binary",
+				adbc.OptionKeyCurrentCatalog: "analytics",
+			},
+		},
+		{
 			uri: "sc://localhost:10000",
 			options: map[string]string{
 				"spark.host": "localhost",

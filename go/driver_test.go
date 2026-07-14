@@ -472,6 +472,37 @@ func (suite *DriverTests) TestSelectNoResult() {
 	suite.NoError(rdr.Err())
 }
 
+func (suite *DriverTests) TestStartupCatalog() {
+	opts := suite.Quirks.DatabaseOptions()
+	opts[adbc.OptionKeyCurrentCatalog] = suite.Quirks.Catalog()
+
+	db, err := suite.driver.NewDatabaseWithContext(suite.ctx, opts)
+	suite.Require().NoError(err)
+	defer testutil.CheckedCloseWithContext(suite.T(), db, suite.ctx)
+
+	cnxn, err := db.Open(suite.ctx)
+	suite.Require().NoError(err)
+	defer testutil.CheckedCloseWithContext(suite.T(), cnxn, suite.ctx)
+
+	catalog, err := cnxn.(adbc.GetSetOptionsWithContext).GetOption(suite.ctx, adbc.OptionKeyCurrentCatalog)
+	suite.Require().NoError(err)
+	suite.Equal(suite.Quirks.Catalog(), catalog)
+}
+
+func (suite *DriverTests) TestStartupCatalogNonexistent() {
+	opts := suite.Quirks.DatabaseOptions()
+	opts[adbc.OptionKeyCurrentCatalog] = "thiscatalogdoesnotexist"
+
+	db, err := suite.driver.NewDatabaseWithContext(suite.ctx, opts)
+	suite.Require().NoError(err)
+	defer testutil.CheckedCloseWithContext(suite.T(), db, suite.ctx)
+
+	_, err = db.Open(suite.ctx)
+	var adbcErr adbc.Error
+	suite.Require().ErrorAs(err, &adbcErr)
+	suite.Equal(adbc.StatusNotFound, adbcErr.Code)
+}
+
 type SparkTestSuite struct {
 	suite.Suite
 	uri    string

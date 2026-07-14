@@ -138,6 +138,11 @@ These parameters can be specified in the URI as query parameters, or as connecti
 
   Whether to validate the server's TLS certificate. Should only be disabled for development/testing.
 
+`adbc.connection.catalog` (query parameter: `catalog`)
+: **Type**: string.
+
+  This is a standard ADBC option; it can additionally be specified during connection to select which catalog to use instead of the server default.
+
 ## Limitations
 
 Different backends and cluster configurations have limitations; some limitations related to data type support are also noted further below.
