@@ -459,6 +459,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      tls-proxy:
+        condition: service_started
     environment:
       SPARK_MASTER: spark://spark41-master:7077
     ports:
