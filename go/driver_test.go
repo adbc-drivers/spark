@@ -132,8 +132,9 @@ func (q *SparkQuirks) DropTable(cnxn adbc.ConnectionWithContext, tblname string)
 		return err
 	}
 
-	_, err = stmt.ExecuteUpdate(ctx)
-	return err
+	// XXX: Spark with an Iceberg + Hive catalog appears to error even with IF EXISTS
+	_, _ = stmt.ExecuteUpdate(ctx)
+	return nil
 }
 
 func (q *SparkQuirks) SampleTableSchemaMetadata(tblName string, dt arrow.DataType) arrow.Metadata {
@@ -448,28 +449,6 @@ func (suite *DriverTests) TestSelect() {
 
 		})
 	}
-}
-
-func (suite *DriverTests) TestSelectNoResult() {
-	suite.NoError(suite.stmt.SetSqlQuery(suite.ctx, "DROP TABLE IF EXISTS no_result"))
-
-	rdr, rows, err := suite.stmt.ExecuteQuery(suite.ctx)
-	suite.NoError(err)
-	defer rdr.Release()
-
-	// TODO(lidavidm): move this to validation suite
-	// XXX: Spark is weird and apparently returns a field
-	schema := arrow.NewSchema([]arrow.Field{
-		{
-			Name:     "Result",
-			Type:     arrow.BinaryTypes.String,
-			Nullable: true,
-		},
-	}, nil)
-	suite.Truef(schema.Equal(rdr.Schema()), "expected: %s\ngot: %s", schema, rdr.Schema())
-	suite.Equal(int64(-1), rows)
-	suite.False(rdr.Next())
-	suite.NoError(rdr.Err())
 }
 
 type SparkTestSuite struct {

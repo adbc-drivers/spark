@@ -79,6 +79,12 @@ func StatusToAdbcErr(defaultStatus adbc.Status, status *hiveserver2.TStatus, con
 		Msg:  fmt.Sprintf("[spark] could not %s: %s", fmt.Sprintf(context, contextArgs...), messages),
 	}
 
+	if strings.Contains(messages, "Failed to get table info from metastore") {
+		// Combined Hive-Iceberg metastore doesn't set SQLSTATE for this
+		err.Code = adbc.StatusNotFound
+		err.SqlState = [5]byte{'4', '2', 'P', '0', '1'}
+	}
+
 	if status.SqlState != nil {
 		copy(err.SqlState[:], []byte(*status.SqlState))
 
