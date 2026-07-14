@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG SPARK_VERSION=4.0.0
+ARG SPARK_VERSION=4.0.3
 ARG HIVE_VERSION=4.0.1
 FROM apache/hive:${HIVE_VERSION} AS hive-jars
 
