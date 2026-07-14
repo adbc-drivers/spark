@@ -204,8 +204,14 @@ class Spark41ConnectIcebergQuirks(Spark41ConnectQuirks):
 
     features = Spark41ConnectQuirks.features.with_values(
         current_catalog="iceberg",
-        current_schema="",
     )
+
+    @property
+    def queries_paths(self) -> tuple[Path]:
+        return (
+            *super().queries_paths,
+            Path(__file__).parent.parent / "queries/spark41-iceberg",
+        )
 
 
 class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
