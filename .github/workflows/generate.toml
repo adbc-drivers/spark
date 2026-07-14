@@ -43,6 +43,10 @@ service_name = "spark4-connect-server"
 vendor_version = "spark4_4.0-connect"
 
 [[lang.go.validation.configs]]
+service_name = "spark41-connect-server"
+vendor_version = "spark4_4.1-connect"
+
+[[lang.go.validation.configs]]
 service_name = ""
 vendor_version = "emr_8.0-connect"
 aws = true

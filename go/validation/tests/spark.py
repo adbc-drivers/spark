@@ -173,6 +173,21 @@ class Spark4ConnectQuirks(Spark4ThriftQuirks):
         )
 
 
+class Spark41ConnectQuirks(Spark4ConnectQuirks):
+    vendor_version = re.compile(r"4\.1\.\d+.*\(Spark Connect\)")
+    short_version = "4.1-connect"
+    setup = model.DriverSetup(
+        database={
+            "uri": model.FromEnv("SPARK41_CONNECT_URI"),
+            "spark.ingest.s3.use_path_style": "true",
+        },
+        connection={},
+        statement={
+            "spark.ingest.staging_area_uri": "s3://test/temporary",
+        },
+    )
+
+
 class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
     short_version = "emr-8.0-connect"
 
@@ -263,6 +278,8 @@ def get_quirks(combined_version: str) -> model.DriverQuirks:
             return Spark4ThriftHttpQuirks()
         elif version == "4.0-connect":
             return Spark4ConnectQuirks()
+        elif version == "4.1-connect":
+            return Spark41ConnectQuirks()
         elif version in ("emr-8.0-connect"):
             return SparkEmr8ConnectQuirks()
     elif vendor in ("emr",):

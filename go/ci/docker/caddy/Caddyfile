@@ -17,7 +17,7 @@
 }
 
 https://:15003 {
-	reverse_proxy h2c://spark4-connect-server:15002
+	reverse_proxy h2c://spark41-connect-server:15002
 
 	tls /etc/caddy/certs/server.crt /etc/caddy/certs/server.key
 }
