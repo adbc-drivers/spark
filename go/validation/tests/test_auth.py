@@ -20,6 +20,30 @@ import pytest
 from . import spark
 
 
+@pytest.fixture(scope="module")
+def connect_uri(driver) -> str | None:
+    if driver.short_version == "4.1-connect":
+        return os.environ["SPARK41_CONNECT_URI"]
+    elif driver.short_version == "4.0-connect":
+        return os.environ["SPARK_CONNECT_URI"]
+    return None
+
+
+@pytest.fixture(scope="module")
+def connect_tls_uri(driver) -> str | None:
+    if driver.short_version == "4.1-connect":
+        uri = os.environ["SPARK41_CONNECT_URI"].replace("15004", "15003")
+    elif driver.short_version == "emr-8.0-connect":
+        uri = os.environ["SPARK_CONNECT_URI"].replace("15002", "15003")
+    else:
+        return None
+
+    uri = uri.replace("auth_type=none", "auth_type=token")
+    if "tls=true" not in uri:
+        uri += "&tls=true"
+    return uri
+
+
 def pytest_generate_tests(metafunc) -> None:
     quirks = spark.get_quirks(metafunc.config.getoption("vendor_version"))
     driver_param = f"{quirks.name}:{quirks.short_version}"
@@ -32,7 +56,7 @@ def pytest_generate_tests(metafunc) -> None:
     )
 
 
-def test_auth(subtests, driver, driver_path):
+def test_auth(subtests, driver, driver_path, connect_uri):
     all_options = {
         f"auth_type={t}"
         for t in [
@@ -71,7 +95,7 @@ def test_auth(subtests, driver, driver_path):
             ("auth_type=none", "Could not execute query"),
         ]
     elif driver.short_version.endswith("-connect"):
-        uri = os.environ["SPARK_CONNECT_URI"]
+        uri = connect_uri
         orig = "auth_type=none"
         cases = [
             # Spark Connect client forces TLS
@@ -139,14 +163,12 @@ def test_auth(subtests, driver, driver_path):
                         cursor.execute("SELECT 1")
 
 
-def test_tls(subtests, driver, driver_path):
+def test_tls(subtests, driver, driver_path, connect_tls_uri):
     if driver.short_version.endswith("-connect"):
-        # Spark Connect is "special" and forces plaintext if you don't have a
-        # token and TLS if you do
-        uri = os.environ["SPARK_CONNECT_URI"].replace("15002", "15003")
-        uri = uri.replace("auth_type=none", "auth_type=token")
-        if "tls=true" not in uri:
-            uri += "&tls=true&validateservercertificate=false"
+        uri = connect_tls_uri
+        if uri is None:
+            return
+        uri += "&validateservercertificate=false"
     elif driver.short_version.endswith("-thrift"):
         return
     elif driver.short_version.endswith("-thrifthttp"):
@@ -172,14 +194,11 @@ def test_tls(subtests, driver, driver_path):
             assert cursor.fetchall() == [(1,)]
 
 
-def test_tls_verify(subtests, driver, driver_path):
+def test_tls_verify(subtests, driver, driver_path, connect_tls_uri):
     if driver.short_version.endswith("-connect"):
-        # Spark Connect is "special" and forces plaintext if you don't have a
-        # token and TLS if you do
-        uri = os.environ["SPARK_CONNECT_URI"].replace("15002", "15003")
-        uri = uri.replace("auth_type=none", "auth_type=token")
-        if "tls=true" not in uri:
-            uri += "&tls=true"
+        uri = connect_tls_uri
+        if uri is None:
+            return
     elif driver.short_version.endswith("-thrift"):
         return
     elif driver.short_version.endswith("-thrifthttp"):

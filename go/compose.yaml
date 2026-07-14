@@ -256,7 +256,7 @@ services:
       start_period: 5s
 
   spark4-master:
-    image: apache/spark:4.0.0
+    image: apache/spark:4.0.3
     environment:
       - SPARK_MODE=master
       - SPARK_MASTER_HOST=spark4-master
@@ -267,7 +267,7 @@ services:
     command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
 
   spark4-worker:
-    image: apache/spark:4.0.0
+    image: apache/spark:4.0.3
     command: ["/opt/spark/sbin/start-worker.sh", "spark://spark4-master:7077"]
     depends_on:
       spark4-master:
@@ -363,8 +363,6 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
-      tls-proxy:
-        condition: service_started
     environment:
       SPARK_MASTER: spark://spark4-master:7077
     ports:
@@ -409,6 +407,71 @@ services:
       - ./.data/metastore4:/opt/spark-data
     healthcheck:
       test: ["CMD-SHELL", "klist && netstat -an | grep 10001 | grep LISTEN || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  # ==========================================================================
+  # Spark 4.1 Stack
+  # ==========================================================================
+
+  spark41-master:
+    image: apache/spark:4.1.2
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark41-master
+      - SPARK_MASTER_PORT=7077
+    ports:
+      - "8082:8080"   # Spark Master Web UI
+      - "7079:7077"   # Spark Master Port
+    command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
+
+  spark41-worker:
+    image: apache/spark:4.1.2
+    command: ["/opt/spark/sbin/start-worker.sh", "spark://spark41-master:7077"]
+    depends_on:
+      spark41-master:
+        condition: service_started
+    environment:
+      SPARK_NO_DAEMONIZE: true
+    healthcheck:
+      test: curl --fail http://localhost:8081
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+
+  spark41-connect-server:
+    build:
+      context: ./ci/docker/
+      dockerfile: spark4/Dockerfile
+      target: connect
+      args:
+        SPARK_VERSION: 4.1.2
+        SPARK_VERSION_NO_PATCH: 4.1
+    depends_on:
+      spark41-master:
+        condition: service_started
+      hive4-metastore:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      tls-proxy:
+        condition: service_started
+    environment:
+      SPARK_MASTER: spark://spark41-master:7077
+    ports:
+      - "15004:15002"  # Spark Connect gRPC port
+      - "4043:4040"    # Spark UI
+    volumes:
+      - ./ci/docker/spark4/conf/:/opt/spark/conf/:ro
+      - ./.data/kerberos/keytabs:/var/keytabs
+      - ./.data/metastore4:/opt/spark-data
+    healthcheck:
+      test: ["CMD-SHELL", "klist && netstat -an | grep 15002 | grep LISTEN || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10

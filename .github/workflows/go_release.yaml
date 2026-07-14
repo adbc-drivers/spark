@@ -160,6 +160,7 @@ jobs:
           - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrift-server", vendor_version: "spark4_4.0-thrift", environment: null, aws: false, azure: false, gcloud: false }
           - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-thrifthttp-server", vendor_version: "spark4_4.0-thrifthttp", environment: null, aws: false, azure: false, gcloud: false }
           - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark4-connect-server", vendor_version: "spark4_4.0-connect", environment: null, aws: false, azure: false, gcloud: false }
+          - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "spark41-connect-server", vendor_version: "spark4_4.1-connect", environment: null, aws: false, azure: false, gcloud: false }
           - { platform: linux, arch: amd64, runner: ubuntu-latest, service_name: "", vendor_version: "emr_8.0-connect", environment: "aws-emr-serverless", aws: true, azure: false, gcloud: false }
     environment: ${{ matrix.environment }}
     permissions:
