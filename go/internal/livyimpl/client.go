@@ -690,10 +690,7 @@ func (c *livyClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCont
 			Msg:  "[spark] livy: no output from statement",
 		}
 	} else if stmt.Output.Status == "error" {
-		return nil, -1, adbc.Error{
-			Code: adbc.StatusUnknown,
-			Msg:  fmt.Sprintf("[spark] livy: query error: %s: %s", stmt.Output.Ename, stmt.Output.Evalue),
-		}
+		return nil, -1, adbcErrFromLivyOutput(adbc.StatusUnknown, stmt.Output, "query error")
 	}
 
 	// Step 2: Get schema
@@ -728,7 +725,6 @@ func (c *livyClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCont
 }
 
 func (c *livyClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryContext) (int64, error) {
-	// TODO(lidavidm): properly map error
 	stmt, err := c.CreateStatement(ctx, CreateStatementRequest{Code: query.Query})
 	if err != nil {
 		return -1, adbc.Error{
@@ -745,10 +741,7 @@ func (c *livyClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryCon
 	}
 	// Check for errors
 	if stmt.Output.Status == "error" {
-		return -1, adbc.Error{
-			Code: adbc.StatusInvalidData,
-			Msg:  fmt.Sprintf("query error: %s: %s", stmt.Output.Ename, stmt.Output.Evalue),
-		}
+		return -1, adbcErrFromLivyOutput(adbc.StatusUnknown, stmt.Output, "query error")
 	}
 	return -1, nil
 }
@@ -892,3 +885,33 @@ func rowToMap(row any, schema *arrow.Schema) (map[string]any, error) {
 }
 
 var _ sparkbase.SparkClient = (*livyClient)(nil)
+
+func adbcErrFromLivyOutput(defaultStatus adbc.Status, output *StatementOutput, context string, contextArgs ...any) error {
+	var msg strings.Builder
+	msg.WriteString("[spark] livy: ")
+	fmt.Fprintf(&msg, context, contextArgs...)
+	msg.WriteString(": ")
+	msg.WriteString(output.Ename)
+	msg.WriteString(": ")
+	msg.WriteString(output.Evalue)
+
+	err := adbc.Error{
+		Code: defaultStatus,
+		Msg:  msg.String(),
+	}
+
+	// Guess from output.Evalue because Livy doesn't break out the error code
+	switch {
+	// N.B. there are multiple messages with this prefix
+	case strings.HasPrefix(output.Evalue, "[INSERT_COLUMN_ARITY_MISMATCH"):
+		err.Code = adbc.StatusAlreadyExists
+		err.SqlState = [5]byte{'2', '1', 'S', '0', '1'}
+	case strings.HasPrefix(output.Evalue, "[TABLE_OR_VIEW_NOT_FOUND]"):
+		err.Code = adbc.StatusNotFound
+		err.SqlState = [5]byte{'4', '2', 'P', '0', '1'}
+	case strings.HasPrefix(output.Evalue, "[TABLE_OR_VIEW_ALREADY_EXISTS]"):
+		err.Code = adbc.StatusAlreadyExists
+		err.SqlState = [5]byte{'4', '2', 'P', '0', '7'}
+	}
+	return err
+}
