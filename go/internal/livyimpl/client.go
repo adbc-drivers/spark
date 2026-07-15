@@ -678,10 +678,21 @@ func (c *livyClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCont
 	}
 
 	// Check for errors
-	if stmt.Output.Status == "error" {
+	if stmt.Output == nil {
+		if StatementState(stmt.State) == StatementStateError {
+			return nil, -1, adbc.Error{
+				Code: adbc.StatusInternal,
+				Msg:  "[spark] livy: unknown error",
+			}
+		}
 		return nil, -1, adbc.Error{
-			Code: adbc.StatusInvalidData,
-			Msg:  fmt.Sprintf("query error: %s: %s", stmt.Output.Ename, stmt.Output.Evalue),
+			Code: adbc.StatusInternal,
+			Msg:  "[spark] livy: no output from statement",
+		}
+	} else if stmt.Output.Status == "error" {
+		return nil, -1, adbc.Error{
+			Code: adbc.StatusUnknown,
+			Msg:  fmt.Sprintf("[spark] livy: query error: %s: %s", stmt.Output.Ename, stmt.Output.Evalue),
 		}
 	}
 
