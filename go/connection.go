@@ -1,4 +1,4 @@
-// Copyright (c) 2025 ADBC Drivers Contributors
+// Copyright (c) 2025-2026 ADBC Drivers Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package spark
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/spark/go/internal/sparkbase"
@@ -106,7 +107,27 @@ func (c *connectionImpl) SetAutocommit(ctx context.Context, enabled bool) error 
 }
 
 func (c *connectionImpl) GetTableSchema(ctx context.Context, catalog *string, dbSchema *string, tableName string) (*arrow.Schema, error) {
-	return nil, sparkbase.ErrTBD
+	parts := make([]string, 0, 3)
+	if catalog != nil && *catalog != "" {
+		parts = append(parts, sparkbase.QuoteIdentifier(*catalog))
+	}
+	if dbSchema != nil && *dbSchema != "" {
+		parts = append(parts, sparkbase.QuoteIdentifier(*dbSchema))
+	}
+	parts = append(parts, sparkbase.QuoteIdentifier(tableName))
+
+	query := fmt.Sprintf("SELECT * FROM %s LIMIT 0", strings.Join(parts, "."))
+	rdr, _, err := c.client.ExecuteQuery(ctx, sparkbase.QueryContext{
+		Mem:   c.Alloc,
+		Log:   c.Logger,
+		Query: query,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer rdr.Release()
+
+	return rdr.Schema(), nil
 }
 
 func (c *connectionImpl) Commit(ctx context.Context) error {

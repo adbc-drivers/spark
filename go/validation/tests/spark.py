@@ -1,4 +1,4 @@
-# Copyright (c) 2025 ADBC Drivers Contributors
+# Copyright (c) 2025-2026 ADBC Drivers Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ class Spark3ThriftQuirks(model.DriverQuirks):
     vendor_version = re.compile(r"3\.5\.\d+.*\(HiveServer2\+binary\)")
     short_version = "3.5-thrift"
     features = model.DriverFeatures(
+        connection_get_table_schema=True,
         get_objects=True,
         statement_bind=False,
         statement_bulk_ingest=True,
