@@ -32,8 +32,9 @@ if __name__ == "__main__":
         "spark",
         lambda version, vendor: spark.get_quirks(f"{vendor}:{version}"),
         [
-            ("spark3", "Spark 3.x"),
-            ("spark4", "Spark 4.x"),
+            ("spark3", "Spark 3.x (Hive metastore)"),
+            ("spark4", "Spark 4.x (Hive metastore)"),
+            ("spark4iceberg", "Spark 4.x (Iceberg metastore)"),
         ],
         reports,
         template,
