@@ -1,4 +1,4 @@
-// Copyright (c) 2025 ADBC Drivers Contributors
+// Copyright (c) 2025-2026 ADBC Drivers Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/adbc-drivers/spark/go/connectclient/sparkerrors"
 	"github.com/adbc-drivers/spark/go/internal/hiveserver2"
 	"github.com/apache/arrow-adbc/go/adbc"
 )
@@ -37,6 +38,10 @@ func ErrToAdbcErr(defaultStatus adbc.Status, err error, context string, contextA
 	status := defaultStatus
 	var details []adbc.ErrorDetail
 	var sqlState [5]byte
+	if sparkErr, ok := errors.AsType[*sparkerrors.SparkError](err); ok {
+		copy(sqlState[:], []byte(sparkErr.SqlState))
+		status = statusFromSQLState(status, sparkErr.SqlState)
+	}
 
 	var builder strings.Builder
 	var trailers []string
@@ -82,23 +87,29 @@ func StatusToAdbcErr(defaultStatus adbc.Status, status *hiveserver2.TStatus, con
 	if status.SqlState != nil {
 		copy(err.SqlState[:], []byte(*status.SqlState))
 
-		// https://spark.apache.org/docs/3.5.8/sql-error-conditions.html
-		switch *status.SqlState {
-		case "22003":
-			err.Code = adbc.StatusInvalidData
-		case "22546", "42000", "42601", "42702", "42704", "42710", "42846":
-			err.Code = adbc.StatusInvalidArgument
-		case "42K03", "42P01":
-			err.Code = adbc.StatusNotFound
-		case "42P07":
-			err.Code = adbc.StatusAlreadyExists
-		}
+		err.Code = statusFromSQLState(err.Code, *status.SqlState)
 	}
 	if status.ErrorCode != nil {
 		err.VendorCode = *status.ErrorCode
 	}
 
 	return err
+}
+
+// https://spark.apache.org/docs/3.5.8/sql-error-conditions.html
+func statusFromSQLState(defaultStatus adbc.Status, sqlState string) adbc.Status {
+	switch sqlState {
+	case "21S01", "42P07":
+		return adbc.StatusAlreadyExists
+	case "22003":
+		return adbc.StatusInvalidData
+	case "22546", "42000", "42601", "42702", "42704", "42710", "42846":
+		return adbc.StatusInvalidArgument
+	case "42K03", "42P01":
+		return adbc.StatusNotFound
+	default:
+		return defaultStatus
+	}
 }
 
 type GetStatus interface {

@@ -1,4 +1,4 @@
-// Copyright (c) 2025 ADBC Drivers Contributors
+// Copyright (c) 2025-2026 ADBC Drivers Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -145,7 +145,7 @@ func (q *SparkQuirks) BindParameter(idx int) string                { return fmt.
 func (q *SparkQuirks) SupportsBulkIngest(string) bool              { return false }
 func (q *SparkQuirks) SupportsConcurrentStatements() bool          { return false }
 func (q *SparkQuirks) SupportsCurrentCatalogSchema() bool          { return true }
-func (q *SparkQuirks) SupportsGetTableSchema() bool                { return false }
+func (q *SparkQuirks) SupportsGetTableSchema() bool                { return true }
 func (q *SparkQuirks) SupportsExecuteSchema() bool                 { return false }
 func (q *SparkQuirks) SupportsGetSetOptions() bool                 { return true }
 func (q *SparkQuirks) SupportsPartitionedData() bool               { return false }
