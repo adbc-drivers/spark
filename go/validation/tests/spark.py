@@ -32,6 +32,8 @@ class Spark3ThriftQuirks(model.DriverQuirks):
     short_version = "3.5-thrift"
     features = model.DriverFeatures(
         connection_get_table_schema=True,
+        connection_set_current_catalog=True,
+        connection_set_current_schema=True,
         get_objects=True,
         statement_bind=False,
         statement_bulk_ingest=True,
@@ -39,6 +41,9 @@ class Spark3ThriftQuirks(model.DriverQuirks):
         statement_rows_affected=True,
         current_catalog="spark_catalog",
         current_schema="default",
+        secondary_catalog="hivealt",
+        secondary_catalog_schema="default",
+        secondary_schema="schematwo",
         supported_xdbc_fields=[],
     )
     setup = model.DriverSetup(
@@ -205,6 +210,7 @@ class Spark41ConnectIcebergQuirks(Spark41ConnectQuirks):
 
     features = Spark41ConnectQuirks.features.with_values(
         current_catalog="iceberg",
+        secondary_catalog="icebergalt",
     )
 
     @property

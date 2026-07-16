@@ -19,4 +19,10 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     SELECT 'CREATE DATABASE metastore4'
     WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'metastore4')\gexec
     GRANT ALL PRIVILEGES ON DATABASE metastore4 TO hive;
+    SELECT 'CREATE DATABASE metastore_alt'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'metastore_alt')\gexec
+    GRANT ALL PRIVILEGES ON DATABASE metastore_alt TO hive;
+    SELECT 'CREATE DATABASE metastore4_alt'
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'metastore4_alt')\gexec
+    GRANT ALL PRIVILEGES ON DATABASE metastore4_alt TO hive;
 EOSQL

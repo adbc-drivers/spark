@@ -55,6 +55,8 @@ RUN wget -q https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP
     && wget -q https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/${AWS_SDK_V2_VERSION}/bundle-${AWS_SDK_V2_VERSION}.jar -P ${SPARK_HOME}/jars/
 
 COPY kerberos/conf/krb5.conf /etc/krb5.conf
+COPY spark/catalog-init.sh /opt/catalog-init.sh
+RUN chmod +x /opt/catalog-init.sh
 ENV KRB5CCNAME="/tmp/krb5cc_spark"
 
 

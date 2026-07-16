@@ -25,7 +25,7 @@ ARG POSTGRES_NAME=postgresql-${POSTGRES_DRIVER_VERSION}
 USER root
 RUN export DEBIAN_FRONTEND=noninteractive \
         && apt-get update \
-        && apt-get install -y --no-install-recommends net-tools krb5-user wget \
+        && apt-get install -y --no-install-recommends net-tools krb5-user wget postgresql-client \
         && rm /opt/hadoop/share/hadoop/common/lib/slf4j-log4j12-1.7.25.jar
 
 # NOTE: If Hive >= 4, there, the prebuilt docker images contain wget.
