@@ -71,6 +71,14 @@ class Spark3ThriftQuirks(model.DriverQuirks):
         identifier = identifier.replace("`", "``")
         return f"`{identifier}`"
 
+    def query_override(self, context: str, default: str) -> str:
+        if context in (
+            "TestConnection.test_get_table_schema_catalog",
+            "TestConnection.test_get_table_schema_schema",
+        ):
+            return default.replace("VARCHAR", "STRING")
+        return super().query_override(context, default)
+
     def drop_table(
         self,
         *,
