@@ -101,10 +101,53 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >
+        set -e;
+        (curl --fail http://iceberg-rest:8181/v1/namespaces/default ||
         curl --fail-with-body --request POST
         --header 'Content-Type: application/json'
         --data '{"namespace":["default"]}'
-        http://iceberg-rest:8181/v1/namespaces
+        http://iceberg-rest:8181/v1/namespaces) &&
+        (curl --fail http://iceberg-rest:8181/v1/namespaces/schematwo ||
+        curl --fail-with-body --request POST
+        --header 'Content-Type: application/json'
+        --data '{"namespace":["schematwo"]}'
+        http://iceberg-rest:8181/v1/namespaces)
+
+  iceberg-rest-alt:
+    image: apache/iceberg-rest-fixture:1.10.1
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      AWS_REGION: us-east-1
+      CATALOG_CATALOG_NAME: icebergalt
+      CATALOG_URI: jdbc:sqlite:/tmp/iceberg_catalog_alt.db
+      CATALOG_WAREHOUSE: s3://test/icebergalt
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: true
+      CATALOG_S3_ACCESS__KEY__ID: admin
+      CATALOG_S3_SECRET__ACCESS__KEY: password
+
+  iceberg-rest-alt-init:
+    image: apache/iceberg-rest-fixture:1.10.1
+    depends_on:
+      iceberg-rest-alt:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        set -e;
+        (curl --fail http://iceberg-rest-alt:8181/v1/namespaces/default ||
+        curl --fail-with-body --request POST
+        --header 'Content-Type: application/json'
+        --data '{"namespace":["default"]}'
+        http://iceberg-rest-alt:8181/v1/namespaces) &&
+        (curl --fail http://iceberg-rest-alt:8181/v1/namespaces/schematwo ||
+        curl --fail-with-body --request POST
+        --header 'Content-Type: application/json'
+        --data '{"namespace":["schematwo"]}'
+        http://iceberg-rest-alt:8181/v1/namespaces)
 
   # ==========================================================================
   # Spark 3.5 Stack
@@ -136,6 +179,59 @@ services:
       timeout: 5s
       retries: 10
       start_period: 5s
+
+  hive3-metastore-alt:
+    build:
+      context: ./ci/docker/
+      dockerfile: hive/Dockerfile
+      target: hive
+    depends_on:
+      metastore-db:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
+    environment:
+      IS_RESUME: true
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      KRB5CCNAME: /tmp/krb5cc_hive
+      METASTORE_DB_NAME: metastore_alt
+      METASTORE_WAREHOUSE_DIR: /opt/spark-data-alt/warehouse
+    volumes:
+      - ./.data/metastore-alt:/opt/spark-data-alt
+      - ./.data/kerberos/keytabs:/var/keytabs
+    healthcheck:
+      test: ["CMD-SHELL", "netstat -an | grep 9083 | grep LISTEN || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  spark35-catalog-init:
+    build:
+      context: ./ci/docker/
+      dockerfile: spark/Dockerfile
+      target: thrift
+    depends_on:
+      hive3-metastore:
+        condition: service_healthy
+      hive3-metastore-alt:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    entrypoint: ["/opt/catalog-init.sh"]
+    environment:
+      SPARK_INIT_SQL: >-
+        CREATE NAMESPACE IF NOT EXISTS spark_catalog.schematwo;
+        CREATE NAMESPACE IF NOT EXISTS hivealt.default;
+        CREATE NAMESPACE IF NOT EXISTS hivealt.schematwo
+    volumes:
+      - ./ci/docker/spark/conf/:/opt/spark/conf/:ro
+      - ./.data/kerberos/keytabs:/var/keytabs
+      - ./.data/metastore:/opt/spark-data
+      - ./.data/metastore-alt:/opt/spark-data-alt
 
   spark35-master:
     image: apache/spark:3.5.0
@@ -173,6 +269,8 @@ services:
         condition: service_started
       hive3-metastore:
         condition: service_healthy
+      spark35-catalog-init:
+        condition: service_completed_successfully
       kerberos:
         condition: service_healthy
       minio-init:
@@ -186,6 +284,7 @@ services:
       - ./ci/docker/spark/conf/:/opt/spark/conf/:ro
       - ./.data/kerberos/keytabs:/var/keytabs
       - ./.data/metastore:/opt/spark-data
+      - ./.data/metastore-alt:/opt/spark-data-alt
     healthcheck:
       test: ["CMD-SHELL", "klist && netstat -an | grep 10000 | grep LISTEN || exit 1"]
       interval: 15s
@@ -203,6 +302,8 @@ services:
         condition: service_started
       hive3-metastore:
         condition: service_healthy
+      spark35-catalog-init:
+        condition: service_completed_successfully
       kerberos:
         condition: service_healthy
       minio-init:
@@ -216,6 +317,7 @@ services:
       - ./ci/docker/spark/conf/:/opt/spark/conf/:ro
       - ./.data/kerberos/keytabs:/var/keytabs
       - ./.data/metastore:/opt/spark-data
+      - ./.data/metastore-alt:/opt/spark-data-alt
     healthcheck:
       test: ["CMD-SHELL", "klist && netstat -an | grep 15002 | grep LISTEN || exit 1"]
       interval: 15s
@@ -234,6 +336,8 @@ services:
         condition: service_started
       hive3-metastore:
         condition: service_healthy
+      spark35-catalog-init:
+        condition: service_completed_successfully
       kerberos:
         condition: service_healthy
       minio-init:
@@ -248,6 +352,7 @@ services:
       - ./ci/docker/spark/conf/:/opt/livy/conf/:ro
       - ./.data/kerberos/keytabs:/var/keytabs
       - ./.data/metastore:/opt/spark-data
+      - ./.data/metastore-alt:/opt/spark-data-alt
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8998/ || exit 1"]
       interval: 30s
@@ -286,6 +391,61 @@ services:
       retries: 10
       start_period: 5s
 
+  hive4-metastore-alt:
+    build:
+      context: ./ci/docker/
+      dockerfile: hive4/Dockerfile
+      target: hive
+    depends_on:
+      metastore-db:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
+    environment:
+      IS_RESUME: true
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      KRB5CCNAME: /tmp/krb5cc_hive
+      METASTORE_DB_NAME: metastore4_alt
+      METASTORE_WAREHOUSE_DIR: /opt/spark-data-alt/warehouse
+    volumes:
+      - ./.data/metastore4-alt:/opt/spark-data-alt
+      - ./.data/kerberos/keytabs:/var/keytabs
+    healthcheck:
+      test: ["CMD-SHELL", "netstat -an | grep 9083 | grep LISTEN || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  spark4-catalog-init:
+    build:
+      context: ./ci/docker/
+      dockerfile: spark4/Dockerfile
+      target: thrift
+    depends_on:
+      hive4-metastore:
+        condition: service_healthy
+      hive4-metastore-alt:
+        condition: service_healthy
+      kerberos:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      iceberg-rest-init:
+        condition: service_completed_successfully
+    entrypoint: ["/opt/catalog-init.sh"]
+    environment:
+      SPARK_INIT_SQL: >-
+        CREATE NAMESPACE IF NOT EXISTS spark_catalog.schematwo;
+        CREATE NAMESPACE IF NOT EXISTS hivealt.default;
+        CREATE NAMESPACE IF NOT EXISTS hivealt.schematwo
+    volumes:
+      - ./ci/docker/spark4/conf/:/opt/spark/conf/:ro
+      - ./.data/kerberos/keytabs:/var/keytabs
+      - ./.data/metastore4:/opt/spark-data
+      - ./.data/metastore4-alt:/opt/spark-data-alt
+
   spark4-master:
     image: apache/spark:4.0.3
     environment:
@@ -322,6 +482,8 @@ services:
         condition: service_started
       hive4-metastore:
         condition: service_healthy
+      spark4-catalog-init:
+        condition: service_completed_successfully
       kerberos:
         condition: service_healthy
       minio-init:
@@ -337,6 +499,7 @@ services:
       - ./ci/docker/spark4/conf/:/opt/spark/conf/:ro
       - ./.data/kerberos/keytabs:/var/keytabs
       - ./.data/metastore4:/opt/spark-data
+      - ./.data/metastore4-alt:/opt/spark-data-alt
     healthcheck:
       test: ["CMD-SHELL", "klist && netstat -an | grep 10000 | grep LISTEN || exit 1"]
       interval: 15s
@@ -392,6 +555,8 @@ services:
         condition: service_started
       hive4-metastore:
         condition: service_healthy
+      spark4-catalog-init:
+        condition: service_completed_successfully
       kerberos:
         condition: service_healthy
       minio-init:
@@ -407,6 +572,7 @@ services:
       - ./ci/docker/spark4/conf/:/opt/spark/conf/:ro
       - ./.data/kerberos/keytabs:/var/keytabs
       - ./.data/metastore4:/opt/spark-data
+      - ./.data/metastore4-alt:/opt/spark-data-alt
     healthcheck:
       test: ["CMD-SHELL", "klist && netstat -an | grep 15002 | grep LISTEN || exit 1"]
       interval: 15s
@@ -424,6 +590,8 @@ services:
         condition: service_started
       hive4-metastore:
         condition: service_healthy
+      spark4-catalog-init:
+        condition: service_completed_successfully
       kerberos:
         condition: service_healthy
       minio-init:
@@ -442,6 +610,7 @@ services:
       - ./ci/docker/spark4/conf/:/opt/spark/conf/:ro
       - ./.data/kerberos/keytabs:/var/keytabs
       - ./.data/metastore4:/opt/spark-data
+      - ./.data/metastore4-alt:/opt/spark-data-alt
     healthcheck:
       test: ["CMD-SHELL", "klist && netstat -an | grep 10001 | grep LISTEN || exit 1"]
       interval: 15s
@@ -492,16 +661,32 @@ services:
         condition: service_started
       hive4-metastore:
         condition: service_healthy
+      spark4-catalog-init:
+        condition: service_completed_successfully
       kerberos:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
       iceberg-rest-init:
         condition: service_completed_successfully
+      iceberg-rest-alt-init:
+        condition: service_completed_successfully
       tls-proxy:
         condition: service_started
     environment:
       SPARK_MASTER: spark://spark41-master:7077
+      SPARK_EXTRA_CONF: |-
+        spark.sql.catalog.icebergalt=org.apache.iceberg.spark.SparkCatalog
+        spark.sql.catalog.icebergalt.type=rest
+        spark.sql.catalog.icebergalt.uri=http://iceberg-rest-alt:8181
+        spark.sql.catalog.icebergalt.warehouse=s3://test/icebergalt
+        spark.sql.catalog.icebergalt.default-namespace=default
+        spark.sql.catalog.icebergalt.io-impl=org.apache.iceberg.aws.s3.S3FileIO
+        spark.sql.catalog.icebergalt.s3.endpoint=http://minio:9000
+        spark.sql.catalog.icebergalt.s3.path-style-access=true
+        spark.sql.catalog.icebergalt.s3.access-key-id=admin
+        spark.sql.catalog.icebergalt.s3.secret-access-key=password
+        spark.sql.catalog.icebergalt.client.region=us-east-1
     ports:
       - "15004:15002"  # Spark Connect gRPC port
       - "4043:4040"    # Spark UI
@@ -509,6 +694,7 @@ services:
       - ./ci/docker/spark4/conf/:/opt/spark/conf/:ro
       - ./.data/kerberos/keytabs:/var/keytabs
       - ./.data/metastore4:/opt/spark-data
+      - ./.data/metastore4-alt:/opt/spark-data-alt
     healthcheck:
       test: ["CMD-SHELL", "klist && netstat -an | grep 15002 | grep LISTEN || exit 1"]
       interval: 15s

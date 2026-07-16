@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG HIVE_VERSION=4.0.1
+ARG HIVE_VERSION=4.0.0
 FROM apache/hive:${HIVE_VERSION} AS hive
 
 ARG POSTGRES_DRIVER_VERSION=42.7.9

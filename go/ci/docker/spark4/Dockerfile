@@ -13,9 +13,6 @@
 # limitations under the License.
 
 ARG SPARK_VERSION=4.0.3
-ARG HIVE_VERSION=4.0.1
-FROM apache/hive:${HIVE_VERSION} AS hive-jars
-
 FROM apache/spark:${SPARK_VERSION} AS base
 
 ARG SPARK_VERSION_NO_PATCH=4.0
@@ -34,14 +31,6 @@ ENV SPARK_HOME=/opt/spark
 
 WORKDIR /tmp
 
-# Copy Hive 4 metastore client JARs to a separate directory for isolated
-# classloading. Spark 4 ships hive-metastore-2.3.10 which uses old Thrift
-# method names incompatible with Hive 4 standalone metastore. Using
-# spark.sql.hive.metastore.jars=path loads these in an isolated classloader
-# so they don't conflict with Spark's own Hive service classes.
-RUN mkdir -p /opt/hive4-metastore-jars
-COPY --from=hive-jars /opt/hive/lib/ /opt/hive4-metastore-jars/
-
 # Download Iceberg runtime (Spark 4.0 + Scala 2.13)
 ARG ICEBERG_NAME="iceberg-spark-runtime-${SPARK_VERSION_NO_PATCH}_${SCALA_VERSION}"
 ARG ICEBERG_JAR="${ICEBERG_NAME}-${ICEBERG_VERSION}.jar"
@@ -55,6 +44,8 @@ RUN wget -q https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP
     && wget -q https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/${AWS_SDK_V2_VERSION}/bundle-${AWS_SDK_V2_VERSION}.jar -P ${SPARK_HOME}/jars/
 
 COPY kerberos/conf/krb5.conf /etc/krb5.conf
+COPY spark/catalog-init.sh /opt/catalog-init.sh
+RUN chmod +x /opt/catalog-init.sh
 ENV KRB5CCNAME="/tmp/krb5cc_spark"
 
 

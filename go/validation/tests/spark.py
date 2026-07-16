@@ -32,6 +32,8 @@ class Spark3ThriftQuirks(model.DriverQuirks):
     short_version = "3.5-thrift"
     features = model.DriverFeatures(
         connection_get_table_schema=True,
+        connection_set_current_catalog=True,
+        connection_set_current_schema=True,
         get_objects=True,
         statement_bind=False,
         statement_bulk_ingest=True,
@@ -39,6 +41,9 @@ class Spark3ThriftQuirks(model.DriverQuirks):
         statement_rows_affected=True,
         current_catalog="spark_catalog",
         current_schema="default",
+        secondary_catalog="hivealt",
+        secondary_catalog_schema="default",
+        secondary_schema="schematwo",
         supported_xdbc_fields=[],
     )
     setup = model.DriverSetup(
@@ -66,6 +71,14 @@ class Spark3ThriftQuirks(model.DriverQuirks):
         identifier = identifier.replace("`", "``")
         return f"`{identifier}`"
 
+    def query_override(self, context: str, default: str) -> str:
+        if context in (
+            "TestConnection.test_get_table_schema_catalog",
+            "TestConnection.test_get_table_schema_schema",
+        ):
+            return default.replace("VARCHAR", "STRING")
+        return super().query_override(context, default)
+
     def drop_table(
         self,
         *,
@@ -92,7 +105,10 @@ class Spark3ThriftQuirks(model.DriverQuirks):
         )
 
     def is_table_not_found(self, table_name: str, error: Exception) -> bool:
-        return "TABLE_OR_VIEW_NOT_FOUND" in str(error) and table_name in str(error)
+        msg = str(error)
+        return (
+            "TABLE_OR_VIEW_NOT_FOUND" in msg or "Failed to get table info" in msg
+        ) and table_name in msg
 
     def split_statement(self, statement: str) -> list[str]:
         return quirks.split_statement(statement)
@@ -206,6 +222,7 @@ class Spark41ConnectIcebergQuirks(Spark41ConnectQuirks):
 
     features = Spark41ConnectQuirks.features.with_values(
         current_catalog="iceberg",
+        secondary_catalog="icebergalt",
     )
 
     @property

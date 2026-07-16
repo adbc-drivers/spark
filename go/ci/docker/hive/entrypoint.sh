@@ -16,6 +16,10 @@
 set -e
 set -x
 
+METASTORE_DB_NAME="${METASTORE_DB_NAME:-metastore}"
+METASTORE_WAREHOUSE_DIR="${METASTORE_WAREHOUSE_DIR:-/opt/spark-data/warehouse}"
+METASTORE_DB_URL="jdbc:postgresql://metastore-db:5432/${METASTORE_DB_NAME}"
+
 # Wait for keytab to exist
 echo "Waiting for keytab..."
 while [ ! -f /var/keytabs/hive.keytab ]; do
@@ -34,8 +38,23 @@ fi
 echo "Verifying Kerberos credentials..."
 klist
 
+echo "ENSURING DATABASE EXISTS"
+if ! PGPASSWORD=hive psql -h metastore-db -U hive -d metastore -tAc \
+    "SELECT 1 FROM pg_database WHERE datname = '${METASTORE_DB_NAME}'" | grep -q 1; then
+    PGPASSWORD=hive createdb -h metastore-db -U hive "${METASTORE_DB_NAME}"
+fi
+
 echo "INITIALIZING SCHEMA"
-${HIVE_HOME}/bin/schematool -dbType postgres -initSchema || true
+${HIVE_HOME}/bin/schematool \
+    -dbType postgres \
+    -url "${METASTORE_DB_URL}" \
+    -userName hive \
+    -passWord hive \
+    -initSchema || true
 
 echo "STARTING HIVE"
-exec ${HIVE_HOME}/bin/hive --service metastore --verbose
+exec ${HIVE_HOME}/bin/hive \
+    --service metastore \
+    --hiveconf javax.jdo.option.ConnectionURL="${METASTORE_DB_URL}" \
+    --hiveconf hive.metastore.warehouse.dir="${METASTORE_WAREHOUSE_DIR}" \
+    --verbose

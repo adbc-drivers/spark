@@ -114,12 +114,20 @@ func DefaultCurrentSchemaImpl(c SparkClient, ctx context.Context, mem memory.All
 }
 
 func DefaultSetCurrentCatalogImpl(c SparkClient, ctx context.Context, mem memory.Allocator, catalog string) error {
-	sql := fmt.Sprintf("USE CATALOG %s", QuoteString(catalog))
+	schema, err := c.CurrentSchema(ctx, mem)
+	if err != nil {
+		return err
+	}
+	if schema == "" {
+		schema = "default"
+	}
+
+	sql := fmt.Sprintf("USE %s.%s", QuoteIdentifier(catalog), QuoteIdentifier(schema))
 	query := QueryContext{
 		Query: sql,
 		Mem:   mem,
 	}
-	_, err := c.ExecuteUpdate(ctx, query)
+	_, err = c.ExecuteUpdate(ctx, query)
 	if err != nil {
 		return err
 	}
@@ -127,7 +135,7 @@ func DefaultSetCurrentCatalogImpl(c SparkClient, ctx context.Context, mem memory
 }
 
 func DefaultSetCurrentSchemaImpl(c SparkClient, ctx context.Context, mem memory.Allocator, schema string) error {
-	sql := fmt.Sprintf("USE SCHEMA %s", QuoteString(schema))
+	sql := fmt.Sprintf("USE SCHEMA %s", QuoteIdentifier(schema))
 	query := QueryContext{
 		Query: sql,
 		Mem:   mem,
