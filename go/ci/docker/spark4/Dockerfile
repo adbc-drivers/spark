@@ -13,9 +13,6 @@
 # limitations under the License.
 
 ARG SPARK_VERSION=4.0.3
-ARG HIVE_VERSION=4.0.1
-FROM apache/hive:${HIVE_VERSION} AS hive-jars
-
 FROM apache/spark:${SPARK_VERSION} AS base
 
 ARG SPARK_VERSION_NO_PATCH=4.0
@@ -33,14 +30,6 @@ RUN mkdir -p /opt/spark-data/warehouse && chmod 777 /opt/spark-data/warehouse
 ENV SPARK_HOME=/opt/spark
 
 WORKDIR /tmp
-
-# Copy Hive 4 metastore client JARs to a separate directory for isolated
-# classloading. Spark 4 ships hive-metastore-2.3.10 which uses old Thrift
-# method names incompatible with Hive 4 standalone metastore. Using
-# spark.sql.hive.metastore.jars=path loads these in an isolated classloader
-# so they don't conflict with Spark's own Hive service classes.
-RUN mkdir -p /opt/hive4-metastore-jars
-COPY --from=hive-jars /opt/hive/lib/ /opt/hive4-metastore-jars/
 
 # Download Iceberg runtime (Spark 4.0 + Scala 2.13)
 ARG ICEBERG_NAME="iceberg-spark-runtime-${SPARK_VERSION_NO_PATCH}_${SCALA_VERSION}"
