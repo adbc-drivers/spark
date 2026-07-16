@@ -15,9 +15,9 @@
 // part: metadata
 
 # https://issues.apache.org/jira/browse/SPARK-28474
-# Spark's row-based Thrift protocol converts binary to UTF-8 strings,
-# replacing bytes > 0x7F with U+FFFD. Fixed in Spark 4.0 (SPARK-47911).
-skip = "Spark Thrift row protocol corrupts non-UTF-8 binary data (SPARK-28474)"
+# Spark's Thrift protocol converts binary to UTF-8 strings, replacing bytes
+# greater than 0x7F with U+FFFD.
+skip = "Spark Thrift corrupts non-UTF-8 binary data (SPARK-28474)"
 
 [tags]
 sql-type-name = "BINARY"

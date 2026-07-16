@@ -132,6 +132,7 @@ class Spark4ThriftQuirks(Spark3ThriftQuirks):
         return (
             Path(__file__).parent.parent / "queries/base",
             Path(__file__).parent.parent / "queries/spark40",
+            Path(__file__).parent.parent / "queries/spark40-thrift",
         )
 
 
