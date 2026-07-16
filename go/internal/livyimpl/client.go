@@ -462,7 +462,7 @@ func (c *livyClient) CreateSession(ctx context.Context, req CreateSessionRequest
 
 // GetSession retrieves session information
 func (c *livyClient) GetSession(ctx context.Context, sessionID SessionID) (*Session, error) {
-	url := fmt.Sprintf("/sessions/%s", sessionID)
+	url := fmt.Sprintf("/sessions/%s", url.PathEscape(string(sessionID)))
 	resp, err := c.doRequest(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -485,7 +485,7 @@ func (c *livyClient) GetSession(ctx context.Context, sessionID SessionID) (*Sess
 
 // DeleteSession deletes a session
 func (c *livyClient) DeleteSession(ctx context.Context) error {
-	url := fmt.Sprintf("/sessions/%s", c.sessionID)
+	url := fmt.Sprintf("/sessions/%s", url.PathEscape(string(c.sessionID)))
 	resp, err := c.doRequest(ctx, "DELETE", url, nil)
 	if err != nil {
 		return err
@@ -505,7 +505,7 @@ func (c *livyClient) DeleteSession(ctx context.Context) error {
 
 func (c *livyClient) Close(ctx context.Context) error {
 	if c.deleteSessionOnClose {
-		url := fmt.Sprintf("/sessions/%s", c.sessionID)
+		url := fmt.Sprintf("/sessions/%s", url.PathEscape(string(c.sessionID)))
 		resp, err := c.doRequest(ctx, "DELETE", url, nil)
 		if err != nil {
 			return err
@@ -564,7 +564,7 @@ func (c *livyClient) CreateStatement(ctx context.Context, req CreateStatementReq
 		return nil, fmt.Errorf("failed to marshal statement request: %w", err)
 	}
 
-	url := fmt.Sprintf("/sessions/%s/statements", c.sessionID)
+	url := fmt.Sprintf("/sessions/%s/statements", url.PathEscape(string(c.sessionID)))
 	resp, err := c.doRequest(ctx, "POST", url, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
@@ -589,7 +589,7 @@ func (c *livyClient) CreateStatement(ctx context.Context, req CreateStatementReq
 
 // GetStatement retrieves statement information
 func (c *livyClient) GetStatement(ctx context.Context, sessionID SessionID, statementID int) (*Statement, error) {
-	url := fmt.Sprintf("/sessions/%s/statements/%d", sessionID, statementID)
+	url := fmt.Sprintf("/sessions/%s/statements/%d", url.PathEscape(string(sessionID)), statementID)
 	resp, err := c.doRequest(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
