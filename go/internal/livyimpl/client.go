@@ -901,11 +901,15 @@ func adbcErrFromLivyOutput(defaultStatus adbc.Status, output *StatementOutput, c
 	}
 
 	// Guess from output.Evalue because Livy doesn't break out the error code
+	// https://spark.apache.org/docs/latest/sql-error-conditions.html
 	switch {
 	// N.B. there are multiple messages with this prefix
 	case strings.HasPrefix(output.Evalue, "[INSERT_COLUMN_ARITY_MISMATCH"):
 		err.Code = adbc.StatusAlreadyExists
 		err.SqlState = [5]byte{'2', '1', 'S', '0', '1'}
+	case strings.HasPrefix(output.Evalue, "[SCHEMA_NOT_FOUND]"):
+		err.Code = adbc.StatusNotFound
+		err.SqlState = [5]byte{'4', '2', '7', '0', '4'}
 	case strings.HasPrefix(output.Evalue, "[TABLE_OR_VIEW_NOT_FOUND]"):
 		err.Code = adbc.StatusNotFound
 		err.SqlState = [5]byte{'4', '2', 'P', '0', '1'}
