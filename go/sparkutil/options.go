@@ -116,6 +116,34 @@ const (
 	// This is required when connecting to AWS EMR Serverless
 	OptionLivyAWSExecutionRoleArn = "spark.livy.aws.emr_serverless.execution_role_arn"
 
+	// Azure Authentication Options (when auth_type=azure_token)
+
+	// OptionLivyAzureCredential selects how the Microsoft Entra ID token is
+	// obtained. See the OptionValueAzureCredential* constants for supported
+	// values. Defaults to "default" (the azidentity DefaultAzureCredential
+	// chain: environment variables, workload identity, managed identity,
+	// Azure CLI, ...).
+	OptionLivyAzureCredential = "spark.livy.azure.credential"
+
+	// OptionLivyAzureTenantID specifies the Entra ID tenant (directory) ID.
+	// Required for the "client_secret" credential; optional otherwise.
+	OptionLivyAzureTenantID = "spark.livy.azure.tenant_id"
+
+	// OptionLivyAzureClientID specifies the Entra ID application (client) ID.
+	// Required for the "client_secret" credential; selects the user-assigned
+	// identity for "managed_identity".
+	OptionLivyAzureClientID = "spark.livy.azure.client_id"
+
+	// OptionLivyAzureClientSecret specifies the client secret for the
+	// "client_secret" credential.
+	OptionLivyAzureClientSecret = "spark.livy.azure.client_secret"
+
+	// OptionLivyAzureTokenScope overrides the OAuth2 scope requested for the
+	// bearer token. When unset, the scope is inferred from the endpoint host:
+	// "https://api.fabric.microsoft.com/.default" for Microsoft Fabric hosts,
+	// "https://dev.azuresynapse.net/" otherwise (Azure Synapse).
+	OptionLivyAzureTokenScope = "spark.livy.azure.token_scope"
+
 	// Spark Connect-specific options
 
 	// OptionConnectSessionId specifies the Spark Connect session ID to reuse
@@ -149,6 +177,14 @@ const (
 	OptionValueAuthTypeBasic      = "basic"
 	OptionValueAuthTypeAwsSigv4   = "aws_sigv4"
 	OptionValueAuthTypeAzureToken = "azure_token"
+
+	// OptionLivyAzureCredential values
+
+	OptionValueAzureCredentialDefault         = "default"
+	OptionValueAzureCredentialCli             = "cli"
+	OptionValueAzureCredentialClientSecret    = "client_secret"
+	OptionValueAzureCredentialEnvironment     = "environment"
+	OptionValueAzureCredentialManagedIdentity = "managed_identity"
 
 	// Spark Connect auth types
 
