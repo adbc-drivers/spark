@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -69,16 +70,87 @@ type ConnectionOpts struct {
 	Username                  string
 	Password                  string
 	SessionTtl                string
-	ExistingSessionId         *int64
+	ExistingSessionId         *string
 	DeleteSessionOnClose      bool
 	ValidateServerCertificate bool
 
 	AwsConfig aws.Config
+
+	// Azure options (AuthTypeAzureToken). AzureCredential is one of the
+	// sparkutil.OptionValueAzureCredential* values ("" means "default").
+	AzureCredential   string
+	AzureTenantID     string
+	AzureClientID     string
+	AzureClientSecret string
+	AzureTokenScope   string
+}
+
+// newAzureCredential builds the Entra ID token credential selected by
+// ConnectionOpts.AzureCredential.
+func newAzureCredential(opts ConnectionOpts) (azcore.TokenCredential, error) {
+	invalidArg := func(msg string) error {
+		return adbc.Error{Code: adbc.StatusInvalidArgument, Msg: "[spark] " + msg}
+	}
+	switch opts.AzureCredential {
+	case "", sparkutil.OptionValueAzureCredentialDefault:
+		return azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
+			TenantID: opts.AzureTenantID,
+		})
+	case sparkutil.OptionValueAzureCredentialCli:
+		return azidentity.NewAzureCLICredential(&azidentity.AzureCLICredentialOptions{
+			TenantID: opts.AzureTenantID,
+		})
+	case sparkutil.OptionValueAzureCredentialClientSecret:
+		if opts.AzureTenantID == "" || opts.AzureClientID == "" || opts.AzureClientSecret == "" {
+			return nil, invalidArg(fmt.Sprintf(
+				"azure credential %q requires %s, %s and %s",
+				opts.AzureCredential,
+				sparkutil.OptionLivyAzureTenantID,
+				sparkutil.OptionLivyAzureClientID,
+				sparkutil.OptionLivyAzureClientSecret,
+			))
+		}
+		return azidentity.NewClientSecretCredential(
+			opts.AzureTenantID, opts.AzureClientID, opts.AzureClientSecret, nil)
+	case sparkutil.OptionValueAzureCredentialEnvironment:
+		return azidentity.NewEnvironmentCredential(nil)
+	case sparkutil.OptionValueAzureCredentialManagedIdentity:
+		miOpts := &azidentity.ManagedIdentityCredentialOptions{}
+		if opts.AzureClientID != "" {
+			miOpts.ID = azidentity.ClientID(opts.AzureClientID)
+		}
+		return azidentity.NewManagedIdentityCredential(miOpts)
+	default:
+		return nil, invalidArg(fmt.Sprintf(
+			"invalid %s: %q (valid values: %s, %s, %s, %s, %s)",
+			sparkutil.OptionLivyAzureCredential,
+			opts.AzureCredential,
+			sparkutil.OptionValueAzureCredentialDefault,
+			sparkutil.OptionValueAzureCredentialCli,
+			sparkutil.OptionValueAzureCredentialClientSecret,
+			sparkutil.OptionValueAzureCredentialEnvironment,
+			sparkutil.OptionValueAzureCredentialManagedIdentity,
+		))
+	}
+}
+
+// azureTokenScope resolves the OAuth2 scope to request for bearer tokens.
+// An explicit override always wins; otherwise the scope is inferred from the
+// endpoint host so Microsoft Fabric and Azure Synapse both work out of the box.
+func azureTokenScope(baseURL, override string) string {
+	if override != "" {
+		return override
+	}
+	if u, err := url.Parse(baseURL); err == nil &&
+		strings.HasSuffix(u.Hostname(), "fabric.microsoft.com") {
+		return "https://api.fabric.microsoft.com/.default"
+	}
+	return "https://dev.azuresynapse.net/"
 }
 
 // livyClient handles communication with the Livy REST API
 type livyClient struct {
-	sessionID int64
+	sessionID SessionID
 	catalog   string //nolint:unused
 	schema    string //nolint:unused
 
@@ -95,6 +167,7 @@ type livyClient struct {
 	password             string
 	deleteSessionOnClose bool
 	azCred               azcore.TokenCredential
+	azTokenScope         string
 }
 
 // NewClient creates a new SparkClient over Livy client
@@ -110,17 +183,15 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 
 	var azCred azcore.TokenCredential
 	if opts.AuthType == AuthTypeAzureToken {
-		// TODO: add option (like MSSQL) to use various credential types
 		var err error
-		options := &azidentity.AzureCLICredentialOptions{}
-		azCred, err = azidentity.NewAzureCLICredential(options)
+		azCred, err = newAzureCredential(opts)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	client := &livyClient{
-		sessionID:            -1,
+		sessionID:            "",
 		sessionConfig:        sessionConfig,
 		baseURL:              opts.BaseURL,
 		httpClient:           httpClient,
@@ -134,6 +205,7 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 		password:             opts.Password,
 		deleteSessionOnClose: opts.DeleteSessionOnClose,
 		azCred:               azCred,
+		azTokenScope:         azureTokenScope(opts.BaseURL, opts.AzureTokenScope),
 	}
 
 	err := client.openSession(ctx, opts.ExistingSessionId)
@@ -148,9 +220,30 @@ func (c *livyClient) BackendName() string {
 	return "Apache Livy"
 }
 
+// SessionID is a Livy session identifier.
+//
+// Apache Livy uses integer session ids while Microsoft Fabric's Livy API uses
+// GUID strings. Both decode into an opaque string, which is also what the
+// session REST paths expect.
+type SessionID string
+
+func (s *SessionID) UnmarshalJSON(b []byte) error {
+	var str string
+	if err := json.Unmarshal(b, &str); err == nil {
+		*s = SessionID(str)
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	*s = SessionID(n.String())
+	return nil
+}
+
 // Session represents a Livy session
 type Session struct {
-	ID                  int64          `json:"id"`
+	ID                  SessionID      `json:"id"`
 	AppID               string         `json:"appId"`
 	Owner               string         `json:"owner"`
 	ProxyUser           string         `json:"proxyUser"`
@@ -236,27 +329,30 @@ type CreateStatementRequest struct {
 	Kind string `json:"kind,omitempty"`
 }
 
-func (c *livyClient) openSession(ctx context.Context, existingSessionId *int64) error {
+func (c *livyClient) openSession(ctx context.Context, existingSessionId *string) error {
 	if existingSessionId != nil {
-		c.sessionID = *existingSessionId
+		c.sessionID = SessionID(*existingSessionId)
 		// Wait for session to be ready (TODO: configurable timeout)
 		timeout := time.Duration(5 * 60 * float64(time.Second))
 		if err := c.WaitForSessionReady(ctx, timeout); err != nil {
 			// TODO: try to list existing sessions?
 			return adbc.Error{
 				Code: adbc.StatusIO,
-				Msg:  fmt.Sprintf("[spark] session %d failed to start: %v", *existingSessionId, err),
+				Msg:  fmt.Sprintf("[spark] session %s failed to start: %v", *existingSessionId, err),
 			}
 		}
 		return nil
 	}
 
-	// Create session request
+	// Create session request.
+	//
+	// driverMemory/driverCores are only sent when explicitly configured:
+	// managed platforms with fixed node sizes (e.g. Microsoft Fabric) refuse
+	// or kill sessions that request less than the pool minimum, and every
+	// Livy server has sensible defaults of its own.
 	req := CreateSessionRequest{
-		Kind:         string(c.sessionKind),
-		Conf:         c.sessionConfig,
-		DriverMemory: "1g",
-		DriverCores:  1,
+		Kind: string(c.sessionKind),
+		Conf: c.sessionConfig,
 	}
 
 	if v, ok := c.sessionConfig["spark.executor.cores"]; ok {
@@ -333,7 +429,9 @@ func (c *livyClient) CreateSession(ctx context.Context, req CreateSessionRequest
 	// TODO: don't swallow error
 	defer resp.Body.Close() //nolint:errcheck
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	// Microsoft Fabric answers POST /sessions with 202 Accepted and the session
+	// id; the session then starts asynchronously and is polled like any other.
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 
 		if resp.StatusCode == http.StatusBadRequest && strings.Contains(c.baseURL, "amazonaws.com") {
@@ -363,8 +461,8 @@ func (c *livyClient) CreateSession(ctx context.Context, req CreateSessionRequest
 }
 
 // GetSession retrieves session information
-func (c *livyClient) GetSession(ctx context.Context, sessionID int64) (*Session, error) {
-	url := fmt.Sprintf("/sessions/%d", sessionID)
+func (c *livyClient) GetSession(ctx context.Context, sessionID SessionID) (*Session, error) {
+	url := fmt.Sprintf("/sessions/%s", sessionID)
 	resp, err := c.doRequest(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -387,7 +485,7 @@ func (c *livyClient) GetSession(ctx context.Context, sessionID int64) (*Session,
 
 // DeleteSession deletes a session
 func (c *livyClient) DeleteSession(ctx context.Context) error {
-	url := fmt.Sprintf("/sessions/%d", c.sessionID)
+	url := fmt.Sprintf("/sessions/%s", c.sessionID)
 	resp, err := c.doRequest(ctx, "DELETE", url, nil)
 	if err != nil {
 		return err
@@ -400,14 +498,14 @@ func (c *livyClient) DeleteSession(ctx context.Context) error {
 		return fmt.Errorf("failed to delete session: status=%d, body=%s", resp.StatusCode, string(body))
 	}
 
-	c.sessionID = -1
+	c.sessionID = ""
 
 	return nil
 }
 
 func (c *livyClient) Close(ctx context.Context) error {
 	if c.deleteSessionOnClose {
-		url := fmt.Sprintf("/sessions/%d", c.sessionID)
+		url := fmt.Sprintf("/sessions/%s", c.sessionID)
 		resp, err := c.doRequest(ctx, "DELETE", url, nil)
 		if err != nil {
 			return err
@@ -466,7 +564,7 @@ func (c *livyClient) CreateStatement(ctx context.Context, req CreateStatementReq
 		return nil, fmt.Errorf("failed to marshal statement request: %w", err)
 	}
 
-	url := fmt.Sprintf("/sessions/%d/statements", c.sessionID)
+	url := fmt.Sprintf("/sessions/%s/statements", c.sessionID)
 	resp, err := c.doRequest(ctx, "POST", url, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
@@ -490,8 +588,8 @@ func (c *livyClient) CreateStatement(ctx context.Context, req CreateStatementReq
 }
 
 // GetStatement retrieves statement information
-func (c *livyClient) GetStatement(ctx context.Context, sessionID int64, statementID int) (*Statement, error) {
-	url := fmt.Sprintf("/sessions/%d/statements/%d", sessionID, statementID)
+func (c *livyClient) GetStatement(ctx context.Context, sessionID SessionID, statementID int) (*Statement, error) {
+	url := fmt.Sprintf("/sessions/%s/statements/%d", sessionID, statementID)
 	resp, err := c.doRequest(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -569,7 +667,7 @@ func (c *livyClient) doRequest(ctx context.Context, method, path string, body io
 		}
 	case AuthTypeAzureToken:
 		options := policy.TokenRequestOptions{
-			Scopes: []string{"https://dev.azuresynapse.net/"},
+			Scopes: []string{c.azTokenScope},
 		}
 		token, err := c.azCred.GetToken(ctx, options)
 		if err != nil {
@@ -660,7 +758,10 @@ func (c *livyClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCont
 		}
 	}
 
-	stmt, err := c.CreateStatement(ctx, CreateStatementRequest{Code: query.Query})
+	// Microsoft Fabric's Livy API rejects statements without an explicit kind
+	// ("Request component 'Kind' cannot be null..."); mirror the session kind,
+	// which plain Livy servers also accept.
+	stmt, err := c.CreateStatement(ctx, CreateStatementRequest{Code: query.Query, Kind: string(c.sessionKind)})
 	if err != nil {
 		return nil, -1, adbc.Error{
 			Code: adbc.StatusIO,
@@ -725,7 +826,10 @@ func (c *livyClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCont
 }
 
 func (c *livyClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryContext) (int64, error) {
-	stmt, err := c.CreateStatement(ctx, CreateStatementRequest{Code: query.Query})
+	// Microsoft Fabric's Livy API rejects statements without an explicit kind
+	// ("Request component 'Kind' cannot be null..."); mirror the session kind,
+	// which plain Livy servers also accept.
+	stmt, err := c.CreateStatement(ctx, CreateStatementRequest{Code: query.Query, Kind: string(c.sessionKind)})
 	if err != nil {
 		return -1, adbc.Error{
 			Code: adbc.StatusIO,
@@ -761,7 +865,7 @@ func (c *livyClient) GetTablesForDBSchema(ctx context.Context, catalog string, s
 func (c *livyClient) GetOption(_ context.Context, key string) (string, bool, error) {
 	switch key {
 	case sparkutil.OptionLivySessionId:
-		return strconv.FormatInt(c.sessionID, 10), true, nil
+		return string(c.sessionID), true, nil
 	default:
 		return "", false, nil
 	}
@@ -770,7 +874,13 @@ func (c *livyClient) GetOption(_ context.Context, key string) (string, bool, err
 func (c *livyClient) GetOptionInt(_ context.Context, key string) (int64, bool, error) {
 	switch key {
 	case sparkutil.OptionLivySessionId:
-		return c.sessionID, true, nil
+		// Session ids may be GUID strings (Microsoft Fabric); only integer ids
+		// (Apache Livy) are representable here — use GetOption for the string form.
+		id, err := strconv.ParseInt(string(c.sessionID), 10, 64)
+		if err != nil {
+			return 0, false, nil
+		}
+		return id, true, nil
 	default:
 		return 0, false, nil
 	}
