@@ -28,3 +28,32 @@ Set up necessary environment variables:
 source .env.linux
 source .env.ci
 ```
+
+## Setting up EMR Serverless
+
+- Your role needs S3 Tables access.
+- You need this application configuration:
+
+  ```
+  {
+    "runtimeConfiguration": [
+      {
+        "classification": "spark-defaults",
+        "configurations": null,
+        "properties": {
+          "spark.sql.catalog.ghatestcatalog": "org.apache.iceberg.spark.SparkCatalog",
+          "spark.sql.extensions": "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
+          "spark.sql.catalogImplementation": "hive",
+          "spark.sql.catalog.ghatestcatalog.rest.signing-name": "glue",
+          "spark.sql.catalog.ghatestcatalog.rest-metrics-reporting-enabled": "false",
+          "spark.sql.catalog.ghatestcatalog.rest.sigv4-enabled": "true",
+          "spark.sql.catalog.ghatestcatalog.io-impl": "org.apache.iceberg.aws.s3.S3FileIO",
+          "spark.sql.catalog.ghatestcatalog.uri": "https://glue.us-east-1.amazonaws.com/iceberg",
+          "spark.sql.catalog.ghatestcatalog.warehouse": "<ACCOUNT ID>:<S3 TABLES BUCKET NAME>/<CATALOG NAME>",
+          "spark.sql.catalog.ghatestcatalog.type": "rest",
+          "spark.sql.catalog.ghatestcatalog.rest.signing-region": "us-east-1"
+        }
+      }
+    ]
+  }
+  ```

@@ -72,12 +72,13 @@ class Spark3ThriftQuirks(model.DriverQuirks):
         return f"`{identifier}`"
 
     def query_override(self, context: str, default: str) -> str:
+        default = super().query_override(context, default)
         if context in (
             "TestConnection.test_get_table_schema_catalog",
             "TestConnection.test_get_table_schema_schema",
         ):
             return default.replace("VARCHAR", "STRING")
-        return super().query_override(context, default)
+        return default
 
     def drop_table(
         self,
@@ -87,7 +88,7 @@ class Spark3ThriftQuirks(model.DriverQuirks):
         catalog_name: str | None = None,
         if_exists: bool = True,
         temporary: bool = False,
-    ) -> None:
+    ) -> str:
         if temporary:
             if catalog_name or schema_name:
                 raise ValueError("Cannot pass catalog/schema name for temporary table")
@@ -236,6 +237,12 @@ class Spark41ConnectIcebergQuirks(Spark41ConnectQuirks):
 class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
     short_version = "emr-8.0-connect"
 
+    features = Spark4ConnectQuirks.features.with_values(
+        secondary_catalog="ghatestcatalog",
+        secondary_catalog_schema="myschema",
+        secondary_schema="myschema",
+    )
+
     setup = model.DriverSetup(
         database={
             "uri": model.FromEnv("SPARK_CONNECT_URI"),
@@ -257,6 +264,40 @@ class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
             Path(__file__).parent.parent / "queries/emr-spark8",
         )
 
+    def query_override(self, context: str, default: str) -> str:
+        default = super().query_override(context, default)
+        if context in (
+            "TestConnection.test_get_table_schema_catalog",
+            "TestConnection.test_get_table_schema_schema",
+        ):
+            location = model.FromEnv("STAGING_S3_BUCKET", template="s3://{}/emr/")
+            default += " LOCATION '"
+            default += location.get_or_raise()
+            default += str(uuid.uuid4())
+            default += "/'"
+        return default
+
+    def drop_table(
+        self,
+        *,
+        table_name: str,
+        schema_name: str | None = None,
+        catalog_name: str | None = None,
+        if_exists: bool = True,
+        temporary: bool = False,
+    ) -> str:
+        query = super().drop_table(
+            table_name=table_name,
+            schema_name=schema_name,
+            catalog_name=catalog_name,
+            if_exists=if_exists,
+            temporary=temporary,
+        )
+        if table_name == "test_get_table_schema_catalog":
+            # Iceberg catalog requires PURGE
+            query += " PURGE"
+        return query
+
     @contextlib.contextmanager
     def setup_statement(self, query, cursor):
         prefix = str(uuid.uuid4())
@@ -273,7 +314,10 @@ class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
                     }
                 )
                 print(f"{query.name}: spark.ingest.location =", location)
-            elif isinstance(query, str) and query.startswith("TestIngest"):
+            elif isinstance(query, str) and (
+                query.startswith("TestIngest")
+                or query == "TestConnection.get_objects_table"
+            ):
                 prefix = str(uuid.uuid4())
                 name = ingest.make_table_name(prefix, query.split(".")[-1])
                 location = location.get_or_raise() + name

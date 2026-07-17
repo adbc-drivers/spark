@@ -51,11 +51,11 @@ main() {
         local host=$(echo "$session_endpoint" | jq -r '.endpoint' | sed 's|^https://||')
         local token=$(echo "$session_endpoint" | jq -r '.authToken')
         local -r uri="spark://:$token@$host:443?tls=true&auth_type=token&api=connect"
-        echo "export SPARK_CONNECT_URI=\"$uri\"" >> ".env.ci"
+        echo "export SPARK_CONNECT_URI=\"$uri\"" > ".env.ci"
 
         exit 0
     else
-        echo "export AWS_ENDPOINT_URL_S3=\"http://localhost:9000\"" >> ".env.ci"
+        echo "export AWS_ENDPOINT_URL_S3=\"http://localhost:9000\"" > ".env.ci"
         echo "export AWS_ACCESS_KEY_ID=admin" >> ".env.ci"
         echo "export AWS_SECRET_ACCESS_KEY=password" >> ".env.ci"
     fi
