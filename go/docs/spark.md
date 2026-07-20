@@ -209,16 +209,23 @@ We have not yet confirmed driver functionality with Azure Synapse Analytics.
   /v1/workspaces/<WORKSPACE ID>/lakehouses/<LAKEHOUSE ID>/livyapi/versions/2023-12-01
   ```
 
-- Set `spark.auth_type` to `azure_token`. The Microsoft Entra ID credential is selected with `spark.livy.azure.credential`:
-  - `default` (the default): the [`DefaultAzureCredential`](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity#DefaultAzureCredential) chain — environment variables, workload identity, managed identity, Azure CLI.
-  - `cli`: the local `az login` context.
-  - `client_secret`: a service principal; requires `spark.livy.azure.tenant_id`, `spark.livy.azure.client_id` and `spark.livy.azure.client_secret`.
-  - `environment`: credentials from `AZURE_*` environment variables only.
-  - `managed_identity`: an Azure managed identity; `spark.livy.azure.client_id` selects a user-assigned identity.
+  The GUIDs of the workspace and the Lakehouse can be inferred by opening
+  Microsoft Fabric, browsing to the Lakehouse, and looking at the URL. For
+  example:
+
+  ```
+  https://app.fabric.microsoft.com/groups/<WORKSPACE ID>/lakehouses/<LAKEHOUSE ID>
+  ```
+
+- Set `spark.auth_type` to `azure_token`. The Microsoft Entra ID credential is selected with `spark.livy.azure.credential` (names match the MSSQL driver's `fedauth` values):
+  - `ActiveDirectoryDefault` (the default): the [`DefaultAzureCredential`](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity#DefaultAzureCredential) chain.
+  - `ActiveDirectoryAzCli`: the local `az login` context.
+  - `ActiveDirectoryServicePrincipal`: requires `spark.livy.azure.tenant_id`, `spark.livy.azure.client_id` and `spark.livy.azure.client_secret`.
+  - `ActiveDirectoryEnvironment`: credentials from `AZURE_*` environment variables only.
+  - `ActiveDirectoryManagedIdentity`: `spark.livy.azure.client_id` selects a user-assigned identity.
 - The OAuth token scope is inferred from the host (`https://api.fabric.microsoft.com/.default` for Fabric hosts); override with `spark.livy.azure.token_scope`.
 - The identity must have execute permissions on the lakehouse (e.g. workspace Contributor).
 - Do not set `spark.driver.memory`/`spark.driver.cores` session config unless you know the capacity's node sizes: Fabric refuses sessions that request less than the pool minimum.
-- Session ids are GUID strings rather than Livy's integers; `spark.livy.session_id` accepts either form.
 
 ## Feature & Type Support
 

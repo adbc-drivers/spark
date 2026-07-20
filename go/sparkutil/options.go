@@ -120,22 +120,20 @@ const (
 
 	// OptionLivyAzureCredential selects how the Microsoft Entra ID token is
 	// obtained. See the OptionValueAzureCredential* constants for supported
-	// values. Defaults to "default" (the azidentity DefaultAzureCredential
-	// chain: environment variables, workload identity, managed identity,
-	// Azure CLI, ...).
+	// values; defaults to ActiveDirectoryDefault.
 	OptionLivyAzureCredential = "spark.livy.azure.credential"
 
 	// OptionLivyAzureTenantID specifies the Entra ID tenant (directory) ID.
-	// Required for the "client_secret" credential; optional otherwise.
+	// Required for ActiveDirectoryServicePrincipal; optional otherwise.
 	OptionLivyAzureTenantID = "spark.livy.azure.tenant_id"
 
 	// OptionLivyAzureClientID specifies the Entra ID application (client) ID.
-	// Required for the "client_secret" credential; selects the user-assigned
-	// identity for "managed_identity".
+	// Required for ActiveDirectoryServicePrincipal; selects the user-assigned
+	// identity for ActiveDirectoryManagedIdentity.
 	OptionLivyAzureClientID = "spark.livy.azure.client_id"
 
-	// OptionLivyAzureClientSecret specifies the client secret for the
-	// "client_secret" credential.
+	// OptionLivyAzureClientSecret specifies the client secret for
+	// ActiveDirectoryServicePrincipal.
 	OptionLivyAzureClientSecret = "spark.livy.azure.client_secret"
 
 	// OptionLivyAzureTokenScope overrides the OAuth2 scope requested for the
@@ -178,13 +176,14 @@ const (
 	OptionValueAuthTypeAwsSigv4   = "aws_sigv4"
 	OptionValueAuthTypeAzureToken = "azure_token"
 
-	// OptionLivyAzureCredential values
+	// OptionLivyAzureCredential values. Names match the MSSQL driver's
+	// fedauth values.
 
-	OptionValueAzureCredentialDefault         = "default"
-	OptionValueAzureCredentialCli             = "cli"
-	OptionValueAzureCredentialClientSecret    = "client_secret"
-	OptionValueAzureCredentialEnvironment     = "environment"
-	OptionValueAzureCredentialManagedIdentity = "managed_identity"
+	OptionValueAzureCredentialDefault          = "ActiveDirectoryDefault"
+	OptionValueAzureCredentialAzCli            = "ActiveDirectoryAzCli"
+	OptionValueAzureCredentialServicePrincipal = "ActiveDirectoryServicePrincipal"
+	OptionValueAzureCredentialEnvironment      = "ActiveDirectoryEnvironment"
+	OptionValueAzureCredentialManagedIdentity  = "ActiveDirectoryManagedIdentity"
 
 	// Spark Connect auth types
 

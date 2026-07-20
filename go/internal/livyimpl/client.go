@@ -77,7 +77,8 @@ type ConnectionOpts struct {
 	AwsConfig aws.Config
 
 	// Azure options (AuthTypeAzureToken). AzureCredential is one of the
-	// sparkutil.OptionValueAzureCredential* values ("" means "default").
+	// sparkutil.OptionValueAzureCredential* values; "" means
+	// ActiveDirectoryDefault.
 	AzureCredential   string
 	AzureTenantID     string
 	AzureClientID     string
@@ -96,11 +97,11 @@ func newAzureCredential(opts ConnectionOpts) (azcore.TokenCredential, error) {
 		return azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
 			TenantID: opts.AzureTenantID,
 		})
-	case sparkutil.OptionValueAzureCredentialCli:
+	case sparkutil.OptionValueAzureCredentialAzCli:
 		return azidentity.NewAzureCLICredential(&azidentity.AzureCLICredentialOptions{
 			TenantID: opts.AzureTenantID,
 		})
-	case sparkutil.OptionValueAzureCredentialClientSecret:
+	case sparkutil.OptionValueAzureCredentialServicePrincipal:
 		if opts.AzureTenantID == "" || opts.AzureClientID == "" || opts.AzureClientSecret == "" {
 			return nil, invalidArg(fmt.Sprintf(
 				"azure credential %q requires %s, %s and %s",
@@ -126,17 +127,16 @@ func newAzureCredential(opts ConnectionOpts) (azcore.TokenCredential, error) {
 			sparkutil.OptionLivyAzureCredential,
 			opts.AzureCredential,
 			sparkutil.OptionValueAzureCredentialDefault,
-			sparkutil.OptionValueAzureCredentialCli,
-			sparkutil.OptionValueAzureCredentialClientSecret,
+			sparkutil.OptionValueAzureCredentialAzCli,
+			sparkutil.OptionValueAzureCredentialServicePrincipal,
 			sparkutil.OptionValueAzureCredentialEnvironment,
 			sparkutil.OptionValueAzureCredentialManagedIdentity,
 		))
 	}
 }
 
-// azureTokenScope resolves the OAuth2 scope to request for bearer tokens.
-// An explicit override always wins; otherwise the scope is inferred from the
-// endpoint host so Microsoft Fabric and Azure Synapse both work out of the box.
+// azureTokenScope resolves the OAuth2 scope: explicit override, else
+// inferred from the endpoint host (Fabric vs Synapse).
 func azureTokenScope(baseURL, override string) string {
 	if override != "" {
 		return override
@@ -220,11 +220,8 @@ func (c *livyClient) BackendName() string {
 	return "Apache Livy"
 }
 
-// SessionID is a Livy session identifier.
-//
-// Apache Livy uses integer session ids while Microsoft Fabric's Livy API uses
-// GUID strings. Both decode into an opaque string, which is also what the
-// session REST paths expect.
+// SessionID is an opaque Livy session ID. Apache Livy uses integers,
+// Microsoft Fabric uses GUID strings; both decode to a string.
 type SessionID string
 
 func (s *SessionID) UnmarshalJSON(b []byte) error {
@@ -344,12 +341,8 @@ func (c *livyClient) openSession(ctx context.Context, existingSessionId *string)
 		return nil
 	}
 
-	// Create session request.
-	//
-	// driverMemory/driverCores are only sent when explicitly configured:
-	// managed platforms with fixed node sizes (e.g. Microsoft Fabric) refuse
-	// or kill sessions that request less than the pool minimum, and every
-	// Livy server has sensible defaults of its own.
+	// driverMemory/driverCores are only sent when explicitly configured;
+	// platforms with fixed node sizes (e.g. Fabric) reject undersized requests.
 	req := CreateSessionRequest{
 		Kind: string(c.sessionKind),
 		Conf: c.sessionConfig,
@@ -429,8 +422,8 @@ func (c *livyClient) CreateSession(ctx context.Context, req CreateSessionRequest
 	// TODO: don't swallow error
 	defer resp.Body.Close() //nolint:errcheck
 
-	// Microsoft Fabric answers POST /sessions with 202 Accepted and the session
-	// id; the session then starts asynchronously and is polled like any other.
+	// Microsoft Fabric answers with 202 Accepted; the session starts
+	// asynchronously and is polled to ready like any other.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 
@@ -758,9 +751,7 @@ func (c *livyClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCont
 		}
 	}
 
-	// Microsoft Fabric's Livy API rejects statements without an explicit kind
-	// ("Request component 'Kind' cannot be null..."); mirror the session kind,
-	// which plain Livy servers also accept.
+	// Fabric requires an explicit statement kind; mirror the session kind.
 	stmt, err := c.CreateStatement(ctx, CreateStatementRequest{Code: query.Query, Kind: string(c.sessionKind)})
 	if err != nil {
 		return nil, -1, adbc.Error{
@@ -826,9 +817,7 @@ func (c *livyClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCont
 }
 
 func (c *livyClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryContext) (int64, error) {
-	// Microsoft Fabric's Livy API rejects statements without an explicit kind
-	// ("Request component 'Kind' cannot be null..."); mirror the session kind,
-	// which plain Livy servers also accept.
+	// Fabric requires an explicit statement kind; mirror the session kind.
 	stmt, err := c.CreateStatement(ctx, CreateStatementRequest{Code: query.Query, Kind: string(c.sessionKind)})
 	if err != nil {
 		return -1, adbc.Error{
@@ -872,18 +861,7 @@ func (c *livyClient) GetOption(_ context.Context, key string) (string, bool, err
 }
 
 func (c *livyClient) GetOptionInt(_ context.Context, key string) (int64, bool, error) {
-	switch key {
-	case sparkutil.OptionLivySessionId:
-		// Session ids may be GUID strings (Microsoft Fabric); only integer ids
-		// (Apache Livy) are representable here — use GetOption for the string form.
-		id, err := strconv.ParseInt(string(c.sessionID), 10, 64)
-		if err != nil {
-			return 0, false, nil
-		}
-		return id, true, nil
-	default:
-		return 0, false, nil
-	}
+	return 0, false, nil
 }
 
 // parseSchemaFromSQLResult extracts schema from SQL session result

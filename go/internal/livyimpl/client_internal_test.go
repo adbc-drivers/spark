@@ -92,9 +92,9 @@ func TestAzureTokenScope(t *testing.T) {
 }
 
 func TestNewAzureCredentialValidation(t *testing.T) {
-	t.Run("client_secret requires tenant, client id and secret", func(t *testing.T) {
+	t.Run("service principal requires tenant, client id and secret", func(t *testing.T) {
 		_, err := newAzureCredential(ConnectionOpts{
-			AzureCredential: sparkutil.OptionValueAzureCredentialClientSecret,
+			AzureCredential: sparkutil.OptionValueAzureCredentialServicePrincipal,
 			AzureTenantID:   "tenant",
 		})
 		var adbcErr adbc.Error
@@ -116,9 +116,9 @@ func TestNewAzureCredentialValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("client_secret with all fields constructs", func(t *testing.T) {
+	t.Run("service principal with all fields constructs", func(t *testing.T) {
 		cred, err := newAzureCredential(ConnectionOpts{
-			AzureCredential:   sparkutil.OptionValueAzureCredentialClientSecret,
+			AzureCredential:   sparkutil.OptionValueAzureCredentialServicePrincipal,
 			AzureTenantID:     "11111111-1111-1111-1111-111111111111",
 			AzureClientID:     "22222222-2222-2222-2222-222222222222",
 			AzureClientSecret: "hunter2",
