@@ -103,8 +103,8 @@ func TestAppendValueStringEncoded(t *testing.T) {
 	})
 }
 
-// Session ids may be GUID strings (Fabric) or integers (Apache Livy);
-// GetOption always exposes the string form, GetOptionInt only integer ids.
+// Session IDs are opaque strings; GetOption exposes them, GetOptionInt
+// does not (they are not integers on all backends).
 func TestSessionIDOptionGetters(t *testing.T) {
 	ctx := context.Background()
 
@@ -114,12 +114,6 @@ func TestSessionIDOptionGetters(t *testing.T) {
 		t.Fatalf("GetOption = (%q, %v, %v)", s, ok, err)
 	}
 	if _, ok, _ := c.GetOptionInt(ctx, sparkutil.OptionLivySessionId); ok {
-		t.Fatal("GetOptionInt should not report GUID session ids")
-	}
-
-	c = &livyClient{sessionID: "42"}
-	n, ok, err := c.GetOptionInt(ctx, sparkutil.OptionLivySessionId)
-	if err != nil || !ok || n != 42 {
-		t.Fatalf("GetOptionInt = (%d, %v, %v)", n, ok, err)
+		t.Fatal("GetOptionInt should not report session IDs")
 	}
 }
