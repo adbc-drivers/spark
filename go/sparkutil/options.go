@@ -120,21 +120,13 @@ const (
 
 	// OptionLivyAzureCredential selects how the Microsoft Entra ID token is
 	// obtained. See the OptionValueAzureCredential* constants for supported
-	// values; defaults to ActiveDirectoryDefault.
+	// values; defaults to ActiveDirectoryDefault. Credential parameters follow
+	// the MSSQL driver's fedauth conventions: for
+	// ActiveDirectoryServicePrincipal the username is
+	// "<client id>@<tenant id>" and the password is the client secret; for
+	// ActiveDirectoryManagedIdentity the username selects a user-assigned
+	// identity by client ID.
 	OptionLivyAzureCredential = "spark.livy.azure.credential"
-
-	// OptionLivyAzureTenantID specifies the Entra ID tenant (directory) ID.
-	// Required for ActiveDirectoryServicePrincipal; optional otherwise.
-	OptionLivyAzureTenantID = "spark.livy.azure.tenant_id"
-
-	// OptionLivyAzureClientID specifies the Entra ID application (client) ID.
-	// Required for ActiveDirectoryServicePrincipal; selects the user-assigned
-	// identity for ActiveDirectoryManagedIdentity.
-	OptionLivyAzureClientID = "spark.livy.azure.client_id"
-
-	// OptionLivyAzureClientSecret specifies the client secret for
-	// ActiveDirectoryServicePrincipal.
-	OptionLivyAzureClientSecret = "spark.livy.azure.client_secret"
 
 	// OptionLivyAzureTokenScope overrides the OAuth2 scope requested for the
 	// bearer token. When unset, the scope is inferred from the endpoint host:

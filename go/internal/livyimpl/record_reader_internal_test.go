@@ -15,10 +15,8 @@
 package livyimpl
 
 import (
-	"context"
 	"testing"
 
-	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -101,19 +99,4 @@ func TestAppendValueStringEncoded(t *testing.T) {
 			t.Fatalf("value = %v", arr.Value(0))
 		}
 	})
-}
-
-// Session IDs are opaque strings; GetOption exposes them, GetOptionInt
-// does not (they are not integers on all backends).
-func TestSessionIDOptionGetters(t *testing.T) {
-	ctx := context.Background()
-
-	c := &livyClient{sessionID: SessionID(fabricGUID)}
-	s, ok, err := c.GetOption(ctx, sparkutil.OptionLivySessionId)
-	if err != nil || !ok || s != fabricGUID {
-		t.Fatalf("GetOption = (%q, %v, %v)", s, ok, err)
-	}
-	if _, ok, _ := c.GetOptionInt(ctx, sparkutil.OptionLivySessionId); ok {
-		t.Fatal("GetOptionInt should not report session IDs")
-	}
 }

@@ -299,11 +299,8 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 		case sparkutil.OptionValueAuthTypeAzureToken:
 			livyOpts.AuthType = livyimpl.AuthTypeAzureToken
 			for opt, dst := range map[string]*string{
-				sparkutil.OptionLivyAzureCredential:   &livyOpts.AzureCredential,
-				sparkutil.OptionLivyAzureTenantID:     &livyOpts.AzureTenantID,
-				sparkutil.OptionLivyAzureClientID:     &livyOpts.AzureClientID,
-				sparkutil.OptionLivyAzureClientSecret: &livyOpts.AzureClientSecret,
-				sparkutil.OptionLivyAzureTokenScope:   &livyOpts.AzureTokenScope,
+				sparkutil.OptionLivyAzureCredential: &livyOpts.AzureCredential,
+				sparkutil.OptionLivyAzureTokenScope: &livyOpts.AzureTokenScope,
 			} {
 				if v, ok := options[opt]; ok {
 					*dst = v

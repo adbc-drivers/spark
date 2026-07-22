@@ -79,46 +79,39 @@ type ConnectionOpts struct {
 	// Azure options (AuthTypeAzureToken). AzureCredential is one of the
 	// sparkutil.OptionValueAzureCredential* values; "" means
 	// ActiveDirectoryDefault.
-	AzureCredential   string
-	AzureTenantID     string
-	AzureClientID     string
-	AzureClientSecret string
-	AzureTokenScope   string
+	AzureCredential string
+	AzureTokenScope string
 }
 
 // newAzureCredential builds the Entra ID token credential selected by
-// ConnectionOpts.AzureCredential.
+// ConnectionOpts.AzureCredential. Credential parameters are carried in the
+// username and password, following the MSSQL driver's fedauth conventions.
 func newAzureCredential(opts ConnectionOpts) (azcore.TokenCredential, error) {
 	invalidArg := func(msg string) error {
 		return adbc.Error{Code: adbc.StatusInvalidArgument, Msg: "[spark] " + msg}
 	}
 	switch opts.AzureCredential {
 	case "", sparkutil.OptionValueAzureCredentialDefault:
-		return azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
-			TenantID: opts.AzureTenantID,
-		})
+		return azidentity.NewDefaultAzureCredential(nil)
 	case sparkutil.OptionValueAzureCredentialAzCli:
-		return azidentity.NewAzureCLICredential(&azidentity.AzureCLICredentialOptions{
-			TenantID: opts.AzureTenantID,
-		})
+		return azidentity.NewAzureCLICredential(nil)
 	case sparkutil.OptionValueAzureCredentialServicePrincipal:
-		if opts.AzureTenantID == "" || opts.AzureClientID == "" || opts.AzureClientSecret == "" {
+		clientID, tenantID, ok := strings.Cut(opts.Username, "@")
+		if !ok || clientID == "" || tenantID == "" || opts.Password == "" {
 			return nil, invalidArg(fmt.Sprintf(
-				"azure credential %q requires %s, %s and %s",
+				"azure credential %q requires a username of the form \"<client id>@<tenant id>\" and the client secret as the password",
 				opts.AzureCredential,
-				sparkutil.OptionLivyAzureTenantID,
-				sparkutil.OptionLivyAzureClientID,
-				sparkutil.OptionLivyAzureClientSecret,
 			))
 		}
-		return azidentity.NewClientSecretCredential(
-			opts.AzureTenantID, opts.AzureClientID, opts.AzureClientSecret, nil)
+		return azidentity.NewClientSecretCredential(tenantID, clientID, opts.Password, nil)
 	case sparkutil.OptionValueAzureCredentialEnvironment:
 		return azidentity.NewEnvironmentCredential(nil)
 	case sparkutil.OptionValueAzureCredentialManagedIdentity:
 		miOpts := &azidentity.ManagedIdentityCredentialOptions{}
-		if opts.AzureClientID != "" {
-			miOpts.ID = azidentity.ClientID(opts.AzureClientID)
+		// Like go-mssqldb, tolerate a "<client id>@<tenant id>" username and
+		// use only the client ID part.
+		if clientID, _, _ := strings.Cut(opts.Username, "@"); clientID != "" {
+			miOpts.ID = azidentity.ClientID(clientID)
 		}
 		return azidentity.NewManagedIdentityCredential(miOpts)
 	default:
@@ -422,8 +415,6 @@ func (c *livyClient) CreateSession(ctx context.Context, req CreateSessionRequest
 	// TODO: don't swallow error
 	defer resp.Body.Close() //nolint:errcheck
 
-	// Microsoft Fabric answers with 202 Accepted; the session starts
-	// asynchronously and is polled to ready like any other.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 
