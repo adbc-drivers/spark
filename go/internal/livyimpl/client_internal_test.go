@@ -92,20 +92,27 @@ func TestAzureTokenScope(t *testing.T) {
 }
 
 func TestNewAzureCredentialValidation(t *testing.T) {
-	t.Run("service principal requires tenant, client id and secret", func(t *testing.T) {
-		_, err := newAzureCredential(ConnectionOpts{
-			AzureCredential: sparkutil.OptionValueAzureCredentialServicePrincipal,
-			AzureTenantID:   "tenant",
-		})
-		var adbcErr adbc.Error
-		if err == nil {
-			t.Fatal("expected error")
+	t.Run("service principal requires client@tenant username and secret", func(t *testing.T) {
+		cases := []ConnectionOpts{
+			// no username
+			{AzureCredential: sparkutil.OptionValueAzureCredentialServicePrincipal, Password: "hunter2"},
+			// username missing the @tenant part
+			{AzureCredential: sparkutil.OptionValueAzureCredentialServicePrincipal, Username: "client-only", Password: "hunter2"},
+			// no password
+			{AzureCredential: sparkutil.OptionValueAzureCredentialServicePrincipal, Username: "client@tenant"},
 		}
-		if !errorAs(err, &adbcErr) || adbcErr.Code != adbc.StatusInvalidArgument {
-			t.Fatalf("expected InvalidArgument adbc.Error, got %v", err)
-		}
-		if !strings.Contains(err.Error(), sparkutil.OptionLivyAzureClientSecret) {
-			t.Fatalf("error should name the missing options: %v", err)
+		for _, opts := range cases {
+			_, err := newAzureCredential(opts)
+			var adbcErr adbc.Error
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !errorAs(err, &adbcErr) || adbcErr.Code != adbc.StatusInvalidArgument {
+				t.Fatalf("expected InvalidArgument adbc.Error, got %v", err)
+			}
+			if !strings.Contains(err.Error(), "<client id>@<tenant id>") {
+				t.Fatalf("error should describe the username form: %v", err)
+			}
 		}
 	})
 
@@ -118,10 +125,9 @@ func TestNewAzureCredentialValidation(t *testing.T) {
 
 	t.Run("service principal with all fields constructs", func(t *testing.T) {
 		cred, err := newAzureCredential(ConnectionOpts{
-			AzureCredential:   sparkutil.OptionValueAzureCredentialServicePrincipal,
-			AzureTenantID:     "11111111-1111-1111-1111-111111111111",
-			AzureClientID:     "22222222-2222-2222-2222-222222222222",
-			AzureClientSecret: "hunter2",
+			AzureCredential: sparkutil.OptionValueAzureCredentialServicePrincipal,
+			Username:        "22222222-2222-2222-2222-222222222222@11111111-1111-1111-1111-111111111111",
+			Password:        "hunter2",
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
