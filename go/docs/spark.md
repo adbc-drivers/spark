@@ -32,12 +32,8 @@ This project is not affiliated with the Apache Software Foundation.
 The driver can be installed with [dbc](https://docs.columnar.tech/dbc):
 
 ```bash
-dbc install spark --pre
+dbc install spark
 ```
-
-:::{note}
-Only prerelease versions of the driver are currently available, so you must use `--pre` with dbc 0.2.0 or newer to install the driver.
-:::
 
 ## Connecting
 
