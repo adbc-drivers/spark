@@ -178,6 +178,13 @@ func appendValueToBuilder(builder array.Builder, value any, dataType arrow.DataT
 	case *array.BooleanBuilder:
 		if boolVal, ok := value.(bool); ok {
 			b.Append(boolVal)
+		} else if str, ok := value.(string); ok {
+			// Booleans may arrive as JSON strings (see toInt64).
+			boolVal, err := strconv.ParseBool(str)
+			if err != nil {
+				return fmt.Errorf("cannot convert %q to bool", str)
+			}
+			b.Append(boolVal)
 		} else {
 			return fmt.Errorf("cannot convert %T to bool", value)
 		}
@@ -356,6 +363,14 @@ func appendValueToBuilder(builder array.Builder, value any, dataType arrow.DataT
 // toInt64 converts various numeric types to int64
 func toInt64(value any) (int64, bool) {
 	switch v := value.(type) {
+	case string:
+		// Some Livy implementations (e.g. Microsoft Fabric) serialize wide
+		// numeric values as JSON strings to avoid precision loss.
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return n, true
 	case json.Number:
 		n, err := strconv.ParseInt(string(v), 10, 64)
 		if err != nil {
@@ -394,6 +409,13 @@ func toInt64(value any) (int64, bool) {
 // toFloat64 converts various numeric types to float64
 func toFloat64(value any) (float64, bool) {
 	switch v := value.(type) {
+	case string:
+		// See toInt64: numeric values may arrive as JSON strings.
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return 0, false
+		}
+		return n, true
 	case json.Number:
 		n, err := strconv.ParseFloat(string(v), 64)
 		if err != nil {

@@ -196,6 +196,33 @@ We have not yet confirmed driver functionality with Azure Synapse Analytics.
 
 - Your user or service principal must have the "Synapse Compute Operator" role. Synapse roles can only be assigned from Synapse Studio, not Azure Portal. See the [Azure documentation](https://learn.microsoft.com/azure/synapse-analytics/security/how-to-manage-synapse-rbac-role-assignments) for more details.
 
+### Microsoft Fabric (Lakehouse)
+
+- Only Livy is supported, via the [Fabric Livy API](https://learn.microsoft.com/fabric/data-engineering/api-livy-overview).
+- The host is `api.fabric.microsoft.com` (TLS required) and `spark.livy.base_url` must be set to:
+
+  ```
+  /v1/workspaces/<WORKSPACE ID>/lakehouses/<LAKEHOUSE ID>/livyapi/versions/2023-12-01
+  ```
+
+  The GUIDs of the workspace and the Lakehouse can be inferred by opening
+  Microsoft Fabric, browsing to the Lakehouse, and looking at the URL. For
+  example:
+
+  ```
+  https://app.fabric.microsoft.com/groups/<WORKSPACE ID>/lakehouses/<LAKEHOUSE ID>
+  ```
+
+- Set `spark.auth_type` to `azure_token`. The Microsoft Entra ID credential is selected with `spark.livy.azure.credential` (names and parameters match the MSSQL driver's `fedauth` values):
+  - `ActiveDirectoryDefault` (the default): the [`DefaultAzureCredential`](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity#DefaultAzureCredential) chain.
+  - `ActiveDirectoryAzCli`: the local `az login` context.
+  - `ActiveDirectoryServicePrincipal`: set the username to `<client id>@<tenant id>` and the password to the client secret.
+  - `ActiveDirectoryEnvironment`: credentials from `AZURE_*` environment variables only.
+  - `ActiveDirectoryManagedIdentity`: set the username to the client ID of a user-assigned identity.
+- The OAuth token scope is inferred from the host (`https://api.fabric.microsoft.com/.default` for Fabric hosts); override with `spark.livy.azure.token_scope`.
+- The identity must have execute permissions on the lakehouse (e.g. workspace Contributor).
+- Do not set `spark.driver.memory`/`spark.driver.cores` session config unless you know the capacity's node sizes: Fabric refuses sessions that request less than the pool minimum.
+
 ## Feature & Type Support
 
 {{ features|safe }}
