@@ -116,6 +116,24 @@ const (
 	// This is required when connecting to AWS EMR Serverless
 	OptionLivyAWSExecutionRoleArn = "spark.livy.aws.emr_serverless.execution_role_arn"
 
+	// Azure Authentication Options (when auth_type=azure_token)
+
+	// OptionLivyAzureCredential selects how the Microsoft Entra ID token is
+	// obtained. See the OptionValueAzureCredential* constants for supported
+	// values; defaults to ActiveDirectoryDefault. Credential parameters follow
+	// the MSSQL driver's fedauth conventions: for
+	// ActiveDirectoryServicePrincipal the username is
+	// "<client id>@<tenant id>" and the password is the client secret; for
+	// ActiveDirectoryManagedIdentity the username selects a user-assigned
+	// identity by client ID.
+	OptionLivyAzureCredential = "spark.livy.azure.credential"
+
+	// OptionLivyAzureTokenScope overrides the OAuth2 scope requested for the
+	// bearer token. When unset, the scope is inferred from the endpoint host:
+	// "https://api.fabric.microsoft.com/.default" for Microsoft Fabric hosts,
+	// "https://dev.azuresynapse.net/" otherwise (Azure Synapse).
+	OptionLivyAzureTokenScope = "spark.livy.azure.token_scope"
+
 	// Spark Connect-specific options
 
 	// OptionConnectSessionId specifies the Spark Connect session ID to reuse
@@ -149,6 +167,15 @@ const (
 	OptionValueAuthTypeBasic      = "basic"
 	OptionValueAuthTypeAwsSigv4   = "aws_sigv4"
 	OptionValueAuthTypeAzureToken = "azure_token"
+
+	// OptionLivyAzureCredential values. Names match the MSSQL driver's
+	// fedauth values.
+
+	OptionValueAzureCredentialDefault          = "ActiveDirectoryDefault"
+	OptionValueAzureCredentialAzCli            = "ActiveDirectoryAzCli"
+	OptionValueAzureCredentialServicePrincipal = "ActiveDirectoryServicePrincipal"
+	OptionValueAzureCredentialEnvironment      = "ActiveDirectoryEnvironment"
+	OptionValueAzureCredentialManagedIdentity  = "ActiveDirectoryManagedIdentity"
 
 	// Spark Connect auth types
 

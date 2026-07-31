@@ -251,11 +251,9 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 
 	if sessionId, ok := options[sparkutil.OptionLivySessionId]; ok {
 		delete(options, sparkutil.OptionLivySessionId)
-		intId, err := strconv.ParseInt(sessionId, 10, 64)
-		if err != nil {
-			return livyOpts, sparkbase.InvalidOptionErr(sparkutil.OptionLivySessionId, sessionId)
-		}
-		livyOpts.ExistingSessionId = new(intId)
+		// Session ids are opaque strings (Microsoft Fabric uses GUIDs, Apache
+		// Livy uses integers) so pass them through without parsing.
+		livyOpts.ExistingSessionId = &sessionId
 	}
 
 	if deleteSession, ok := options[sparkutil.OptionLivyReleaseSession]; ok {
@@ -300,6 +298,15 @@ func livyOptsFromOptions(ctx context.Context, options map[string]string) (livyim
 			livyOpts.AwsConfig = cfg
 		case sparkutil.OptionValueAuthTypeAzureToken:
 			livyOpts.AuthType = livyimpl.AuthTypeAzureToken
+			for opt, dst := range map[string]*string{
+				sparkutil.OptionLivyAzureCredential: &livyOpts.AzureCredential,
+				sparkutil.OptionLivyAzureTokenScope: &livyOpts.AzureTokenScope,
+			} {
+				if v, ok := options[opt]; ok {
+					*dst = v
+					delete(options, opt)
+				}
+			}
 		default:
 			return livyOpts, sparkbase.InvalidOptionErr(sparkutil.OptionAuthType, authType)
 		}
