@@ -93,7 +93,7 @@ jobs:
           # https://github.com/actions/runner-images/issues/2840
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: github.event_name != 'workflow_dispatch'
         with:
           fetch-depth: 0
@@ -101,7 +101,7 @@ jobs:
           submodules: 'recursive'
 
       - name: "checkout remote"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: github.event_name == 'workflow_dispatch'
         with:
           repository: ${{ inputs.repository }}
@@ -110,7 +110,7 @@ jobs:
           persist-credentials: false
           submodules: 'recursive'
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           cache: true
           cache-dependency-path: go/go.sum
@@ -158,11 +158,6 @@ jobs:
       - name: Test
         working-directory: go
         run: |
-          if [[ -f ci/scripts/pre-test.sh ]]; then
-            echo "Loading pre-test"
-            ./ci/scripts/pre-test.sh ${{ matrix.platform }} ${{ matrix.arch }} "spark4-thrift-server"
-          fi
-
           set -a
           if [[ -f .env ]]; then
             source .env
@@ -172,6 +167,18 @@ jobs:
           fi
           if [[ -f .env.ci ]]; then
             source .env.ci
+          fi
+          set +a
+
+          if [[ -f ci/scripts/pre-test.sh ]]; then
+            echo "Loading pre-test"
+            ./ci/scripts/pre-test.sh ${{ matrix.platform }} ${{ matrix.arch }} "spark4-thrift-server"
+          fi
+
+          # if pre-test.sh needs to override env vars, it can generate this file
+          set -a
+          if [[ -f .env.override ]]; then
+            source .env.override
           fi
           set +a
 
@@ -218,7 +225,7 @@ jobs:
           # https://github.com/actions/runner-images/issues/2840
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: github.event_name != 'workflow_dispatch'
         with:
           fetch-depth: 0
@@ -226,7 +233,7 @@ jobs:
           submodules: 'recursive'
 
       - name: "checkout remote"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: github.event_name == 'workflow_dispatch'
         with:
           repository: ${{ inputs.repository }}
@@ -235,7 +242,7 @@ jobs:
           persist-credentials: false
           submodules: 'recursive'
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           cache: true
           cache-dependency-path: go/go.sum
@@ -248,7 +255,7 @@ jobs:
           run-install: false
 
       - name: AWS Login
-        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
         if: matrix.aws
         with:
           aws-region: us-east-1
@@ -301,11 +308,6 @@ jobs:
           STAGING_S3_BUCKET: ${{ secrets.STAGING_S3_BUCKET }} # zizmor: ignore[secrets-outside-env]
         working-directory: go
         run: |
-          if [[ -f ci/scripts/pre-test.sh ]]; then
-            echo "Loading pre-test"
-            ./ci/scripts/pre-test.sh ${{ matrix.platform }} ${{ matrix.arch }} ${{ matrix.service_name }}
-          fi
-
           set -a
           if [[ -f .env ]]; then
             source .env
@@ -315,6 +317,18 @@ jobs:
           fi
           if [[ -f .env.ci ]]; then
             source .env.ci
+          fi
+          set +a
+
+          if [[ -f ci/scripts/pre-test.sh ]]; then
+            echo "Loading pre-test"
+            ./ci/scripts/pre-test.sh ${{ matrix.platform }} ${{ matrix.arch }} ${{ matrix.service_name }}
+          fi
+
+          # if pre-test.sh needs to override env vars, it can generate this file
+          set -a
+          if [[ -f .env.override ]]; then
+            source .env.override
           fi
           set +a
 
@@ -365,7 +379,7 @@ jobs:
       packages: read
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: github.event_name != 'workflow_dispatch'
         with:
           fetch-depth: 0
@@ -373,7 +387,7 @@ jobs:
           submodules: 'recursive'
 
       - name: "checkout remote"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: github.event_name == 'workflow_dispatch'
         with:
           repository: ${{ inputs.repository }}
@@ -382,7 +396,7 @@ jobs:
           persist-credentials: false
           submodules: 'recursive'
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           cache: true
           cache-dependency-path: go/go.sum
@@ -422,6 +436,10 @@ jobs:
           fi
           set +a
           pixi run adbc-make check CI=true VERBOSE=true DRIVER=spark IMPL_LANG=go
+          if [[ -f ci/scripts/post-build.sh ]]; then
+            ./ci/scripts/post-build.sh release ${{ matrix.platform }} ${{ matrix.arch }}
+          fi
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: drivers-${{ matrix.platform }}-${{ matrix.arch }}
@@ -438,7 +456,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: github.event_name != 'workflow_dispatch'
         with:
           fetch-depth: 0
@@ -446,7 +464,7 @@ jobs:
           submodules: 'recursive'
 
       - name: "checkout remote"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: github.event_name == 'workflow_dispatch'
         with:
           repository: ${{ inputs.repository }}
@@ -455,7 +473,7 @@ jobs:
           persist-credentials: false
           submodules: 'recursive'
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           cache: true
           check-latest: true
@@ -535,7 +553,7 @@ jobs:
           - { platform: windows, arch: amd64, runner: windows-latest }
     steps:
       # for now, install dbc from main
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16  # v6.5.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           cache: true
           go-version: 'stable'
@@ -560,14 +578,14 @@ jobs:
           echo "Installing ${driver_pkg}"
           ./dbc install --no-verify "${driver_pkg}"
           echo "Installed ${driver_pkg}"
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: github.event_name != 'workflow_dispatch'
         with:
           fetch-depth: 1
           persist-credentials: false
           submodules: 'recursive'
       - name: "checkout remote"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: github.event_name == 'workflow_dispatch'
         with:
           repository: ${{ inputs.repository }}
@@ -604,7 +622,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: github.event_name != 'workflow_dispatch'
         with:
           fetch-depth: 0
@@ -612,7 +630,7 @@ jobs:
           submodules: 'recursive'
 
       - name: "checkout remote"
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         if: github.event_name == 'workflow_dispatch'
         with:
           repository: ${{ inputs.repository }}
