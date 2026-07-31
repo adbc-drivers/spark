@@ -69,7 +69,7 @@ jobs:
           echo "**Remote:** ${REPOSITORY}@${REF}" >> $GITHUB_STEP_SUMMARY
 
   test:
-    uses: adbc-drivers/apache/.github/workflows/go_test.yaml@main # zizmor: ignore[unpinned-uses]
+    uses: adbc-drivers/spark/.github/workflows/go_test.yaml@main # zizmor: ignore[unpinned-uses]
     needs:
       - setup
     with:
