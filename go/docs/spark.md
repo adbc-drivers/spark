@@ -199,29 +199,27 @@ We have not yet confirmed driver functionality with Azure Synapse Analytics.
 ### Microsoft Fabric (Lakehouse)
 
 - Only Livy is supported, via the [Fabric Livy API](https://learn.microsoft.com/fabric/data-engineering/api-livy-overview).
-- The host is `api.fabric.microsoft.com` (TLS required) and `spark.livy.base_url` must be set to:
+- The host is `api.fabric.microsoft.com` and `spark.livy.base_url` must be set to:
 
   ```
-  /v1/workspaces/<WORKSPACE ID>/lakehouses/<LAKEHOUSE ID>/livyapi/versions/2023-12-01
+  /v1/workspaces/<WORKSPACE GUID>/lakehouses/<LAKEHOUSE GUID>/livyapi/versions/2023-12-01
   ```
 
-  The GUIDs of the workspace and the Lakehouse can be inferred by opening
-  Microsoft Fabric, browsing to the Lakehouse, and looking at the URL. For
-  example:
+  The GUIDs of the workspace and the Lakehouse can be inferred by opening Microsoft Fabric, browsing to the Lakehouse, and looking at the URL. For example:
 
   ```
-  https://app.fabric.microsoft.com/groups/<WORKSPACE ID>/lakehouses/<LAKEHOUSE ID>
-  ```
-
-- Set `spark.auth_type` to `azure_token`. The Microsoft Entra ID credential is selected with `spark.livy.azure.credential` (names and parameters match the MSSQL driver's `fedauth` values):
-  - `ActiveDirectoryDefault` (the default): the [`DefaultAzureCredential`](https://pkg.go.dev/github.com/Azure/azure-sdk-for-go/sdk/azidentity#DefaultAzureCredential) chain.
+  https://app.fabric.microsoft.com/groups/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx/lakehouses/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+                                          ^WORKSPACE_GUID                                 ^LAKEHOUSE_GUID
+```
+- Set `spark.auth_type` to `azure_token`. The Microsoft Entra ID credential is selected with `spark.livy.azure.credential`:
+  - `ActiveDirectoryDefault` (the default): tries several credential sources in order, selecting the first one that produces a result.
   - `ActiveDirectoryAzCli`: the local `az login` context.
   - `ActiveDirectoryServicePrincipal`: set the username to `<client id>@<tenant id>` and the password to the client secret.
   - `ActiveDirectoryEnvironment`: credentials from `AZURE_*` environment variables only.
   - `ActiveDirectoryManagedIdentity`: set the username to the client ID of a user-assigned identity.
-- The OAuth token scope is inferred from the host (`https://api.fabric.microsoft.com/.default` for Fabric hosts); override with `spark.livy.azure.token_scope`.
+- The OAuth token scope is inferred from the host (`https://api.fabric.microsoft.com/.default` for Fabric hosts). (It can be overridden with `spark.livy.azure.token_scope`.)
 - The identity must have execute permissions on the lakehouse (e.g. workspace Contributor).
-- Do not set `spark.driver.memory`/`spark.driver.cores` session config unless you know the capacity's node sizes: Fabric refuses sessions that request less than the pool minimum.
+- Do not set `spark.driver.memory`/`spark.driver.cores` unless you know the capacity's node sizes. (Fabric refuses sessions that request less than the pool minimum.)
 
 ## Feature & Type Support
 

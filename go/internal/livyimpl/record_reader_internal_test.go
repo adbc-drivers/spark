@@ -20,6 +20,8 @@ import (
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Fabric serializes wide numeric and boolean values as JSON strings; the
@@ -29,22 +31,18 @@ func TestToInt64StringEncoded(t *testing.T) {
 	// 2^53 + 1: not representable as float64, so string decoding must not
 	// round-trip through a float.
 	v, ok := toInt64("9007199254740993")
-	if !ok || v != 9007199254740993 {
-		t.Fatalf("toInt64(string) = (%d, %v)", v, ok)
-	}
-	if _, ok := toInt64("not a number"); ok {
-		t.Fatal("toInt64 should reject non-numeric strings")
-	}
+	require.True(t, ok)
+	assert.EqualValues(t, 9007199254740993, v)
+	_, ok = toInt64("not a number")
+	assert.False(t, ok)
 }
 
 func TestToFloat64StringEncoded(t *testing.T) {
 	v, ok := toFloat64("1.5")
-	if !ok || v != 1.5 {
-		t.Fatalf("toFloat64(string) = (%v, %v)", v, ok)
-	}
-	if _, ok := toFloat64("not a number"); ok {
-		t.Fatal("toFloat64 should reject non-numeric strings")
-	}
+	require.True(t, ok)
+	assert.Equal(t, 1.5, v)
+	_, ok = toFloat64("not a number")
+	assert.False(t, ok)
 }
 
 func TestAppendValueStringEncoded(t *testing.T) {
@@ -53,50 +51,40 @@ func TestAppendValueStringEncoded(t *testing.T) {
 	t.Run("int64 from string", func(t *testing.T) {
 		b := array.NewInt64Builder(alloc)
 		defer b.Release()
-		if err := appendValueToBuilder(b, "9007199254740993", arrow.PrimitiveTypes.Int64); err != nil {
-			t.Fatalf("append: %v", err)
-		}
+		err := appendValueToBuilder(b, "9007199254740993", arrow.PrimitiveTypes.Int64)
+		require.NoError(t, err)
 		arr := b.NewInt64Array()
 		defer arr.Release()
-		if arr.Value(0) != 9007199254740993 {
-			t.Fatalf("value = %d", arr.Value(0))
-		}
+		assert.EqualValues(t, 9007199254740993, arr.Value(0))
 	})
 
 	t.Run("bool from string", func(t *testing.T) {
 		b := array.NewBooleanBuilder(alloc)
 		defer b.Release()
-		if err := appendValueToBuilder(b, "true", arrow.FixedWidthTypes.Boolean); err != nil {
-			t.Fatalf("append: %v", err)
-		}
-		if err := appendValueToBuilder(b, false, arrow.FixedWidthTypes.Boolean); err != nil {
-			t.Fatalf("append native bool: %v", err)
-		}
+		err := appendValueToBuilder(b, "true", arrow.FixedWidthTypes.Boolean)
+		require.NoError(t, err)
+		err = appendValueToBuilder(b, false, arrow.FixedWidthTypes.Boolean)
+		require.NoError(t, err)
 		arr := b.NewBooleanArray()
 		defer arr.Release()
-		if !arr.Value(0) || arr.Value(1) {
-			t.Fatalf("values = %v, %v", arr.Value(0), arr.Value(1))
-		}
+		assert.True(t, arr.Value(0))
+		assert.False(t, arr.Value(1))
 	})
 
 	t.Run("invalid bool string errors", func(t *testing.T) {
 		b := array.NewBooleanBuilder(alloc)
 		defer b.Release()
-		if err := appendValueToBuilder(b, "not a bool", arrow.FixedWidthTypes.Boolean); err == nil {
-			t.Fatal("expected error for non-boolean string")
-		}
+		err := appendValueToBuilder(b, "not a bool", arrow.FixedWidthTypes.Boolean)
+		require.Error(t, err)
 	})
 
 	t.Run("float64 from string", func(t *testing.T) {
 		b := array.NewFloat64Builder(alloc)
 		defer b.Release()
-		if err := appendValueToBuilder(b, "1.5", arrow.PrimitiveTypes.Float64); err != nil {
-			t.Fatalf("append: %v", err)
-		}
+		err := appendValueToBuilder(b, "1.5", arrow.PrimitiveTypes.Float64)
+		require.NoError(t, err)
 		arr := b.NewFloat64Array()
 		defer arr.Release()
-		if arr.Value(0) != 1.5 {
-			t.Fatalf("value = %v", arr.Value(0))
-		}
+		assert.Equal(t, 1.5, arr.Value(0))
 	})
 }

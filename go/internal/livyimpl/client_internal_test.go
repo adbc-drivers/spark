@@ -16,11 +16,12 @@ package livyimpl
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSessionIDUnmarshal(t *testing.T) {
@@ -35,19 +36,15 @@ func TestSessionIDUnmarshal(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var s Session
-			if err := json.Unmarshal([]byte(tc.in), &s); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
-			if s.ID != tc.want {
-				t.Fatalf("got %q, want %q", s.ID, tc.want)
-			}
+			err := json.Unmarshal([]byte(tc.in), &s)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, s.ID)
 		})
 	}
 
 	var s Session
-	if err := json.Unmarshal([]byte(`{"id":{"nested":true}}`), &s); err == nil {
-		t.Fatal("expected error for non-scalar session id")
-	}
+	err := json.Unmarshal([]byte(`{"id":{"nested":true}}`), &s)
+	require.Error(t, err)
 }
 
 func TestAzureTokenScope(t *testing.T) {
@@ -84,9 +81,7 @@ func TestAzureTokenScope(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := azureTokenScope(tc.baseURL, tc.override); got != tc.want {
-				t.Fatalf("got %q, want %q", got, tc.want)
-			}
+			assert.Equal(t, tc.want, azureTokenScope(tc.baseURL, tc.override))
 		})
 	}
 }
@@ -103,24 +98,18 @@ func TestNewAzureCredentialValidation(t *testing.T) {
 		}
 		for _, opts := range cases {
 			_, err := newAzureCredential(opts)
+			require.Error(t, err)
 			var adbcErr adbc.Error
-			if err == nil {
-				t.Fatal("expected error")
-			}
-			if !errorAs(err, &adbcErr) || adbcErr.Code != adbc.StatusInvalidArgument {
-				t.Fatalf("expected InvalidArgument adbc.Error, got %v", err)
-			}
-			if !strings.Contains(err.Error(), "<client id>@<tenant id>") {
-				t.Fatalf("error should describe the username form: %v", err)
-			}
+			require.ErrorAs(t, err, &adbcErr)
+			assert.Equal(t, adbc.StatusInvalidArgument, adbcErr.Code)
+			assert.ErrorContains(t, err, "<client id>@<tenant id>")
 		}
 	})
 
 	t.Run("invalid credential kind is rejected", func(t *testing.T) {
 		_, err := newAzureCredential(ConnectionOpts{AzureCredential: "carrier_pigeon"})
-		if err == nil || !strings.Contains(err.Error(), "carrier_pigeon") {
-			t.Fatalf("expected invalid-credential error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "carrier_pigeon")
 	})
 
 	t.Run("service principal with all fields constructs", func(t *testing.T) {
@@ -129,19 +118,7 @@ func TestNewAzureCredentialValidation(t *testing.T) {
 			Username:        "22222222-2222-2222-2222-222222222222@11111111-1111-1111-1111-111111111111",
 			Password:        "hunter2",
 		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cred == nil {
-			t.Fatal("expected credential")
-		}
+		require.NoError(t, err)
+		assert.NotNil(t, cred)
 	})
-}
-
-func errorAs(err error, target *adbc.Error) bool {
-	e, ok := err.(adbc.Error)
-	if ok {
-		*target = e
-	}
-	return ok
 }
