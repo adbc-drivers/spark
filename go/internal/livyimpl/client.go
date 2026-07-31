@@ -446,8 +446,8 @@ func (c *livyClient) CreateSession(ctx context.Context, req CreateSessionRequest
 
 // GetSession retrieves session information
 func (c *livyClient) GetSession(ctx context.Context, sessionID SessionID) (*Session, error) {
-	url := fmt.Sprintf("/sessions/%s", url.PathEscape(string(sessionID)))
-	resp, err := c.doRequest(ctx, "GET", url, nil)
+	path := fmt.Sprintf("/sessions/%s", url.PathEscape(string(sessionID)))
+	resp, err := c.doRequest(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -469,8 +469,8 @@ func (c *livyClient) GetSession(ctx context.Context, sessionID SessionID) (*Sess
 
 // DeleteSession deletes a session
 func (c *livyClient) DeleteSession(ctx context.Context) error {
-	url := fmt.Sprintf("/sessions/%s", url.PathEscape(string(c.sessionID)))
-	resp, err := c.doRequest(ctx, "DELETE", url, nil)
+	path := fmt.Sprintf("/sessions/%s", url.PathEscape(string(c.sessionID)))
+	resp, err := c.doRequest(ctx, "DELETE", path, nil)
 	if err != nil {
 		return err
 	}
@@ -489,8 +489,8 @@ func (c *livyClient) DeleteSession(ctx context.Context) error {
 
 func (c *livyClient) Close(ctx context.Context) error {
 	if c.deleteSessionOnClose {
-		url := fmt.Sprintf("/sessions/%s", url.PathEscape(string(c.sessionID)))
-		resp, err := c.doRequest(ctx, "DELETE", url, nil)
+		path := fmt.Sprintf("/sessions/%s", url.PathEscape(string(c.sessionID)))
+		resp, err := c.doRequest(ctx, "DELETE", path, nil)
 		if err != nil {
 			return err
 		}
@@ -548,8 +548,8 @@ func (c *livyClient) CreateStatement(ctx context.Context, req CreateStatementReq
 		return nil, fmt.Errorf("failed to marshal statement request: %w", err)
 	}
 
-	url := fmt.Sprintf("/sessions/%s/statements", url.PathEscape(string(c.sessionID)))
-	resp, err := c.doRequest(ctx, "POST", url, bytes.NewReader(data))
+	path := fmt.Sprintf("/sessions/%s/statements", url.PathEscape(string(c.sessionID)))
+	resp, err := c.doRequest(ctx, "POST", path, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
@@ -573,8 +573,8 @@ func (c *livyClient) CreateStatement(ctx context.Context, req CreateStatementReq
 
 // GetStatement retrieves statement information
 func (c *livyClient) GetStatement(ctx context.Context, sessionID SessionID, statementID int) (*Statement, error) {
-	url := fmt.Sprintf("/sessions/%s/statements/%d", url.PathEscape(string(sessionID)), statementID)
-	resp, err := c.doRequest(ctx, "GET", url, nil)
+	path := fmt.Sprintf("/sessions/%s/statements/%d", url.PathEscape(string(sessionID)), statementID)
+	resp, err := c.doRequest(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -633,9 +633,9 @@ func (c *livyClient) WaitForStatementComplete(ctx context.Context, statementID i
 
 // doRequest performs an HTTP request with appropriate authentication
 func (c *livyClient) doRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
-	url := c.baseURL + path
+	requestURL := c.baseURL + path
 
-	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}

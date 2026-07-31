@@ -183,7 +183,7 @@ Also see the above caveats for specific ways to connect to EMR.
 ### Azure Synapse Analytics
 
 :::{warning}
-We have not yet confirmed driver functionality with Azure Synapse Analytics.
+We are currently unsuccessful in confirming driver functionality with Azure Synapse Analytics.
 :::
 
 - Only Livy is supported.
@@ -198,6 +198,10 @@ We have not yet confirmed driver functionality with Azure Synapse Analytics.
 
 ### Microsoft Fabric (Lakehouse)
 
+:::{note}
+Support is still experimental; Fabric is not yet part of integration testing.
+:::
+
 - Only Livy is supported, via the [Fabric Livy API](https://learn.microsoft.com/fabric/data-engineering/api-livy-overview).
 - The host is `api.fabric.microsoft.com` and `spark.livy.base_url` must be set to:
 
@@ -210,7 +214,8 @@ We have not yet confirmed driver functionality with Azure Synapse Analytics.
   ```
   https://app.fabric.microsoft.com/groups/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx/lakehouses/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
                                           ^WORKSPACE_GUID                                 ^LAKEHOUSE_GUID
-```
+  ```
+
 - Set `spark.auth_type` to `azure_token`. The Microsoft Entra ID credential is selected with `spark.livy.azure.credential`:
   - `ActiveDirectoryDefault` (the default): tries several credential sources in order, selecting the first one that produces a result.
   - `ActiveDirectoryAzCli`: the local `az login` context.

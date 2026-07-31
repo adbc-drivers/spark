@@ -32,7 +32,7 @@ func TestToInt64StringEncoded(t *testing.T) {
 	// round-trip through a float.
 	v, ok := toInt64("9007199254740993")
 	require.True(t, ok)
-	assert.EqualValues(t, 9007199254740993, v)
+	assert.Equal(t, int64(9007199254740993), v)
 	_, ok = toInt64("not a number")
 	assert.False(t, ok)
 }
@@ -55,7 +55,7 @@ func TestAppendValueStringEncoded(t *testing.T) {
 		require.NoError(t, err)
 		arr := b.NewInt64Array()
 		defer arr.Release()
-		assert.EqualValues(t, 9007199254740993, arr.Value(0))
+		assert.Equal(t, int64(9007199254740993), arr.Value(0))
 	})
 
 	t.Run("bool from string", func(t *testing.T) {
