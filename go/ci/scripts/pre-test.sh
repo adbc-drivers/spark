@@ -52,6 +52,7 @@ main() {
         local token=$(echo "$session_endpoint" | jq -r '.authToken')
         local -r uri="spark://:$token@$host:443?tls=true&auth_type=token&api=connect"
         echo "export SPARK_CONNECT_URI=\"$uri\"" > ".env.override"
+        echo "export EMR_SESSION_ID=\"$session_id\"" >> ".env.override"
 
         exit 0
     else
