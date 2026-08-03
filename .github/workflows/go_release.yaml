@@ -144,9 +144,26 @@ jobs:
 
           go test -tags assert -v ./...
 
-          if [[ -f ci/scripts/post-test.sh ]]; then
-            ./ci/scripts/post-test.sh
+      - name: Post-Test
+        if: always()
+        working-directory: go
+        run: |
+          set -a
+          if [[ -f .env ]]; then
+            source .env
           fi
+          if [[ -f .env.${{ matrix.platform }} ]]; then
+            source .env.${{ matrix.platform }}
+          fi
+          if [[ -f .env.ci ]]; then
+            source .env.ci
+          fi
+          if [[ -f .env.override ]]; then
+            source .env.override
+          fi
+          set +a
+
+          ./ci/scripts/post-test.sh
 
       - name: go mod tidy
         if: runner.os == 'Linux'
@@ -288,11 +305,32 @@ jobs:
             pixi run validate
           fi
 
-          if [[ -f ci/scripts/post-test.sh ]]; then
-            ./ci/scripts/post-test.sh
-          fi
-
           cp validation-report.xml validation-report-${{ matrix.vendor_version }}.xml
+
+      - name: Post-Test
+        if: always()
+        env:
+          EMR_SERVERLESS_APPLICATION_ID: ${{ secrets.EMR_SERVERLESS_APPLICATION_ID }} # zizmor: ignore[secrets-outside-env]
+          EMR_SERVERLESS_EXECUTION_ROLE_ARN: ${{ secrets.EMR_SERVERLESS_EXECUTION_ROLE_ARN }} # zizmor: ignore[secrets-outside-env]
+          STAGING_S3_BUCKET: ${{ secrets.STAGING_S3_BUCKET }} # zizmor: ignore[secrets-outside-env]
+        working-directory: go
+        run: |
+          set -a
+          if [[ -f .env ]]; then
+            source .env
+          fi
+          if [[ -f .env.${{ matrix.platform }} ]]; then
+            source .env.${{ matrix.platform }}
+          fi
+          if [[ -f .env.ci ]]; then
+            source .env.ci
+          fi
+          if [[ -f .env.override ]]; then
+            source .env.override
+          fi
+          set +a
+
+          ./ci/scripts/post-test.sh
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
