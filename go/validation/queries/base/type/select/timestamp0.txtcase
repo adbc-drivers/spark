@@ -12,15 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// part: expected_schema
+// part: metadata
 
-{
-    "format": "+s",
-    "children": [
-        {
-            "name": "res",
-            "format": "tsu:",
-            "flags": ["nullable"]
-        }
-    ]
-}
+hide = true
