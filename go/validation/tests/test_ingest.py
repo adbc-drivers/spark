@@ -19,8 +19,12 @@ from . import spark
 
 
 def pytest_generate_tests(metafunc) -> None:
-    quirks = [spark.get_quirks(metafunc.config.getoption("vendor_version"))]
-    return adbc_drivers_validation.tests.ingest.generate_tests(quirks, metafunc)
+    quirks = spark.get_quirks(metafunc.config.getoption("vendor_version"))
+    if quirks.short_version.endswith(("-thrift", "-thrifthttp")):
+        return adbc_drivers_validation.tests.ingest.generate_tests(
+            [quirks], metafunc, long_value_queries={"ingest/string"}
+        )
+    return adbc_drivers_validation.tests.ingest.generate_tests([quirks], metafunc)
 
 
 class TestIngest(adbc_drivers_validation.tests.ingest.TestIngest):
