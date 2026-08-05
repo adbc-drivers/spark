@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// part: expected_schema
+// part: metadata
 
-{
-    "format": "+s",
-    "children": [
-        {
-            "name": "res",
-            "format": "tsu:",
-            "flags": ["nullable"]
-        }
-    ]
-}
+[tags]
+caveats = [
+  "In our testing, the Livy SQL backend loses fractional seconds when returning timestamp values"
+]
+partial-support = true
+
+// part: expected
+
+{"res": 1684158330000000}
+{"res": 946684800000000}
+{"res": -14182940000000}
+{"res": 253402300799000000}
+{"res": null}
+{"res": -62135596800000000}
+{"res": 1684158330000000}

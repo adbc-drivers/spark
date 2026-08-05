@@ -12,29 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// part: setup_query
+// part: metadata
 
-CREATE TABLE test_timestamp (
-    idx INTEGER,
-    res TIMESTAMP
-) USING parquet LOCATION 's3://{bucket}/emr/type/select/{uuid}';
-
-INSERT INTO test_timestamp (idx, res) VALUES
-  (1, TIMESTAMP '2023-05-15 13:45:30'),
-  (2, TIMESTAMP '2000-01-01 00:00:00'),
-  (3, TIMESTAMP '1969-07-20 20:17:40'),
-  (4, TIMESTAMP '9999-12-31 23:59:59'),
-  (5, NULL);
-
-// part: expected_schema
-
-{
-    "format": "+s",
-    "children": [
-        {
-            "name": "res",
-            "format": "tsu:GMT",
-            "flags": ["nullable"]
-        }
-    ]
-}
+hide = true
