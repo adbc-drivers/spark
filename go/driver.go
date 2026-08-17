@@ -28,7 +28,7 @@ type driverImpl struct {
 }
 
 func (d *driverImpl) NewDatabaseWithContext(ctx context.Context, opts map[string]string) (adbc.DatabaseWithContext, error) {
-	base, err := driverbase.NewDatabaseImplBase(ctx, &d.DriverImplBase)
+	base, err := driverbase.NewDatabaseImplBase(ctx, &d.DriverImplBase, driverbase.TracingOptions{})
 	if err != nil {
 		return nil, err
 	}
