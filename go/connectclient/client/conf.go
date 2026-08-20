@@ -27,7 +27,7 @@ import (
 	proto "github.com/adbc-drivers/spark/go/connectclient/internal/generated"
 )
 
-// Public interface RuntimeConfig
+// RuntimeConfig is the public interface for runtime configuration.
 type RuntimeConfig interface {
 	GetAll(ctx context.Context) (map[string]string, error)
 	Set(ctx context.Context, key string, value string) error

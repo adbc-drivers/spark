@@ -140,7 +140,7 @@ func (s *sparkSessionImpl) Sql(ctx context.Context, query string) (DataFrame, er
 			Command: &proto.Command{
 				CommandType: &proto.Command_SqlCommand{
 					SqlCommand: &proto.SqlCommand{
-						Sql: query,
+						Sql: query, //nolint:staticcheck
 					},
 				},
 			},
