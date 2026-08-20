@@ -53,7 +53,7 @@ var (
 	}
 )
 
-// MockResponseDone is a response that indicates the plan execution is done.
+// ExecutePlanResponseDone is a response that indicates the plan execution is done.
 var ExecutePlanResponseDone = MockResponse{
 	Resp: &proto.ExecutePlanResponse{
 		ResponseType: &proto.ExecutePlanResponse_ResultComplete_{
@@ -191,7 +191,7 @@ func NewSqlCommand(sql string) *proto.Plan {
 			Command: &proto.Command{
 				CommandType: &proto.Command_SqlCommand{
 					SqlCommand: &proto.SqlCommand{
-						Sql: sql,
+						Sql: sql, //nolint:staticcheck
 					},
 				},
 			},

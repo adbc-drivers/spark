@@ -772,7 +772,7 @@ func (df *dataFrameImpl) WithColumnsRenamed(ctx context.Context, colsMap map[str
 		RelType: &proto.Relation_WithColumnsRenamed{
 			WithColumnsRenamed: &proto.WithColumnsRenamed{
 				Input:            df.relation,
-				RenameColumnsMap: colsMap,
+				RenameColumnsMap: colsMap, //nolint:staticcheck
 			},
 		},
 	}

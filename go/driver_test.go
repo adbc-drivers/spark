@@ -45,18 +45,18 @@ type SparkQuirks struct {
 
 var _ validation.DriverQuirks = (*SparkQuirks)(nil)
 
-func (s *SparkQuirks) SetupDriver(t *testing.T) driverbase.DriverWithContext {
-	s.mem = memory.NewCheckedAllocator(memory.DefaultAllocator)
-	return driver.NewDriver(s.mem)
+func (q *SparkQuirks) SetupDriver(t *testing.T) driverbase.DriverWithContext {
+	q.mem = memory.NewCheckedAllocator(memory.DefaultAllocator)
+	return driver.NewDriver(q.mem)
 }
 
-func (s *SparkQuirks) TearDownDriver(t *testing.T, _ driverbase.DriverWithContext) {
-	s.mem.AssertSize(t, 0)
+func (q *SparkQuirks) TearDownDriver(t *testing.T, _ driverbase.DriverWithContext) {
+	q.mem.AssertSize(t, 0)
 }
 
-func (s *SparkQuirks) DatabaseOptions() map[string]string {
+func (q *SparkQuirks) DatabaseOptions() map[string]string {
 	return map[string]string{
-		adbc.OptionKeyURI: s.dsn,
+		adbc.OptionKeyURI: q.dsn,
 	}
 }
 
