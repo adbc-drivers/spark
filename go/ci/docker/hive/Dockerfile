@@ -50,7 +50,7 @@ ENV PATH=${HIVE_HOME}/bin:${HADOOP_HOME}/bin:${PATH}
 ARG POSTGRES_NAME=postgresql-${POSTGRES_DRIVER_VERSION}
 
 USER root
-RUN microdnf install -y procps-ng net-tools krb5-workstation postgresql16 \
+RUN microdnf install -y procps-ng net-tools krb5-workstation postgresql \
         && microdnf clean all
 
 COPY --from=distributions /opt/hadoop /opt/hadoop

@@ -19,7 +19,7 @@ ARG TEZ_VERSION=0.10.3
 
 # Adapted from Apache Hive's packaging/src/docker/Dockerfile at
 # b2e2523f31659bb0ec3f538a30ecfb71be9cf108.
-FROM eclipse-temurin:21-jdk-ubi9-minimal AS distributions
+FROM eclipse-temurin:8-jre-ubi10-minimal AS distributions
 
 ARG HIVE_VERSION
 ARG HADOOP_VERSION
@@ -39,7 +39,7 @@ RUN set -eux; \
         --exclude="apache-tez-${TEZ_VERSION}-bin/share"; \
     rm /tmp/hadoop.tar.gz /tmp/hive.tar.gz /tmp/tez.tar.gz
 
-FROM eclipse-temurin:21-jdk-ubi9-minimal AS hive
+FROM eclipse-temurin:8-jre-ubi10-minimal AS hive
 
 ARG HIVE_VERSION
 ARG POSTGRES_DRIVER_VERSION=42.7.9
