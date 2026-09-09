@@ -1,4 +1,4 @@
-# Copyright (c) 2025 ADBC Drivers Contributors
+# Copyright (c) 2025-2026 ADBC Drivers Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,10 @@
 
 services:
   kerberos:
+    image: ghcr.io/adbc-drivers/spark:kerberos
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/kerberos/
       dockerfile: Dockerfile
       target: kerberos
@@ -154,7 +157,10 @@ services:
   # ==========================================================================
 
   hive3-metastore:
+    image: ghcr.io/adbc-drivers/spark:hive3
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: hive/Dockerfile
       target: hive
@@ -181,7 +187,10 @@ services:
       start_period: 5s
 
   hive3-metastore-alt:
+    image: ghcr.io/adbc-drivers/spark:hive3
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: hive/Dockerfile
       target: hive
@@ -208,7 +217,10 @@ services:
       start_period: 5s
 
   spark35-catalog-init:
+    image: ghcr.io/adbc-drivers/spark:spark35-thrift
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: spark/Dockerfile
       target: thrift
@@ -260,7 +272,10 @@ services:
       start_period: 5s
 
   spark35-thrift-server:
+    image: ghcr.io/adbc-drivers/spark:spark35-thrift
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: spark/Dockerfile
       target: thrift
@@ -293,7 +308,10 @@ services:
       start_period: 45s
 
   spark35-connect-server:
+    image: ghcr.io/adbc-drivers/spark:spark35-connect
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: spark/Dockerfile
       target: connect
@@ -327,7 +345,10 @@ services:
 
   # Apache Livy Server with Iceberg support
   spark35-livy:
+    image: ghcr.io/adbc-drivers/spark:spark35-livy
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: spark/Dockerfile
       target: livy
@@ -365,7 +386,10 @@ services:
   # ==========================================================================
 
   hive4-metastore:
+    image: ghcr.io/adbc-drivers/spark:hive4
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: hive4/Dockerfile
       target: hive
@@ -392,7 +416,10 @@ services:
       start_period: 5s
 
   hive4-metastore-alt:
+    image: ghcr.io/adbc-drivers/spark:hive4
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: hive4/Dockerfile
       target: hive
@@ -419,7 +446,10 @@ services:
       start_period: 5s
 
   spark4-catalog-init:
+    image: ghcr.io/adbc-drivers/spark:spark4-thrift
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: spark4/Dockerfile
       target: thrift
@@ -473,7 +503,10 @@ services:
       start_period: 5s
 
   spark4-thrift-server:
+    image: ghcr.io/adbc-drivers/spark:spark4-thrift
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: spark4/Dockerfile
       target: thrift
@@ -546,7 +579,10 @@ services:
       start_period: 5s
 
   spark4-connect-server:
+    image: ghcr.io/adbc-drivers/spark:spark4-connect
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: spark4/Dockerfile
       target: connect
@@ -581,7 +617,10 @@ services:
       start_period: 45s
 
   spark4-thrifthttp-server:
+    image: ghcr.io/adbc-drivers/spark:spark4-thrift
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: spark4/Dockerfile
       target: thrift
@@ -649,7 +688,10 @@ services:
       start_period: 5s
 
   spark41-connect-server:
+    image: ghcr.io/adbc-drivers/spark:spark41-connect
     build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
       context: ./ci/docker/
       dockerfile: spark4/Dockerfile
       target: connect
