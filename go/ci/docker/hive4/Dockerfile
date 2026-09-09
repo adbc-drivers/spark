@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG HIVE_VERSION=4.0.0
+ARG HIVE_VERSION=4.2.1
 FROM apache/hive:${HIVE_VERSION} AS hive
 
 ARG POSTGRES_DRIVER_VERSION=42.7.9
@@ -22,10 +22,8 @@ ENV HIVE_HOME=/opt/hive
 ARG POSTGRES_NAME=postgresql-${POSTGRES_DRIVER_VERSION}
 
 USER root
-RUN export DEBIAN_FRONTEND=noninteractive \
-        && apt-get update \
-        && apt-get install -y --no-install-recommends net-tools krb5-user wget postgresql-client \
-        && rm -rf /var/lib/apt/lists/*
+RUN microdnf install -y net-tools krb5-workstation wget postgresql \
+        && microdnf clean all
 
 RUN wget -q https://jdbc.postgresql.org/download/${POSTGRES_NAME}.jar -P ${HIVE_HOME}/lib/
 COPY ./hive4/conf/ ${HIVE_HOME}/conf/
