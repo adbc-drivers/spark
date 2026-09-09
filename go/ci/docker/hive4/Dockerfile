@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG HIVE_VERSION=4.0.1
+# Spark's bundled Hive client requires the get_table RPC retained in Hive 4.0.0.
+ARG HIVE_VERSION=4.0.0
 ARG HADOOP_VERSION=3.3.6
-ARG TEZ_VERSION=0.10.4
+ARG TEZ_VERSION=0.10.3
 
 # Adapted from Apache Hive's packaging/src/docker/Dockerfile at
 # b2e2523f31659bb0ec3f538a30ecfb71be9cf108.
@@ -25,9 +26,9 @@ ARG HADOOP_VERSION
 ARG TEZ_VERSION
 
 RUN set -eux; \
-    wget --no-verbose https://archive.apache.org/dist/hadoop/core/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz -O /tmp/hadoop.tar.gz; \
-    wget --no-verbose https://archive.apache.org/dist/hive/hive-${HIVE_VERSION}/apache-hive-${HIVE_VERSION}-bin.tar.gz -O /tmp/hive.tar.gz; \
-    wget --no-verbose https://archive.apache.org/dist/tez/${TEZ_VERSION}/apache-tez-${TEZ_VERSION}-bin.tar.gz -O /tmp/tez.tar.gz; \
+    wget -q https://archive.apache.org/dist/hadoop/core/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz -O /tmp/hadoop.tar.gz; \
+    wget -q https://archive.apache.org/dist/hive/hive-${HIVE_VERSION}/apache-hive-${HIVE_VERSION}-bin.tar.gz -O /tmp/hive.tar.gz; \
+    wget -q https://archive.apache.org/dist/tez/${TEZ_VERSION}/apache-tez-${TEZ_VERSION}-bin.tar.gz -O /tmp/tez.tar.gz; \
     mkdir -p /opt/hadoop /opt/hive /opt/tez; \
     tar -xzf /tmp/hadoop.tar.gz -C /opt/hadoop --strip-components=1 \
         --exclude="hadoop-${HADOOP_VERSION}/share/doc" --exclude='*/jdiff' \
