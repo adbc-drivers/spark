@@ -12,23 +12,60 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG HIVE_VERSION=4.2.1
-FROM apache/hive:${HIVE_VERSION} AS hive
+ARG HIVE_VERSION=4.0.1
+ARG HADOOP_VERSION=3.3.6
+ARG TEZ_VERSION=0.10.4
 
+# Adapted from Apache Hive's packaging/src/docker/Dockerfile at
+# b2e2523f31659bb0ec3f538a30ecfb71be9cf108.
+FROM eclipse-temurin:21-jdk-ubi9-minimal AS distributions
+
+ARG HIVE_VERSION
+ARG HADOOP_VERSION
+ARG TEZ_VERSION
+
+RUN set -eux; \
+    wget --no-verbose https://archive.apache.org/dist/hadoop/core/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz -O /tmp/hadoop.tar.gz; \
+    wget --no-verbose https://archive.apache.org/dist/hive/hive-${HIVE_VERSION}/apache-hive-${HIVE_VERSION}-bin.tar.gz -O /tmp/hive.tar.gz; \
+    wget --no-verbose https://archive.apache.org/dist/tez/${TEZ_VERSION}/apache-tez-${TEZ_VERSION}-bin.tar.gz -O /tmp/tez.tar.gz; \
+    mkdir -p /opt/hadoop /opt/hive /opt/tez; \
+    tar -xzf /tmp/hadoop.tar.gz -C /opt/hadoop --strip-components=1 \
+        --exclude="hadoop-${HADOOP_VERSION}/share/doc" --exclude='*/jdiff' \
+        --exclude='*/sources' --exclude='*tests.jar' --exclude='*/webapps'; \
+    tar -xzf /tmp/hive.tar.gz -C /opt/hive --strip-components=1 \
+        --exclude="apache-hive-${HIVE_VERSION}-bin/jdbc"; \
+    tar -xzf /tmp/tez.tar.gz -C /opt/tez --strip-components=1 \
+        --exclude="apache-tez-${TEZ_VERSION}-bin/share"; \
+    rm /tmp/hadoop.tar.gz /tmp/hive.tar.gz /tmp/tez.tar.gz
+
+FROM eclipse-temurin:21-jdk-ubi9-minimal AS hive
+
+ARG HIVE_VERSION
 ARG POSTGRES_DRIVER_VERSION=42.7.9
 
-ENV HIVE_HOME=/opt/hive
+ENV HADOOP_HOME=/opt/hadoop \
+    HIVE_HOME=/opt/hive \
+    TEZ_HOME=/opt/tez \
+    HIVE_VER=${HIVE_VERSION}
+ENV PATH=${HIVE_HOME}/bin:${HADOOP_HOME}/bin:${PATH}
 
 ARG POSTGRES_NAME=postgresql-${POSTGRES_DRIVER_VERSION}
 
 USER root
-RUN microdnf install -y net-tools krb5-workstation wget postgresql \
+RUN microdnf install -y procps-ng gettext wget xmlstarlet net-tools krb5-workstation postgresql \
         && microdnf clean all
 
-RUN wget -q https://jdbc.postgresql.org/download/${POSTGRES_NAME}.jar -P ${HIVE_HOME}/lib/
+COPY --from=distributions /opt/hadoop /opt/hadoop
+COPY --from=distributions /opt/hive /opt/hive
+COPY --from=distributions /opt/tez /opt/tez
+
+RUN wget -q https://jdbc.postgresql.org/download/${POSTGRES_NAME}.jar -P ${HIVE_HOME}/lib/ \
+        && mkdir -p ${HIVE_HOME}/data/warehouse ${HIVE_HOME}/scratch /home/hive/.beeline
 COPY ./hive4/conf/ ${HIVE_HOME}/conf/
 COPY ./kerberos/conf/krb5.conf /etc/krb5.conf
 
 COPY ./hive4/entrypoint.sh /entrypoint.sh
 
+WORKDIR /opt/hive
+EXPOSE 10000 10002 9083
 ENTRYPOINT ["sh", "/entrypoint.sh"]
