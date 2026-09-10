@@ -67,9 +67,18 @@ jobs:
         run: |
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
-      - name: Build and push
+      - name: Build
         working-directory: go
-        run: docker compose build --push
+        run: docker compose build
+
+      - name: Push
+        working-directory: go
+        run: |
+          docker compose config --format json \
+            | jq -r '[.services[] | select(.build) | .image] | unique[]' \
+            | while IFS= read -r image; do
+                docker push "$image"
+              done
 
   build:
     name: "Build"
