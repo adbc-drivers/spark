@@ -36,7 +36,7 @@ ARG ICEBERG_NAME="iceberg-spark-runtime-${SPARK_VERSION_NO_PATCH}_${SCALA_VERSIO
 ARG ICEBERG_JAR="${ICEBERG_NAME}-${ICEBERG_VERSION}.jar"
 RUN wget -q https://repo1.maven.org/maven2/org/apache/iceberg/${ICEBERG_NAME}/${ICEBERG_VERSION}/${ICEBERG_JAR} -P ${SPARK_HOME}/jars/
 
-# Download Hadoop AWS and AWS SDK for S3 (MinIO) support
+# Download Hadoop AWS and AWS SDK for S3 (Silo) support
 # Version must match the Hadoop bundled with Spark (3.5.x ships Hadoop 3.3.4)
 ARG HADOOP_VERSION=3.3.4
 RUN wget -q https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_VERSION}/hadoop-aws-${HADOOP_VERSION}.jar -P ${SPARK_HOME}/jars/ \
