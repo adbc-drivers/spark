@@ -80,31 +80,6 @@ class Spark3ThriftQuirks(model.DriverQuirks):
             return default.replace("VARCHAR", "STRING")
         return default
 
-    def drop_table(
-        self,
-        *,
-        table_name: str,
-        schema_name: str | None = None,
-        catalog_name: str | None = None,
-        if_exists: bool = True,
-        temporary: bool = False,
-    ) -> str:
-        if temporary:
-            if catalog_name or schema_name:
-                raise ValueError("Cannot pass catalog/schema name for temporary table")
-            table_name = self.qualify_temp_table(table_name)
-            if if_exists:
-                return f"DROP TABLE IF EXISTS {table_name}"
-            return f"DROP TABLE {table_name}"
-
-        return super().drop_table(
-            table_name=table_name,
-            schema_name=schema_name,
-            catalog_name=catalog_name,
-            if_exists=if_exists,
-            temporary=temporary,
-        )
-
     def is_table_not_found(self, table_name: str, error: Exception) -> bool:
         msg = str(error)
         return (
