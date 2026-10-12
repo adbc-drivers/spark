@@ -17,6 +17,7 @@ package connectimpl
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -151,21 +152,31 @@ func newConnectClient(opts ConnectionOpts) (*connectClient, error) {
 	}, nil
 }
 
-// splitHostPort splits "host" or "host:port", defaulting the port.
+// splitHostPort splits "host" or "host:port". As in spark-connect-go, a
+// missing or zero port means the default port.
 func splitHostPort(hostPort string) (string, int, error) {
-	if !strings.Contains(hostPort, ":") {
-		return hostPort, defaultPort, nil
+	host, port := hostPort, ""
+	if strings.Contains(hostPort, ":") {
+		var err error
+		if host, port, err = net.SplitHostPort(hostPort); err != nil {
+			return "", 0, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse Spark Connect host")
+		}
 	}
-	host, port, err := net.SplitHostPort(hostPort)
-	if err != nil {
-		return "", 0, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse Spark Connect host")
+	if host == "" {
+		return "", 0, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, errors.New("missing hostname"), "parse Spark Connect host")
 	}
-	if port == "" {
-		return host, defaultPort, nil
+	portValue := 0
+	if port != "" {
+		var err error
+		if portValue, err = strconv.Atoi(port); err != nil {
+			return "", 0, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse Spark Connect port")
+		}
 	}
-	portValue, err := strconv.Atoi(port)
-	if err != nil {
-		return "", 0, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse Spark Connect port")
+	if portValue < 0 || portValue > 65535 {
+		return "", 0, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, fmt.Errorf("port %d is out of range", portValue), "parse Spark Connect port")
+	}
+	if portValue == 0 {
+		portValue = defaultPort
 	}
 	return host, portValue, nil
 }
@@ -276,7 +287,7 @@ func (c *connectClient) executeSQL(ctx context.Context, q sparkbase.QueryContext
 		mem = memory.DefaultAllocator
 	}
 	interrupt := func() { c.interruptOperation(operationID) }
-	return newResultReader(stream, cancel, interrupt, mem)
+	return newResultReader(streamCtx, stream, cancel, interrupt, mem)
 }
 
 // interruptOperation stops an operation whose results are no longer wanted.

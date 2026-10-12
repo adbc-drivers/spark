@@ -34,11 +34,15 @@ import (
 
 // resultReader streams an ExecutePlan response as Arrow record batches. It
 // holds one ArrowBatch at a time and reads the next as the consumer advances.
-// Releasing it before the end interrupts the operation and cancels the RPC.
+// Releasing it before the server ends the operation interrupts the operation
+// and cancels the RPC.
 type resultReader struct {
-	refCount  atomic.Int64
-	schema    *arrow.Schema
-	alloc     memory.Allocator
+	refCount atomic.Int64
+	schema   *arrow.Schema
+	alloc    memory.Allocator
+	// ctx is the stream's context, used to tell a cancelled read from a
+	// server error.
+	ctx       context.Context
 	stream    grpc.ServerStreamingClient[proto.ExecutePlanResponse]
 	cancel    context.CancelFunc
 	interrupt func()
@@ -48,12 +52,15 @@ type resultReader struct {
 	cur  arrow.RecordBatch
 	err  error
 	done bool
+	// finished is set when the server ends the operation, so there is
+	// nothing to interrupt. done alone may mean the reader stopped early.
+	finished bool
 }
 
 var _ array.RecordReader = (*resultReader)(nil)
 
-func newResultReader(stream grpc.ServerStreamingClient[proto.ExecutePlanResponse], cancel context.CancelFunc, interrupt func(), alloc memory.Allocator) (*resultReader, error) {
-	r := &resultReader{alloc: alloc, stream: stream, cancel: cancel, interrupt: interrupt}
+func newResultReader(ctx context.Context, stream grpc.ServerStreamingClient[proto.ExecutePlanResponse], cancel context.CancelFunc, interrupt func(), alloc memory.Allocator) (*resultReader, error) {
+	r := &resultReader{alloc: alloc, ctx: ctx, stream: stream, cancel: cancel, interrupt: interrupt}
 	r.refCount.Store(1)
 	// Read the first batch so the schema is known and an immediate failure is
 	// returned from the execute call.
@@ -77,11 +84,15 @@ func (r *resultReader) fill() {
 		resp, err := r.stream.Recv()
 		if errors.Is(err, io.EOF) {
 			r.done = true
+			r.finished = true
 			return
 		}
 		if err != nil {
 			r.err = newSparkError(err)
 			r.done = true
+			// A read that failed because the caller cancelled it or its
+			// deadline passed leaves the operation running on the server.
+			r.finished = r.ctx.Err() == nil
 			return
 		}
 		data := resp.GetArrowBatch().GetData()
@@ -140,7 +151,7 @@ func (r *resultReader) Release() {
 		r.cur = nil
 	}
 	r.releaseBuf()
-	if !r.done {
+	if !r.finished {
 		// Spark keeps running a non-reattachable operation after its RPC is
 		// cancelled, so stop it explicitly.
 		r.interrupt()

@@ -182,6 +182,28 @@ func sendAll(responses ...*proto.ExecutePlanResponse) func(*proto.ExecutePlanReq
 	}
 }
 
+// sendThenBlock sends responses and then keeps the operation running until
+// the client goes away, like a long query.
+func sendThenBlock(responses ...*proto.ExecutePlanResponse) func(*proto.ExecutePlanRequest, planStream) error {
+	return func(req *proto.ExecutePlanRequest, stream planStream) error {
+		if err := sendAll(responses...)(req, stream); err != nil {
+			return err
+		}
+		<-stream.Context().Done()
+		return stream.Context().Err()
+	}
+}
+
+// requireInterrupted asserts that the operation was interrupted exactly once.
+func requireInterrupted(t *testing.T, fake *fakeServer) {
+	t.Helper()
+	interrupts := fake.interruptRequests()
+	require.Len(t, interrupts, 1)
+	require.Equal(t, proto.InterruptRequest_INTERRUPT_TYPE_OPERATION_ID, interrupts[0].GetInterruptType())
+	require.NotEmpty(t, interrupts[0].GetOperationId())
+	require.Equal(t, fake.planRequests()[0].GetOperationId(), interrupts[0].GetOperationId())
+}
+
 // adbcError asserts that err is an ADBC error and returns it.
 func adbcError(t *testing.T, err error) adbc.Error {
 	t.Helper()
@@ -223,14 +245,7 @@ func TestExecuteQueryStreamsBatches(t *testing.T) {
 }
 
 func TestReleaseBeforeTheEndInterruptsTheOperation(t *testing.T) {
-	first := arrowBatch(t, int64Batch(1))
-	fake := &fakeServer{execute: func(_ *proto.ExecutePlanRequest, stream planStream) error {
-		if err := stream.Send(first); err != nil {
-			return err
-		}
-		<-stream.Context().Done()
-		return stream.Context().Err()
-	}}
+	fake := &fakeServer{execute: sendThenBlock(arrowBatch(t, int64Batch(1)))}
 	c := connect(t, fake, ConnectionOpts{})
 
 	rdr, _, err := c.ExecuteQuery(context.Background(), sparkbase.QueryContext{Query: "SELECT id FROM range(1000000000)"})
@@ -238,11 +253,60 @@ func TestReleaseBeforeTheEndInterruptsTheOperation(t *testing.T) {
 	require.True(t, rdr.Next())
 	rdr.Release()
 
-	interrupts := fake.interruptRequests()
-	require.Len(t, interrupts, 1)
-	require.Equal(t, proto.InterruptRequest_INTERRUPT_TYPE_OPERATION_ID, interrupts[0].GetInterruptType())
-	require.NotEmpty(t, interrupts[0].GetOperationId())
-	require.Equal(t, fake.planRequests()[0].GetOperationId(), interrupts[0].GetOperationId())
+	requireInterrupted(t, fake)
+}
+
+func TestCancelledReadInterruptsTheOperation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		timeout time.Duration // zero cancels the context instead
+		want    adbc.Status
+	}{
+		{"cancel", 0, adbc.StatusCancelled},
+		{"deadline", time.Second, adbc.StatusTimeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeServer{execute: sendThenBlock(arrowBatch(t, int64Batch(1)))}
+			c := connect(t, fake, ConnectionOpts{})
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.timeout > 0 {
+				var cancelTimeout context.CancelFunc
+				ctx, cancelTimeout = context.WithTimeout(ctx, tc.timeout)
+				defer cancelTimeout()
+			}
+			rdr, _, err := c.ExecuteQuery(ctx, sparkbase.QueryContext{Query: "SELECT id FROM range(1000000000)"})
+			require.NoError(t, err)
+			require.True(t, rdr.Next())
+			if tc.timeout == 0 {
+				cancel()
+			}
+			// The server is still streaming, so only the client stops the read.
+			require.False(t, rdr.Next())
+			require.Equal(t, tc.want, adbcError(t, rdr.Err()).Code)
+			rdr.Release()
+
+			requireInterrupted(t, fake)
+		})
+	}
+}
+
+func TestDecodeErrorInterruptsTheOperation(t *testing.T) {
+	malformed := &proto.ExecutePlanResponse{ResponseType: &proto.ExecutePlanResponse_ArrowBatch_{
+		ArrowBatch: &proto.ExecutePlanResponse_ArrowBatch{RowCount: 1, Data: []byte("not an Arrow IPC stream")},
+	}}
+	fake := &fakeServer{execute: sendThenBlock(arrowBatch(t, int64Batch(1)), malformed)}
+	c := connect(t, fake, ConnectionOpts{})
+
+	rdr, _, err := c.ExecuteQuery(context.Background(), sparkbase.QueryContext{Query: "SELECT id FROM t"})
+	require.NoError(t, err)
+	require.True(t, rdr.Next())
+	require.False(t, rdr.Next())
+	require.ErrorContains(t, rdr.Err(), "decode Arrow batch")
+	rdr.Release()
+
+	requireInterrupted(t, fake)
 }
 
 func TestReleaseCancelsTheStream(t *testing.T) {
@@ -433,6 +497,8 @@ func TestSplitHostPort(t *testing.T) {
 		port int
 	}{
 		{"localhost", "localhost", defaultPort},
+		{"localhost:", "localhost", defaultPort},
+		{"localhost:0", "localhost", defaultPort},
 		{"localhost:1234", "localhost", 1234},
 		{"[::1]:15003", "::1", 15003},
 	} {
@@ -444,6 +510,24 @@ func TestSplitHostPort(t *testing.T) {
 
 	_, _, err := splitHostPort("localhost:port")
 	require.Equal(t, adbc.StatusInvalidArgument, adbcError(t, err).Code)
+}
+
+func TestNewClientRejectsInvalidHostAndPort(t *testing.T) {
+	for _, tc := range []struct {
+		host string
+		msg  string
+	}{
+		{"", "missing hostname"},
+		{":15002", "missing hostname"},
+		{"localhost:-1", "port -1 is out of range"},
+		{"localhost:65536", "port 65536 is out of range"},
+	} {
+		client, err := NewClient(context.Background(), ConnectionOpts{Host: tc.host}, nil)
+		require.Nil(t, client, tc.host)
+		adbcErr := adbcError(t, err)
+		require.Equal(t, adbc.StatusInvalidArgument, adbcErr.Code, tc.host)
+		require.Contains(t, adbcErr.Msg, tc.msg, tc.host)
+	}
 }
 
 func TestUserIDAndClientTypeDefaults(t *testing.T) {
