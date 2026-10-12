@@ -20,19 +20,29 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/adbc-drivers/spark/go/connectclient/sparkerrors"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
+// sparkErr is shaped like a Spark Connect error: a gRPC status plus SQLSTATE.
+type sparkErr struct {
+	code     codes.Code
+	sqlState string
+}
+
+func (e sparkErr) Error() string { return "boom" }
+
+func (e sparkErr) GRPCStatus() *status.Status { return status.New(e.code, "boom") }
+
+func (e sparkErr) SQLState() string { return e.sqlState }
+
 func TestErrToAdbcErrUsesSparkSQLState(t *testing.T) {
-	sparkErr := &sparkerrors.SparkError{
-		SqlState: "42P01",
-		Message:  "table not found",
-	}
-	err := ErrToAdbcErr(adbc.StatusIO, sparkerrors.WithType(sparkErr, sparkerrors.ExecutionError), "execute query")
+	err := ErrToAdbcErr(adbc.StatusIO, fmt.Errorf("execute: %w", sparkErr{
+		code:     codes.Internal,
+		sqlState: "42P01",
+	}), "execute query")
 
 	var adbcErr adbc.Error
 	require.ErrorAs(t, err, &adbcErr)
@@ -60,10 +70,9 @@ func TestErrToAdbcErrMapsGRPCStatus(t *testing.T) {
 		{codes.Unknown, adbc.StatusInvalidState},
 	} {
 		t.Run(tc.code.String(), func(t *testing.T) {
-			rpcErr := status.Error(tc.code, "boom")
 			for _, err := range []error{
-				fmt.Errorf("execute: %w", rpcErr),
-				sparkerrors.WithType(sparkerrors.FromRPCError(rpcErr), sparkerrors.ExecutionError),
+				fmt.Errorf("execute: %w", status.Error(tc.code, "boom")),
+				sparkErr{code: tc.code},
 			} {
 				var adbcErr adbc.Error
 				require.ErrorAs(t, ErrToAdbcErr(adbc.StatusInvalidState, err, "execute query"), &adbcErr)
@@ -74,14 +83,10 @@ func TestErrToAdbcErrMapsGRPCStatus(t *testing.T) {
 }
 
 func TestErrToAdbcErrPrefersSQLStateOverGRPCStatus(t *testing.T) {
-	sparkErr := &sparkerrors.SparkError{
-		Code:     codes.InvalidArgument,
-		SqlState: "42P01",
-		Message:  "table not found",
-	}
+	err := sparkErr{code: codes.InvalidArgument, sqlState: "42P01"}
 
 	var adbcErr adbc.Error
-	require.ErrorAs(t, ErrToAdbcErr(adbc.StatusIO, sparkErr, "execute query"), &adbcErr)
+	require.ErrorAs(t, ErrToAdbcErr(adbc.StatusIO, err, "execute query"), &adbcErr)
 	require.Equal(t, adbc.StatusNotFound, adbcErr.Code)
 }
 

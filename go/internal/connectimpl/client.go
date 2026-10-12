@@ -16,18 +16,27 @@ package connectimpl
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
 	"net"
+	"os"
+	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
-	"github.com/adbc-drivers/spark/go/connectclient/client/channel"
-	sparksql "github.com/adbc-drivers/spark/go/connectclient/sql"
+	proto "github.com/adbc-drivers/spark/go/internal/generated"
 	"github.com/adbc-drivers/spark/go/internal/sparkbase"
 	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/google/uuid"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 type AuthType uint8
@@ -44,7 +53,7 @@ type ConnectionOpts struct {
 	AuthType AuthType // not used
 	Username string
 	// Token is the OAuth2 bearer token used when AuthType is AuthTypeToken.
-	// The spark-connect-go client enables TLS when a token is present.
+	// TLS is enabled when a token is present.
 	Token string
 
 	Tls                       bool
@@ -54,8 +63,29 @@ type ConnectionOpts struct {
 	ReleaseSession            bool
 }
 
+const (
+	defaultPort = 15002
+	// gRPC's default limit is 4 MiB, but Spark writes at least one row per
+	// Arrow batch, so a single wide row can exceed it. PySpark and the Scala
+	// client use 128 MiB.
+	maxRecvMsgSize = 128 * 1024 * 1024
+)
+
+var (
+	// releaseSessionTimeout bounds Close so an unresponsive server can't hang it.
+	releaseSessionTimeout = 5 * time.Second
+	// interruptTimeout bounds the Interrupt sent when a reader is released early.
+	interruptTimeout = 5 * time.Second
+)
+
 type connectClient struct {
-	session sparksql.SparkSession
+	conn           *grpc.ClientConn
+	service        proto.SparkConnectServiceClient
+	sessionID      string
+	userContext    *proto.UserContext
+	clientType     string
+	headers        metadata.MD
+	releaseSession bool
 }
 
 func (c *connectClient) BackendName() string {
@@ -64,104 +94,224 @@ func (c *connectClient) BackendName() string {
 
 // NewClient creates a SparkClient backed by a Spark Connect gRPC session.
 func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[string]string) (sparkbase.SparkClient, error) {
-	params, err := channelParametersFromConnectionOpts(opts)
+	c, err := newConnectClient(opts)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range sessionConfig {
+		if err := c.setConfig(ctx, k, v); err != nil {
+			_ = c.Close(ctx)
+			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "set Spark config %s", k)
+		}
+	}
+	return c, nil
+}
+
+func newConnectClient(opts ConnectionOpts) (*connectClient, error) {
+	host, port, err := splitHostPort(opts.Host)
 	if err != nil {
 		return nil, err
 	}
 
-	channelBuilder, err := channel.NewBuilder(params)
+	dialOpts := []grpc.DialOption{
+		grpc.WithAuthority(host),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxRecvMsgSize)),
+	}
+	if opts.Tls || opts.Token != "" {
+		tlsConfig := &tls.Config{InsecureSkipVerify: !opts.ValidateServerCertificate}
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+		if opts.Token != "" {
+			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(bearerToken(opts.Token)))
+		}
+	} else {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
+	conn, err := grpc.NewClient(net.JoinHostPort(host, strconv.Itoa(port)), dialOpts...)
 	if err != nil {
 		return nil, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "build Spark Connect channel")
 	}
 
-	session, err := sparksql.NewSessionBuilder().
-		WithChannelBuilder(channelBuilder).
-		WithReleaseSession(opts.ReleaseSession).
-		Build(ctx)
-	if err != nil {
-		return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "build Spark Connect session")
+	sessionID := opts.SessionID
+	if sessionID == "" {
+		sessionID = uuid.NewString()
 	}
-
-	cfg := session.Config()
-	for k, v := range sessionConfig {
-		if err := cfg.Set(ctx, k, v); err != nil {
-			_ = session.Stop(ctx)
-			return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "set Spark config %s", k)
-		}
-	}
-
-	return &connectClient{session: session}, nil
-}
-
-func channelParametersFromConnectionOpts(opts ConnectionOpts) (channel.ConnectionParameters, error) {
-	params := channel.ConnectionParameters{
-		Host:                      opts.Host,
-		Token:                     opts.Token,
-		User:                      opts.Username,
-		UseSSL:                    opts.Tls,
-		ValidateServerCertificate: &opts.ValidateServerCertificate,
-		SessionID:                 opts.SessionID,
-	}
-
-	if strings.Contains(opts.Host, ":") {
-		host, port, err := net.SplitHostPort(opts.Host)
-		if err != nil {
-			return params, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse Spark Connect host")
-		}
-		params.Host = host
-		if port != "" {
-			portValue, err := strconv.Atoi(port)
-			if err != nil {
-				return params, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse Spark Connect port")
-			}
-			params.Port = portValue
-		}
-	}
-
+	headers := metadata.MD{}
 	if opts.AwsProxyAuth != "" {
-		params.Headers = map[string]string{
-			"x-aws-proxy-auth": opts.AwsProxyAuth,
-		}
+		headers.Set("x-aws-proxy-auth", opts.AwsProxyAuth)
 	}
-
-	return params, nil
+	return &connectClient{
+		conn:           conn,
+		service:        proto.NewSparkConnectServiceClient(conn),
+		sessionID:      sessionID,
+		userContext:    &proto.UserContext{UserId: userID(opts.Username)},
+		clientType:     clientType(),
+		headers:        headers,
+		releaseSession: opts.ReleaseSession,
+	}, nil
 }
 
-func (c *connectClient) Close(ctx context.Context) error {
-	if c.session == nil {
-		return nil
+// splitHostPort splits "host" or "host:port", defaulting the port.
+func splitHostPort(hostPort string) (string, int, error) {
+	if !strings.Contains(hostPort, ":") {
+		return hostPort, defaultPort, nil
 	}
-	err := c.session.Stop(ctx)
-	c.session = nil
+	host, port, err := net.SplitHostPort(hostPort)
 	if err != nil {
-		return sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "close Spark Connect session")
+		return "", 0, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse Spark Connect host")
+	}
+	if port == "" {
+		return host, defaultPort, nil
+	}
+	portValue, err := strconv.Atoi(port)
+	if err != nil {
+		return "", 0, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse Spark Connect port")
+	}
+	return host, portValue, nil
+}
+
+// bearerToken sends a token on every RPC. gRPC refuses to send it over a
+// connection without transport security.
+type bearerToken string
+
+func (t bearerToken) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
+	return map[string]string{"authorization": "Bearer " + string(t)}, nil
+}
+
+func (bearerToken) RequireTransportSecurity() bool { return true }
+
+// userID defaults to $USER, as spark-connect-go did. Spark scopes server
+// sessions by user and session ID.
+func userID(username string) string {
+	if username != "" {
+		return username
+	}
+	if user := os.Getenv("USER"); user != "" {
+		return user
+	}
+	return "na"
+}
+
+// clientType identifies the driver, with spark-connect-go's os/go suffix.
+func clientType() string {
+	agent := os.Getenv("SPARK_CONNECT_USER_AGENT")
+	if agent == "" {
+		agent = "adbc-driver-spark"
+	}
+	return fmt.Sprintf("%s os/%s go/%s", agent, runtime.GOOS, runtime.Version())
+}
+
+func (c *connectClient) outgoing(ctx context.Context) context.Context {
+	if len(c.headers) == 0 {
+		return ctx
+	}
+	return metadata.NewOutgoingContext(ctx, c.headers)
+}
+
+func (c *connectClient) setConfig(ctx context.Context, key, value string) error {
+	_, err := c.service.Config(c.outgoing(ctx), &proto.ConfigRequest{
+		SessionId:   c.sessionID,
+		UserContext: c.userContext,
+		ClientType:  &c.clientType,
+		Operation: &proto.ConfigRequest_Operation{
+			OpType: &proto.ConfigRequest_Operation_Set{
+				Set: &proto.ConfigRequest_Set{
+					Pairs: []*proto.KeyValue{{Key: key, Value: &value}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return newSparkError(err)
 	}
 	return nil
 }
 
+func (c *connectClient) Close(ctx context.Context) error {
+	if c.conn == nil {
+		return nil
+	}
+	var releaseErr error
+	if c.releaseSession {
+		releaseCtx, cancel := context.WithTimeout(c.outgoing(ctx), releaseSessionTimeout)
+		_, releaseErr = c.service.ReleaseSession(releaseCtx, &proto.ReleaseSessionRequest{
+			SessionId:   c.sessionID,
+			UserContext: c.userContext,
+			ClientType:  &c.clientType,
+		})
+		cancel()
+	}
+	closeErr := c.conn.Close()
+	c.conn = nil
+	if releaseErr != nil {
+		return sparkbase.ErrToAdbcErr(adbc.StatusIO, newSparkError(releaseErr), "close Spark Connect session")
+	}
+	if closeErr != nil {
+		return sparkbase.ErrToAdbcErr(adbc.StatusIO, closeErr, "close Spark Connect channel")
+	}
+	return nil
+}
+
+// executeSQL runs a query as a single ExecutePlan with a SQL relation root.
+func (c *connectClient) executeSQL(ctx context.Context, q sparkbase.QueryContext) (*resultReader, error) {
+	plan := &proto.Plan{OpType: &proto.Plan_Root{Root: &proto.Relation{
+		RelType: &proto.Relation_Sql{Sql: &proto.SQL{Query: q.Query}},
+	}}}
+	operationID := uuid.NewString()
+	// The stream outlives this call; the reader cancels it on Release.
+	streamCtx, cancel := context.WithCancel(c.outgoing(ctx))
+	stream, err := c.service.ExecutePlan(streamCtx, &proto.ExecutePlanRequest{
+		SessionId:   c.sessionID,
+		UserContext: c.userContext,
+		ClientType:  &c.clientType,
+		OperationId: &operationID,
+		Plan:        plan,
+	})
+	if err != nil {
+		cancel()
+		return nil, newSparkError(err)
+	}
+	mem := q.Mem
+	if mem == nil {
+		mem = memory.DefaultAllocator
+	}
+	interrupt := func() { c.interruptOperation(operationID) }
+	return newResultReader(stream, cancel, interrupt, mem)
+}
+
+// interruptOperation stops an operation whose results are no longer wanted.
+// Cancelling the RPC alone leaves the job running on the server.
+func (c *connectClient) interruptOperation(operationID string) {
+	ctx, cancel := context.WithTimeout(c.outgoing(context.Background()), interruptTimeout)
+	defer cancel()
+	_, _ = c.service.Interrupt(ctx, &proto.InterruptRequest{
+		SessionId:     c.sessionID,
+		UserContext:   c.userContext,
+		ClientType:    &c.clientType,
+		InterruptType: proto.InterruptRequest_INTERRUPT_TYPE_OPERATION_ID,
+		Interrupt:     &proto.InterruptRequest_OperationId{OperationId: operationID},
+	})
+}
+
 func (c *connectClient) ExecuteQuery(ctx context.Context, q sparkbase.QueryContext) (array.RecordReader, int64, error) {
-	df, err := c.session.Sql(ctx, q.Query)
+	rdr, err := c.executeSQL(ctx, q)
 	if err != nil {
 		return nil, -1, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute query")
 	}
-
-	tbl, err := df.ToArrow(ctx)
-	if err != nil {
-		return nil, -1, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "collect Arrow result")
-	}
-
-	rr := array.NewTableReader(*tbl, (*tbl).NumRows())
-	return rr, (*tbl).NumRows(), nil
+	// Rows are streamed, so the count isn't known up front.
+	return rdr, -1, nil
 }
 
 func (c *connectClient) ExecuteUpdate(ctx context.Context, q sparkbase.QueryContext) (int64, error) {
-	// Sql() runs commands eagerly against the Spark Connect server, so the
-	// returned DataFrame can be discarded for pure-command queries (DDL, INSERT,
-	// UPDATE, DELETE). Spark Connect does not surface a modified-row count.
-	if _, err := c.session.Sql(ctx, q.Query); err != nil {
+	rdr, err := c.executeSQL(ctx, q)
+	if err != nil {
 		return -1, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute update")
 	}
-	return -1, nil
+	defer rdr.Release()
+	for rdr.Next() {
+	}
+	// Spark Connect does not surface a modified-row count.
+	return -1, rdr.Err()
 }
 
 func (c *connectClient) VendorVersion(ctx context.Context, mem memory.Allocator) (string, error) {
@@ -199,7 +349,7 @@ func (c *connectClient) GetTablesForDBSchema(ctx context.Context, catalog string
 func (c *connectClient) GetOption(_ context.Context, key string) (string, bool, error) {
 	switch key {
 	case sparkutil.OptionConnectSessionId:
-		return c.session.GetSessionId(), true, nil
+		return c.sessionID, true, nil
 	default:
 		return "", false, nil
 	}
