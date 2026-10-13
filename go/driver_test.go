@@ -405,7 +405,7 @@ func (suite *DriverTests) TestSelect() {
 					Nullable: true,
 				},
 			}, nil),
-			expected: `[{"time": "1971-01-02 01:02:03.456789"}]`,
+			expected: `[{"time": "1971-01-02 01:02:03.456789Z"}]`,
 		},
 		{
 			name:  "timestamptz",
@@ -420,7 +420,7 @@ func (suite *DriverTests) TestSelect() {
 					Nullable: true,
 				},
 			}, nil),
-			expected: `[{"time": "1971-01-02 01:02:03.456789"}]`,
+			expected: `[{"time": "1971-01-02 01:02:03.456789Z"}]`,
 		},
 	} {
 		suite.Run(testCase.name, func() {
