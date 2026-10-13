@@ -43,10 +43,8 @@ To use the driver, provide a connection string as the `uri` option.
 from adbc_driver_manager import dbapi
 
 dbapi.connect(
-  driver="spark",
-  db_kwargs={
-      "uri": "spark://localhost:10000?auth_type=plain&api=thrift%2Bbinary"
-  }
+    driver="spark",
+    db_kwargs={"uri": "spark://localhost:10000?auth_type=plain&api=thrift%2Bbinary"},
 )
 ```
 

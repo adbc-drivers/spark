@@ -349,7 +349,6 @@ def get_quirks(combined_version: str) -> model.DriverQuirks:
     elif vendor in ("spark4iceberg",):
         if version == "4.1-connect":
             return Spark41ConnectIcebergQuirks()
-    elif vendor in ("emr",):
-        if version in ("8.0-connect"):
-            return SparkEmr8ConnectQuirks()
+    elif vendor in ("emr",) and version in ("8.0-connect"):
+        return SparkEmr8ConnectQuirks()
     raise ValueError(f"unsupported Spark {vendor} {version}")

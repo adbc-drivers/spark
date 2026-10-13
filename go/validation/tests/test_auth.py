@@ -141,26 +141,30 @@ def test_auth(subtests, driver, driver_path, connect_uri):
             ):
                 # this seems to succeed, presumably because the local docker
                 # container doesn't actually validate things?
-                with adbc_driver_manager.dbapi.connect(
-                    driver=driver_path,
-                    uri=new_uri,
-                    autocommit=True,
-                    db_kwargs=kwargs,
-                ) as conn:
-                    with conn.cursor() as cursor:
-                        cursor.execute("SELECT 1")
+                with (
+                    adbc_driver_manager.dbapi.connect(
+                        driver=driver_path,
+                        uri=new_uri,
+                        autocommit=True,
+                        db_kwargs=kwargs,
+                    ) as conn,
+                    conn.cursor() as cursor,
+                ):
+                    cursor.execute("SELECT 1")
 
                 continue
 
-            with pytest.raises(adbc_driver_manager.Error, match=error_message):
-                with adbc_driver_manager.dbapi.connect(
+            with (
+                pytest.raises(adbc_driver_manager.Error, match=error_message),
+                adbc_driver_manager.dbapi.connect(
                     driver=driver_path,
                     uri=new_uri,
                     autocommit=True,
                     db_kwargs=kwargs,
-                ) as conn:
-                    with conn.cursor() as cursor:
-                        cursor.execute("SELECT 1")
+                ) as conn,
+                conn.cursor() as cursor,
+            ):
+                cursor.execute("SELECT 1")
 
 
 def test_tls(subtests, driver, driver_path, connect_tls_uri):
@@ -180,18 +184,20 @@ def test_tls(subtests, driver, driver_path, connect_tls_uri):
     else:
         raise NotImplementedError(driver.short_version)
 
-    with adbc_driver_manager.dbapi.connect(
-        driver=driver_path,
-        uri=uri,
-        autocommit=True,
-        db_kwargs={
-            "username": "spark",
-            "password": "spark",
-        },
-    ) as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT 1")
-            assert cursor.fetchall() == [(1,)]
+    with (
+        adbc_driver_manager.dbapi.connect(
+            driver=driver_path,
+            uri=uri,
+            autocommit=True,
+            db_kwargs={
+                "username": "spark",
+                "password": "spark",
+            },
+        ) as conn,
+        conn.cursor() as cursor,
+    ):
+        cursor.execute("SELECT 1")
+        assert cursor.fetchall() == [(1,)]
 
 
 def test_tls_verify(subtests, driver, driver_path, connect_tls_uri):
@@ -212,10 +218,11 @@ def test_tls_verify(subtests, driver, driver_path, connect_tls_uri):
 
     # No point testing EMR - the certificate is valid
     if not driver.short_version.startswith("emr-"):
-        with pytest.raises(
-            adbc_driver_manager.Error, match="failed to verify certificate"
-        ):
-            with adbc_driver_manager.dbapi.connect(
+        with (
+            pytest.raises(
+                adbc_driver_manager.Error, match="failed to verify certificate"
+            ),
+            adbc_driver_manager.dbapi.connect(
                 driver=driver_path,
                 uri=uri,
                 autocommit=True,
@@ -223,6 +230,7 @@ def test_tls_verify(subtests, driver, driver_path, connect_tls_uri):
                     "username": "spark",
                     "password": "spark",
                 },
-            ) as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute("SELECT 1")
+            ) as conn,
+            conn.cursor() as cursor,
+        ):
+            cursor.execute("SELECT 1")

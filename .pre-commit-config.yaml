@@ -24,6 +24,8 @@ repos:
     - id: ruff-check
       args: ["--fix"]
     - id: ruff-format
+      # Ruff treats this .markdown file (shell and JSON examples only) as Python.
+      exclude: ^go/validation/README\.markdown$
 
 - repo: https://github.com/codespell-project/codespell
   rev: 57b21406f092110c18776e39b0bda50d37c945c8  # frozen: v2.4.3

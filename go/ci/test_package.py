@@ -17,12 +17,14 @@ import pytest
 
 
 def test_package() -> None:
-    with pytest.raises(
-        adbc_driver_manager.dbapi.OperationalError,
-        match="Could not open binary thrift client",
-    ):
-        with adbc_driver_manager.dbapi.connect(
+    with (
+        pytest.raises(
+            adbc_driver_manager.dbapi.OperationalError,
+            match="Could not open binary thrift client",
+        ),
+        adbc_driver_manager.dbapi.connect(
             uri="spark://localhost:20000?auth_type=plain", autocommit=True
-        ) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT 1")
+        ) as conn,
+        conn.cursor() as cursor,
+    ):
+        cursor.execute("SELECT 1")
