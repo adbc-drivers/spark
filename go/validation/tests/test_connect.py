@@ -61,3 +61,29 @@ def test_session_id(driver, conn, db_kwargs, driver_path):
             cur.execute("SELECT 1")
             result = cur.fetchall()
             assert result == [(1,)]
+
+
+def test_large_value(driver, conn):
+    # Spark sends at least one row per Arrow batch, so this row is a single
+    # message over gRPC's default 4 MiB limit.
+    size = 6 * 1024 * 1024
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT repeat('x', {size}) AS s")
+        assert cur.fetchall() == [("x" * size,)]
+
+
+def test_many_batches(driver, conn):
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM range(0, 10000, 1, 10)")
+        batches = list(cur.fetch_record_batch())
+    assert len(batches) > 1
+    assert [i for b in batches for i in b.column(0).to_pylist()] == list(range(10000))
+
+
+def test_query_error(driver, conn):
+    with conn.cursor() as cur:
+        with pytest.raises(adbc_driver_manager.Error) as excinfo:
+            cur.execute("SELECT * FROM table_that_does_not_exist")
+            cur.fetchall()
+    assert excinfo.value.status_code == adbc_driver_manager.AdbcStatusCode.NOT_FOUND
+    assert excinfo.value.sqlstate == "42P01"

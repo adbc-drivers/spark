@@ -70,9 +70,6 @@ const (
 	// Arrow batch, so a single wide row can exceed it. PySpark and the Scala
 	// client use 128 MiB.
 	maxRecvMsgSize = 128 * 1024 * 1024
-)
-
-var (
 	// releaseSessionTimeout bounds Close so an unresponsive server can't hang it.
 	releaseSessionTimeout = 5 * time.Second
 	// interruptTimeout bounds the Interrupt sent when a reader is released early.
