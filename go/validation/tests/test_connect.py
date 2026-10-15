@@ -81,9 +81,8 @@ def test_many_batches(driver, conn):
 
 
 def test_query_error(driver, conn):
-    with conn.cursor() as cur:
-        with pytest.raises(adbc_driver_manager.Error) as excinfo:
-            cur.execute("SELECT * FROM table_that_does_not_exist")
-            cur.fetchall()
+    with conn.cursor() as cur, pytest.raises(adbc_driver_manager.Error) as excinfo:
+        cur.execute("SELECT * FROM table_that_does_not_exist")
+        cur.fetchall()
     assert excinfo.value.status_code == adbc_driver_manager.AdbcStatusCode.NOT_FOUND
     assert excinfo.value.sqlstate == "42P01"
