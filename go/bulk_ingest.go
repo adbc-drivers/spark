@@ -217,7 +217,12 @@ func (bi *bulkIngestImpl) createTableStatement(schema *arrow.Schema, ifTableExis
 
 			b.WriteString(sparkbase.QuoteIdentifier(field.Name))
 
-			switch field.Type.ID() {
+			dataType := field.Type
+			if dictType, ok := dataType.(*arrow.DictionaryType); ok {
+				// Parquet serializes dictionary arrays using their value type.
+				dataType = dictType.ValueType
+			}
+			switch dataType.ID() {
 			case arrow.BINARY, arrow.LARGE_BINARY, arrow.FIXED_SIZE_BINARY, arrow.BINARY_VIEW:
 				b.WriteString(" BINARY")
 			case arrow.BOOL:
@@ -225,7 +230,7 @@ func (bi *bulkIngestImpl) createTableStatement(schema *arrow.Schema, ifTableExis
 			case arrow.DATE32:
 				b.WriteString(" DATE")
 			case arrow.DECIMAL128, arrow.DECIMAL256:
-				dec := field.Type.(arrow.DecimalType)
+				dec := dataType.(arrow.DecimalType)
 				fmt.Fprintf(&b, "DECIMAL(%d, %d)", dec.GetPrecision(), dec.GetScale())
 			case arrow.FLOAT32:
 				b.WriteString(" REAL")
@@ -240,7 +245,7 @@ func (bi *bulkIngestImpl) createTableStatement(schema *arrow.Schema, ifTableExis
 			case arrow.STRING, arrow.LARGE_STRING, arrow.STRING_VIEW:
 				b.WriteString(" STRING")
 			case arrow.TIMESTAMP:
-				ts := field.Type.(*arrow.TimestampType)
+				ts := dataType.(*arrow.TimestampType)
 				if ts.TimeZone != "" {
 					b.WriteString(" TIMESTAMP")
 				} else {
