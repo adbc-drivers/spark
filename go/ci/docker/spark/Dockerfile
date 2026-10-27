@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG SPARK_VERSION=3.5.8
+ARG SPARK_VERSION=3.5.9
 FROM apache/spark:${SPARK_VERSION} AS base
 
 ARG SPARK_VERSION_NO_PATCH=3.5
