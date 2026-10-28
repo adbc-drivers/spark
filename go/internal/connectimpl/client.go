@@ -202,11 +202,7 @@ func userID(username string) string {
 
 // clientType identifies the driver, with spark-connect-go's os/go suffix.
 func clientType() string {
-	agent := os.Getenv("SPARK_CONNECT_USER_AGENT")
-	if agent == "" {
-		agent = "adbc-driver-spark"
-	}
-	return fmt.Sprintf("%s os/%s go/%s", agent, runtime.GOOS, runtime.Version())
+	return fmt.Sprintf("adbc-driver-spark os/%s go/%s", runtime.GOOS, runtime.Version())
 }
 
 func (c *connectClient) outgoing(ctx context.Context) context.Context {

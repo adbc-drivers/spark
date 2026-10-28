@@ -78,6 +78,5 @@ func TestUserIDAndClientTypeDefaults(t *testing.T) {
 	t.Setenv("USER", "")
 	require.Equal(t, "na", userID(""))
 
-	t.Setenv("SPARK_CONNECT_USER_AGENT", "my-app")
-	require.True(t, strings.HasPrefix(clientType(), "my-app os/"), clientType())
+	require.True(t, strings.HasPrefix(clientType(), "adbc-driver-spark os/"), clientType())
 }
