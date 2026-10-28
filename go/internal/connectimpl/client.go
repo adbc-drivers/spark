@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	proto "github.com/adbc-drivers/spark/go/internal/generated"
@@ -33,7 +34,6 @@ import (
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -132,7 +132,7 @@ func newConnectClient(opts ConnectionOpts) (*connectClient, error) {
 
 	sessionID := opts.SessionID
 	if sessionID == "" {
-		sessionID = uuid.NewString()
+		sessionID = uuid.New().String()
 	}
 	headers := metadata.MD{}
 	if opts.AwsProxyAuth != "" {
@@ -265,7 +265,7 @@ func (c *connectClient) executeSQL(ctx context.Context, q sparkbase.QueryContext
 	plan := &proto.Plan{OpType: &proto.Plan_Root{Root: &proto.Relation{
 		RelType: &proto.Relation_Sql{Sql: &proto.SQL{Query: q.Query}},
 	}}}
-	operationID := uuid.NewString()
+	operationID := uuid.New().String()
 	// The stream outlives this call; the reader cancels it on Release.
 	streamCtx, cancel := context.WithCancel(c.outgoing(ctx))
 	stream, err := c.service.ExecutePlan(streamCtx, &proto.ExecutePlanRequest{
