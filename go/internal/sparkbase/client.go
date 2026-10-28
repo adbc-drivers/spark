@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"regexp"
 	"strings"
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
@@ -153,15 +154,51 @@ func executeMetadataQuery(c SparkClient, ctx context.Context, sql string) (array
 	return rr, nil
 }
 
+// nameFilter turns an ADBC name pattern (SQL LIKE syntax) into a LIKE clause
+// for Spark's SHOW commands, and a regexp that matches names on the client.
+// A nil or empty pattern matches every name.
+//
+// SHOW ... LIKE takes Spark's own syntax: a regex in which '*' matches any
+// characters and '|' separates alternatives, matched ignoring the case of
+// ASCII letters only. So only a pattern of ASCII letters, digits, '%', and
+// '_' gets a LIKE clause, which needs no quoting; any other pattern is
+// matched only on the client. Names in Spark's session catalog can only
+// contain those characters anyway.
+func nameFilter(pattern *string) (string, *regexp.Regexp, error) {
+	if pattern == nil || *pattern == "" {
+		return "", nil, nil
+	}
+	match, err := driverbase.PatternToRegexp(pattern)
+	if err != nil {
+		return "", nil, err
+	}
+	var like strings.Builder
+	for _, r := range *pattern {
+		switch {
+		case r == '%':
+			like.WriteByte('*')
+		case r == '_':
+			like.WriteByte('.')
+		case 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z', '0' <= r && r <= '9':
+			like.WriteRune(r)
+		default:
+			return "", match, nil
+		}
+	}
+	return " LIKE " + QuoteString(like.String()), match, nil
+}
+
+func matchesName(match *regexp.Regexp, name string) bool {
+	return match == nil || match.MatchString(name)
+}
+
 func DefaultGetCatalogsImpl(c SparkClient, ctx context.Context, catalogFilter *string) ([]string, error) {
-	var query strings.Builder
-	query.WriteString("SHOW CATALOGS")
-	if catalogFilter != nil && *catalogFilter != "" {
-		query.WriteString(" LIKE ")
-		query.WriteString(QuoteString(*catalogFilter))
+	like, pattern, err := nameFilter(catalogFilter)
+	if err != nil {
+		return nil, err
 	}
 
-	rr, err := executeMetadataQuery(c, ctx, query.String())
+	rr, err := executeMetadataQuery(c, ctx, "SHOW CATALOGS"+like)
 	if err != nil {
 		return nil, err
 	}
@@ -178,22 +215,21 @@ func DefaultGetCatalogsImpl(c SparkClient, ctx context.Context, catalogFilter *s
 			}
 		}
 		for i := range int(rec.NumRows()) {
-			catalogs = append(catalogs, strings.Clone(col.Value(i)))
+			if name := col.Value(i); matchesName(pattern, name) {
+				catalogs = append(catalogs, strings.Clone(name))
+			}
 		}
 	}
 	return catalogs, nil
 }
 
 func DefaultGetDBSchemasForCatalogImpl(c SparkClient, ctx context.Context, catalog string, schemaFilter *string) ([]string, error) {
-	var query strings.Builder
-	query.WriteString("SHOW SCHEMAS IN ")
-	query.WriteString(QuoteIdentifier(catalog))
-	if schemaFilter != nil && *schemaFilter != "" {
-		query.WriteString(" LIKE ")
-		query.WriteString(QuoteString(*schemaFilter))
+	like, pattern, err := nameFilter(schemaFilter)
+	if err != nil {
+		return nil, err
 	}
 
-	rr, err := executeMetadataQuery(c, ctx, query.String())
+	rr, err := executeMetadataQuery(c, ctx, "SHOW SCHEMAS IN "+QuoteIdentifier(catalog)+like)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +246,9 @@ func DefaultGetDBSchemasForCatalogImpl(c SparkClient, ctx context.Context, catal
 			}
 		}
 		for i := range int(rec.NumRows()) {
-			schemas = append(schemas, strings.Clone(col.Value(i)))
+			if name := col.Value(i); matchesName(pattern, name) {
+				schemas = append(schemas, strings.Clone(name))
+			}
 		}
 	}
 	return schemas, nil
@@ -224,17 +262,13 @@ func DefaultGetTablesForDBSchemaImpl(c SparkClient, ctx context.Context, catalog
 }
 
 func defaultGetTablesOnly(c SparkClient, ctx context.Context, catalog string, schema string, tableFilter *string) ([]driverbase.TableInfo, error) {
-	var query strings.Builder
-	query.WriteString("SHOW TABLES IN ")
-	query.WriteString(QuoteIdentifier(catalog))
-	query.WriteString(".")
-	query.WriteString(QuoteIdentifier(schema))
-	if tableFilter != nil && *tableFilter != "" {
-		query.WriteString(" LIKE ")
-		query.WriteString(QuoteString(*tableFilter))
+	like, pattern, err := nameFilter(tableFilter)
+	if err != nil {
+		return nil, err
 	}
 
-	rr, err := executeMetadataQuery(c, ctx, query.String())
+	query := "SHOW TABLES IN " + QuoteIdentifier(catalog) + "." + QuoteIdentifier(schema) + like
+	rr, err := executeMetadataQuery(c, ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -251,6 +285,9 @@ func defaultGetTablesOnly(c SparkClient, ctx context.Context, catalog string, sc
 			}
 		}
 		for i := range int(rec.NumRows()) {
+			if !matchesName(pattern, nameCol.Value(i)) {
+				continue
+			}
 			tableName := strings.Clone(nameCol.Value(i))
 			tables = append(tables, driverbase.TableInfo{
 				TableName:    tableName,
