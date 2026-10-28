@@ -88,7 +88,7 @@ func (r *resultReader) fill() {
 			return
 		}
 		if err != nil {
-			r.err = newSparkError(err)
+			r.err = NewSparkError(err)
 			r.done = true
 			// A read that failed because the caller cancelled it or its
 			// deadline passed leaves the operation running on the server.

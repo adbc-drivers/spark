@@ -22,20 +22,20 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// sparkError is a failed Spark Connect RPC. It keeps the gRPC status so the
+// SparkError is a failed Spark Connect RPC. It keeps the gRPC status so the
 // code can be mapped, and the SQLSTATE that Spark attaches in an ErrorInfo.
-type sparkError struct {
+type SparkError struct {
 	status   *status.Status
 	sqlState string
 }
 
-// newSparkError wraps a gRPC error; other errors are returned unchanged.
-func newSparkError(err error) error {
+// NewSparkError wraps a gRPC error; other errors are returned unchanged.
+func NewSparkError(err error) error {
 	st, ok := status.FromError(err)
 	if !ok {
 		return err
 	}
-	e := &sparkError{status: st}
+	e := &SparkError{status: st}
 	for _, detail := range st.Details() {
 		if info, ok := detail.(*errdetails.ErrorInfo); ok {
 			e.sqlState = info.GetMetadata()["sqlState"]
@@ -44,7 +44,7 @@ func newSparkError(err error) error {
 	return e
 }
 
-func (e *sparkError) Error() string {
+func (e *SparkError) Error() string {
 	// Spark's own errors already start with their error class.
 	if e.status.Code() == codes.Internal {
 		return e.status.Message()
@@ -52,6 +52,6 @@ func (e *sparkError) Error() string {
 	return fmt.Sprintf("[%s] %s", e.status.Code(), e.status.Message())
 }
 
-func (e *sparkError) GRPCStatus() *status.Status { return e.status }
+func (e *SparkError) GRPCStatus() *status.Status { return e.status }
 
-func (e *sparkError) SQLState() string { return e.sqlState }
+func (e *SparkError) SQLState() string { return e.sqlState }

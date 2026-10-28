@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package sparkbase
+package sparkbase_test
 
 import (
 	"context"
@@ -20,29 +20,30 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/adbc-drivers/spark/go/internal/connectimpl"
+	"github.com/adbc-drivers/spark/go/internal/sparkbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-// sparkErr is shaped like a Spark Connect error: a gRPC status plus SQLSTATE.
-type sparkErr struct {
-	code     codes.Code
-	sqlState string
+// sparkError returns the Spark Connect client's error for a failed RPC, with
+// the SQLSTATE in an ErrorInfo as Spark sends it.
+func sparkError(t *testing.T, code codes.Code, sqlState string) error {
+	t.Helper()
+	st := status.New(code, "boom")
+	if sqlState != "" {
+		var err error
+		st, err = st.WithDetails(&errdetails.ErrorInfo{Metadata: map[string]string{"sqlState": sqlState}})
+		require.NoError(t, err)
+	}
+	return connectimpl.NewSparkError(st.Err())
 }
 
-func (e sparkErr) Error() string { return "boom" }
-
-func (e sparkErr) GRPCStatus() *status.Status { return status.New(e.code, "boom") }
-
-func (e sparkErr) SQLState() string { return e.sqlState }
-
 func TestErrToAdbcErrUsesSparkSQLState(t *testing.T) {
-	err := ErrToAdbcErr(adbc.StatusIO, fmt.Errorf("execute: %w", sparkErr{
-		code:     codes.Internal,
-		sqlState: "42P01",
-	}), "execute query")
+	err := sparkbase.ErrToAdbcErr(adbc.StatusIO, fmt.Errorf("execute: %w", sparkError(t, codes.Internal, "42P01")), "execute query")
 
 	var adbcErr adbc.Error
 	require.ErrorAs(t, err, &adbcErr)
@@ -72,10 +73,10 @@ func TestErrToAdbcErrMapsGRPCStatus(t *testing.T) {
 		t.Run(tc.code.String(), func(t *testing.T) {
 			for _, err := range []error{
 				fmt.Errorf("execute: %w", status.Error(tc.code, "boom")),
-				sparkErr{code: tc.code},
+				sparkError(t, tc.code, ""),
 			} {
 				var adbcErr adbc.Error
-				require.ErrorAs(t, ErrToAdbcErr(adbc.StatusInvalidState, err, "execute query"), &adbcErr)
+				require.ErrorAs(t, sparkbase.ErrToAdbcErr(adbc.StatusInvalidState, err, "execute query"), &adbcErr)
 				require.Equal(t, tc.want, adbcErr.Code)
 			}
 		})
@@ -83,10 +84,10 @@ func TestErrToAdbcErrMapsGRPCStatus(t *testing.T) {
 }
 
 func TestErrToAdbcErrPrefersSQLStateOverGRPCStatus(t *testing.T) {
-	err := sparkErr{code: codes.InvalidArgument, sqlState: "42P01"}
+	err := sparkError(t, codes.InvalidArgument, "42P01")
 
 	var adbcErr adbc.Error
-	require.ErrorAs(t, ErrToAdbcErr(adbc.StatusIO, err, "execute query"), &adbcErr)
+	require.ErrorAs(t, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute query"), &adbcErr)
 	require.Equal(t, adbc.StatusNotFound, adbcErr.Code)
 }
 
@@ -100,7 +101,7 @@ func TestErrToAdbcErrMapsContextErrors(t *testing.T) {
 		{errors.New("boom"), adbc.StatusIO},
 	} {
 		var adbcErr adbc.Error
-		require.ErrorAs(t, ErrToAdbcErr(adbc.StatusIO, tc.err, "execute query"), &adbcErr)
+		require.ErrorAs(t, sparkbase.ErrToAdbcErr(adbc.StatusIO, tc.err, "execute query"), &adbcErr)
 		require.Equal(t, tc.want, adbcErr.Code, tc.err.Error())
 	}
 }

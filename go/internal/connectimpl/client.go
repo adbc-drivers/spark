@@ -230,7 +230,7 @@ func (c *connectClient) setConfig(ctx context.Context, key, value string) error 
 		},
 	})
 	if err != nil {
-		return newSparkError(err)
+		return NewSparkError(err)
 	}
 	return nil
 }
@@ -252,7 +252,7 @@ func (c *connectClient) Close(ctx context.Context) error {
 	closeErr := c.conn.Close()
 	c.conn = nil
 	if releaseErr != nil {
-		return sparkbase.ErrToAdbcErr(adbc.StatusIO, newSparkError(releaseErr), "close Spark Connect session")
+		return sparkbase.ErrToAdbcErr(adbc.StatusIO, NewSparkError(releaseErr), "close Spark Connect session")
 	}
 	if closeErr != nil {
 		return sparkbase.ErrToAdbcErr(adbc.StatusIO, closeErr, "close Spark Connect channel")
@@ -277,7 +277,7 @@ func (c *connectClient) executeSQL(ctx context.Context, q sparkbase.QueryContext
 	})
 	if err != nil {
 		cancel()
-		return nil, newSparkError(err)
+		return nil, NewSparkError(err)
 	}
 	mem := q.Mem
 	if mem == nil {
