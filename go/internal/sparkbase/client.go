@@ -154,9 +154,23 @@ func executeMetadataQuery(c SparkClient, ctx context.Context, sql string) (array
 	return rr, nil
 }
 
-// nameFilter turns an ADBC name pattern (SQL LIKE syntax) into a LIKE clause
-// for Spark's SHOW commands, and a regexp that matches names on the client.
-// A nil or empty pattern matches every name.
+// NamePattern compiles an ADBC name pattern (SQL LIKE syntax) to a regexp
+// that matches names on the client, ignoring case. A nil or empty pattern
+// gives nil, which MatchesName takes to match every name.
+func NamePattern(pattern *string) (*regexp.Regexp, error) {
+	if pattern == nil || *pattern == "" {
+		return nil, nil
+	}
+	return driverbase.PatternToRegexp(pattern)
+}
+
+// MatchesName reports whether name matches a regexp from NamePattern.
+func MatchesName(match *regexp.Regexp, name string) bool {
+	return match == nil || match.MatchString(name)
+}
+
+// nameFilter turns an ADBC name pattern into a LIKE clause for Spark's SHOW
+// commands, and a regexp from NamePattern that matches names on the client.
 //
 // SHOW ... LIKE takes Spark's own syntax: a regex in which '*' matches any
 // characters and '|' separates alternatives, matched ignoring the case of
@@ -165,11 +179,8 @@ func executeMetadataQuery(c SparkClient, ctx context.Context, sql string) (array
 // matched only on the client. Names in Spark's session catalog can only
 // contain those characters anyway.
 func nameFilter(pattern *string) (string, *regexp.Regexp, error) {
-	if pattern == nil || *pattern == "" {
-		return "", nil, nil
-	}
-	match, err := driverbase.PatternToRegexp(pattern)
-	if err != nil {
+	match, err := NamePattern(pattern)
+	if err != nil || match == nil {
 		return "", nil, err
 	}
 	var like strings.Builder
@@ -186,10 +197,6 @@ func nameFilter(pattern *string) (string, *regexp.Regexp, error) {
 		}
 	}
 	return " LIKE " + QuoteString(like.String()), match, nil
-}
-
-func matchesName(match *regexp.Regexp, name string) bool {
-	return match == nil || match.MatchString(name)
 }
 
 func DefaultGetCatalogsImpl(c SparkClient, ctx context.Context, catalogFilter *string) ([]string, error) {
@@ -215,7 +222,7 @@ func DefaultGetCatalogsImpl(c SparkClient, ctx context.Context, catalogFilter *s
 			}
 		}
 		for i := range int(rec.NumRows()) {
-			if name := col.Value(i); matchesName(pattern, name) {
+			if name := col.Value(i); MatchesName(pattern, name) {
 				catalogs = append(catalogs, strings.Clone(name))
 			}
 		}
@@ -246,7 +253,7 @@ func DefaultGetDBSchemasForCatalogImpl(c SparkClient, ctx context.Context, catal
 			}
 		}
 		for i := range int(rec.NumRows()) {
-			if name := col.Value(i); matchesName(pattern, name) {
+			if name := col.Value(i); MatchesName(pattern, name) {
 				schemas = append(schemas, strings.Clone(name))
 			}
 		}
@@ -285,7 +292,7 @@ func defaultGetTablesOnly(c SparkClient, ctx context.Context, catalog string, sc
 			}
 		}
 		for i := range int(rec.NumRows()) {
-			if !matchesName(pattern, nameCol.Value(i)) {
+			if !MatchesName(pattern, nameCol.Value(i)) {
 				continue
 			}
 			tableName := strings.Clone(nameCol.Value(i))
