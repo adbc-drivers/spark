@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/spark/go/internal/hiveserver2"
@@ -186,34 +185,6 @@ func (c *thriftClient) Close(_ context.Context) error {
 	return nil
 }
 
-func (c *thriftClient) simpleQuery(ctx context.Context, query string, context string) (*hiveserver2.TFetchResultsResp, error) {
-	req := &hiveserver2.TExecuteStatementReq{
-		SessionHandle: c.session,
-		Statement:     query,
-	}
-	return driverbase.WithShared(c.client, func(client *hiveserver2.TCLIServiceClient) (*hiveserver2.TFetchResultsResp, error) {
-		resp, err := client.ExecuteStatement(ctx, req)
-		if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, resp, "%s", context); err != nil {
-			return nil, err
-		}
-
-		if !resp.OperationHandle.HasResultSet {
-			return nil, nil
-		}
-
-		rs, err := client.FetchResults(ctx, &hiveserver2.TFetchResultsReq{
-			OperationHandle: resp.OperationHandle,
-			Orientation:     hiveserver2.TFetchOrientation_FETCH_FIRST,
-			MaxRows:         1,
-		})
-		if err = sparkbase.ToAdbcErr(adbc.StatusIO, err, resp, "%s", context); err != nil {
-			return nil, err
-		}
-
-		return rs, nil
-	})
-}
-
 func (c *thriftClient) VendorVersion(ctx context.Context, _ memory.Allocator) (string, error) {
 	req := &hiveserver2.TGetInfoReq{
 		SessionHandle: c.session,
@@ -300,60 +271,58 @@ func (c *thriftClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryC
 }
 
 func (c *thriftClient) GetCatalogs(ctx context.Context, catalogFilter *string) ([]string, error) {
-	var query strings.Builder
-	query.WriteString("SHOW CATALOGS")
-	if catalogFilter != nil && *catalogFilter != "" {
-		query.WriteString(" LIKE ")
-		// TODO(lidavidm): need to translate the filter to a regex for Spark
-		query.WriteString(sparkbase.QuoteString(*catalogFilter))
-	}
-	resp, err := c.simpleQuery(ctx, query.String(), "get catalogs")
-	if err != nil {
-		return nil, err
-	} else if resp == nil {
-		return nil, adbc.Error{
-			Code: adbc.StatusInternal,
-			Msg:  fmt.Sprintf("[spark] `%s` did not return a result set", query.String()),
-		}
-	}
-
-	catalogs := make([]string, len(resp.Results.Rows))
-	for i, row := range resp.Results.Rows {
-		catalogs[i] = *row.ColVals[0].GetStringVal().Value
-	}
-	return catalogs, nil
+	return sparkbase.DefaultGetCatalogsImpl(c, ctx, catalogFilter)
 }
 
 func (c *thriftClient) GetDBSchemasForCatalog(ctx context.Context, catalog string, schemaFilter *string) ([]string, error) {
-	var query strings.Builder
-	query.WriteString("SHOW SCHEMAS IN ")
-	query.WriteString(sparkbase.QuoteIdentifier(catalog))
-	if schemaFilter != nil && *schemaFilter != "" {
-		query.WriteString(" LIKE ")
-		// TODO(lidavidm): need to translate the filter to a regex for Spark
-		query.WriteString(sparkbase.QuoteString(*schemaFilter))
-	}
-	resp, err := c.simpleQuery(ctx, query.String(), "get schemas")
-	if err != nil {
-		return nil, err
-	} else if resp == nil {
-		return nil, adbc.Error{
-			Code: adbc.StatusInternal,
-			Msg:  fmt.Sprintf("[spark] `%s` did not return a result set", query.String()),
-		}
-	}
+	return sparkbase.DefaultGetDBSchemasForCatalogImpl(c, ctx, catalog, schemaFilter)
+}
 
-	schemas := make([]string, len(resp.Results.Rows))
-	for i, row := range resp.Results.Rows {
-		schemas[i] = *row.ColVals[0].GetStringVal().Value
+// tablePattern turns an ADBC table name pattern into a pattern for GetTables
+// and GetColumns, or nil to list every table. Names are matched on the client
+// too, so the pattern only has to match at least the same tables.
+//
+// Spark's Thrift server converts '%' and '_' to the syntax of SHOW ... LIKE
+// and keeps any other character, so it reads '.', '*', and '|' as that syntax
+// too, and it ignores the case of ASCII letters only. It also skips the
+// second of two '%' or two '_' in a row. So only a pattern of ASCII letters,
+// digits, '%', and '_' is sent, with each run of wildcards replaced by '%'.
+func tablePattern(pattern *string) *hiveserver2.TPatternOrIdentifier {
+	if pattern == nil || *pattern == "" {
+		return nil
 	}
-	return schemas, nil
+	sent := make([]byte, 0, len(*pattern))
+	for _, r := range *pattern {
+		switch {
+		case r == '%' || r == '_':
+			if n := len(sent); n > 0 && (sent[n-1] == '%' || sent[n-1] == '_') {
+				sent[n-1] = '%'
+				continue
+			}
+		case 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z', '0' <= r && r <= '9':
+		default:
+			return nil
+		}
+		sent = append(sent, byte(r))
+	}
+	return new(hiveserver2.TPatternOrIdentifier(sent))
 }
 
 func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string, includeColumns bool) ([]driverbase.TableInfo, error) {
 	type getObjectsResult struct {
 		tableResp *hiveserver2.TFetchResultsResp
 		colResp   *hiveserver2.TFetchResultsResp
+	}
+
+	tableMatch, err := sparkbase.NamePattern(tableFilter)
+	if err != nil {
+		return nil, err
+	}
+	// Spark's Thrift server matches column names as a case-sensitive regex,
+	// so they're matched only on the client.
+	columnMatch, err := driverbase.PatternToRegexp(columnFilter)
+	if err != nil {
+		return nil, err
 	}
 
 	// HiveServer2 lacks support for parameters so we have to build the
@@ -363,9 +332,7 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 		SessionHandle: c.session,
 		CatalogName:   new(hiveserver2.TPatternOrIdentifier(catalog)),
 		SchemaName:    new(hiveserver2.TPatternOrIdentifier(schema)),
-	}
-	if tableFilter != nil {
-		tablesReq.TableName = new(hiveserver2.TPatternOrIdentifier(*tableFilter))
+		TableName:     tablePattern(tableFilter),
 	}
 
 	var colReq *hiveserver2.TGetColumnsReq
@@ -374,12 +341,7 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 			SessionHandle: c.session,
 			CatalogName:   new(hiveserver2.TIdentifier(catalog)),
 			SchemaName:    new(hiveserver2.TPatternOrIdentifier(schema)),
-		}
-		if tableFilter != nil {
-			colReq.TableName = new(hiveserver2.TPatternOrIdentifier(*tableFilter))
-		}
-		if columnFilter != nil {
-			colReq.ColumnName = new(hiveserver2.TPatternOrIdentifier(*columnFilter))
+			TableName:     tablesReq.TableName,
 		}
 	}
 
@@ -439,6 +401,9 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 	tableIndex := make(map[string]int)
 	for _, row := range result.tableResp.Results.Rows {
 		tableName := *row.ColVals[2].GetStringVal().Value
+		if !sparkbase.MatchesName(tableMatch, tableName) {
+			continue
+		}
 		tableType := *row.ColVals[3].GetStringVal().Value
 		tableIndex[tableName] = len(tables)
 		tables = append(tables, driverbase.TableInfo{
@@ -455,9 +420,13 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 			if !ok {
 				continue
 			}
+			columnName := *row.ColVals[3].GetStringVal().Value
+			if !sparkbase.MatchesName(columnMatch, columnName) {
+				continue
+			}
 
 			col := driverbase.ColumnInfo{
-				ColumnName: *row.ColVals[3].GetStringVal().Value,
+				ColumnName: columnName,
 			}
 
 			if v := row.ColVals[16].GetI32Val(); v != nil && v.Value != nil {
