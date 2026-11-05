@@ -438,6 +438,9 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 	tables := make([]driverbase.TableInfo, 0)
 	tableIndex := make(map[string]int)
 	for _, row := range result.tableResp.Results.Rows {
+		if !inSchema(row, schema) {
+			continue
+		}
 		tableName := *row.ColVals[2].GetStringVal().Value
 		tableType := *row.ColVals[3].GetStringVal().Value
 		tableIndex[tableName] = len(tables)
@@ -450,6 +453,9 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 
 	if result.colResp != nil {
 		for _, row := range result.colResp.Results.Rows {
+			if !inSchema(row, schema) {
+				continue
+			}
 			tableName := *row.ColVals[2].GetStringVal().Value
 			idx, ok := tableIndex[tableName]
 			if !ok {
@@ -487,6 +493,16 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 	}
 
 	return tables, nil
+}
+
+// inSchema reports whether a row of GetTables or GetColumns belongs to schema.
+// Spark's Thrift server reads the schema name as a pattern, in which '_'
+// matches any character, so it also returns the rows of other schemas that
+// the name matches. Temporary views have no schema and stay listed in every
+// schema, as SHOW TABLES does.
+func inSchema(row *hiveserver2.TRow, schema string) bool {
+	v := row.ColVals[1].GetStringVal()
+	return v == nil || v.Value == nil || *v.Value == schema
 }
 
 func (c *thriftClient) GetOption(_ context.Context, _ string) (string, bool, error) {
