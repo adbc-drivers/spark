@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG SPARK_VERSION=4.0.4
+ARG SPARK_VERSION=4.0.5
 FROM apache/spark:${SPARK_VERSION} AS base
 
 ARG SPARK_VERSION_NO_PATCH=4.0
@@ -31,10 +31,11 @@ ENV SPARK_HOME=/opt/spark
 
 WORKDIR /tmp
 
-# Download Iceberg runtime (Spark 4.0 + Scala 2.13)
+# Download the matching Iceberg runtime when available
+ARG WITH_ICEBERG=true
 ARG ICEBERG_NAME="iceberg-spark-runtime-${SPARK_VERSION_NO_PATCH}_${SCALA_VERSION}"
 ARG ICEBERG_JAR="${ICEBERG_NAME}-${ICEBERG_VERSION}.jar"
-RUN wget -q https://repo1.maven.org/maven2/org/apache/iceberg/${ICEBERG_NAME}/${ICEBERG_VERSION}/${ICEBERG_JAR} -P ${SPARK_HOME}/jars/
+RUN if [ "${WITH_ICEBERG}" = "true" ]; then wget -q https://repo1.maven.org/maven2/org/apache/iceberg/${ICEBERG_NAME}/${ICEBERG_VERSION}/${ICEBERG_JAR} -P ${SPARK_HOME}/jars/; fi
 
 # Download Hadoop AWS and AWS SDK for S3 (Silo) support
 # Version must match the Hadoop bundled with Spark (4.0.x ships Hadoop 3.4.1)
@@ -42,6 +43,10 @@ ARG HADOOP_VERSION=3.4.1
 ARG AWS_SDK_V2_VERSION=2.24.6
 RUN wget -q https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/${HADOOP_VERSION}/hadoop-aws-${HADOOP_VERSION}.jar -P ${SPARK_HOME}/jars/ \
     && wget -q https://repo1.maven.org/maven2/software/amazon/awssdk/bundle/${AWS_SDK_V2_VERSION}/bundle-${AWS_SDK_V2_VERSION}.jar -P ${SPARK_HOME}/jars/
+
+# Hadoop 3.5 requires the S3 analytics accelerator at runtime.
+ARG S3_ANALYTICS_VERSION=""
+RUN if [ -n "${S3_ANALYTICS_VERSION}" ]; then wget -q https://repo1.maven.org/maven2/software/amazon/s3/analyticsaccelerator/analyticsaccelerator-s3/${S3_ANALYTICS_VERSION}/analyticsaccelerator-s3-${S3_ANALYTICS_VERSION}.jar -P ${SPARK_HOME}/jars/; fi
 
 COPY kerberos/conf/krb5.conf /etc/krb5.conf
 COPY spark/catalog-init.sh /opt/catalog-init.sh
