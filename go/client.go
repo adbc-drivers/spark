@@ -16,6 +16,7 @@ package spark
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/adbc-drivers/spark/go/internal/connectimpl"
 	"github.com/adbc-drivers/spark/go/internal/livyimpl"
@@ -520,6 +521,9 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 	if ok {
 		parsed, err := url.Parse(uri)
 		if err != nil {
+			if urlErr, ok := errors.AsType[*url.Error](err); ok {
+				err = urlErr.Err
+			}
 			return nil, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
 		}
 

@@ -30,12 +30,64 @@ import (
 	"github.com/adbc-drivers/driverbase-go/testutil"
 	"github.com/adbc-drivers/driverbase-go/validation"
 	driver "github.com/adbc-drivers/spark/go"
+	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
+
+func TestInvalidURIDoesNotExposeSecrets(t *testing.T) {
+	const password = "uri-password-sentinel"
+	const token = "uri-token-sentinel"
+	for _, backend := range []struct {
+		api    string
+		scheme string
+	}{
+		{sparkutil.OptionValueApiConnect, "sc"},
+		{sparkutil.OptionValueApiLivy, "livy"},
+		{sparkutil.OptionValueApiThriftBinary, "thrift+binary"},
+		{sparkutil.OptionValueApiThriftHttp, "thrift+http"},
+	} {
+		t.Run(backend.api, func(t *testing.T) {
+			for _, scheme := range []string{"spark", backend.scheme} {
+				t.Run(scheme, func(t *testing.T) {
+					for _, tc := range []struct {
+						name       string
+						address    string
+						diagnostic string
+					}{
+						{"escape", "localhost/%zz", "invalid URL escape"},
+						{"port", "localhost:bad/", "invalid port"},
+					} {
+						t.Run(tc.name, func(t *testing.T) {
+							uri := fmt.Sprintf("%s://user:%s@%s?token=%s", scheme, password, tc.address, token)
+							d := driver.NewDriver(memory.NewGoAllocator())
+							db, err := d.NewDatabaseWithContext(context.Background(), map[string]string{
+								adbc.OptionKeyURI:   uri,
+								sparkutil.OptionApi: backend.api,
+							})
+							if db != nil {
+								t.Cleanup(func() { require.NoError(t, db.Close(context.Background())) })
+							}
+							require.Error(t, err)
+							var adbcErr adbc.Error
+							require.ErrorAs(t, err, &adbcErr)
+							assert.Equal(t, adbc.StatusInvalidArgument, adbcErr.Code)
+							assert.Contains(t, err.Error(), tc.diagnostic)
+							assert.NotContains(t, err.Error(), password)
+							assert.NotContains(t, err.Error(), token)
+							assert.NotContains(t, err.Error(), uri)
+						})
+					}
+				})
+			}
+		})
+	}
+}
 
 type SparkQuirks struct {
 	dsn string
