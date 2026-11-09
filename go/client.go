@@ -521,10 +521,7 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 	if ok {
 		parsed, err := url.Parse(uri)
 		if err != nil {
-			if urlErr, ok := errors.AsType[*url.Error](err); ok {
-				err = urlErr.Err
-			}
-			return nil, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
+			return nil, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, errors.New("invalid URI format"), "parse URI")
 		}
 
 		err = parseOptionsFromUri(parsed, options)

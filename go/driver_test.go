@@ -60,11 +60,15 @@ func TestInvalidURIDoesNotExposeSecrets(t *testing.T) {
 						address    string
 						diagnostic string
 					}{
-						{"escape", "localhost/%zz", "invalid URL escape"},
-						{"port", "localhost:bad/", "invalid port"},
+						{"escape", "localhost/%zz", "invalid URI format"},
+						{"port", "localhost:bad/", "invalid URI format"},
+						{"missing userinfo separator and host", "", "invalid URI format"},
 					} {
 						t.Run(tc.name, func(t *testing.T) {
 							uri := fmt.Sprintf("%s://user:%s@%s?token=%s", scheme, password, tc.address, token)
+							if tc.address == "" {
+								uri = fmt.Sprintf("%s://user:%s/db?token=%s", scheme, password, token)
+							}
 							d := driver.NewDriver(memory.NewGoAllocator())
 							db, err := d.NewDatabaseWithContext(context.Background(), map[string]string{
 								adbc.OptionKeyURI:   uri,
