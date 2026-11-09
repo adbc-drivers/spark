@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import urllib.parse
+
 import adbc_drivers_validation.tests.statement
+import pyarrow
 import pytest
 
 from . import spark
@@ -36,3 +39,22 @@ class TestStatement(adbc_drivers_validation.tests.statement.TestStatement):
         if driver.short_version.startswith("emr-"):
             pytest.skip("EMR Spark does not support UPDATE etc.")
         super().test_rows_affected(driver, conn)
+
+    def test_logical_plan_passthrough(self, driver, conn, db_kwargs):
+        if not driver.short_version.startswith("4."):
+            pytest.skip("only test logical plan passthrough on Spark 4.x")
+        if not driver.short_version.endswith("-connect"):
+            pytest.skip("logical plan passthrough is only supported in Spark Connect")
+
+        from pyspark.sql import SparkSession
+
+        url = urllib.parse.urlparse(db_kwargs["uri"])
+        spark = SparkSession.builder.remote(f"sc://{url.netloc}").getOrCreate()
+        plan = spark.range(10).filter("id >= 5")._plan.to_proto(spark.client)
+        plan = plan.SerializeToString()
+        with conn.cursor() as cur:
+            cur.adbc_statement.set_options(**{"spark.query.logical_plan": plan})
+            handle, _ = cur.adbc_statement.execute_query()
+            with pyarrow.RecordBatchReader._import_from_c(handle.address) as reader:
+                res = reader.read_all()
+        assert len(res) == 5, str(res)

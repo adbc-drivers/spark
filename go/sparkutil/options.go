@@ -29,6 +29,9 @@ const (
 	// like Amazon EMR, require this to be set to create a table.
 	OptionIngestLocation = "spark.ingest.location"
 
+	// Set a logical plan directly (only supported for Spark Connect)
+	OptionSparkLogicalPlan = "spark.query.logical_plan"
+
 	// CONNECTION OPTION KEYS
 
 	// OptionHost specifies the host to connect to
