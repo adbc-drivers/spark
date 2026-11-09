@@ -477,7 +477,7 @@ services:
       - ./.data/metastore4-alt:/opt/spark-data-alt
 
   spark4-master:
-    image: apache/spark:4.0.4
+    image: apache/spark:4.0.5
     environment:
       - SPARK_MODE=master
       - SPARK_MASTER_HOST=spark4-master
@@ -488,7 +488,7 @@ services:
     command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
 
   spark4-worker:
-    image: apache/spark:4.0.4
+    image: apache/spark:4.0.5
     command: ["/opt/spark/sbin/start-worker.sh", "spark://spark4-master:7077"]
     depends_on:
       spark4-master:
@@ -662,7 +662,7 @@ services:
   # ==========================================================================
 
   spark41-master:
-    image: apache/spark:4.1.3
+    image: apache/spark:4.1.4
     environment:
       - SPARK_MODE=master
       - SPARK_MASTER_HOST=spark41-master
@@ -673,7 +673,7 @@ services:
     command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
 
   spark41-worker:
-    image: apache/spark:4.1.3
+    image: apache/spark:4.1.4
     command: ["/opt/spark/sbin/start-worker.sh", "spark://spark41-master:7077"]
     depends_on:
       spark41-master:
@@ -696,8 +696,10 @@ services:
       dockerfile: spark4/Dockerfile
       target: connect
       args:
-        SPARK_VERSION: 4.1.3
+        SPARK_VERSION: 4.1.4
         SPARK_VERSION_NO_PATCH: 4.1
+        HADOOP_VERSION: 3.4.2
+        AWS_SDK_V2_VERSION: 2.29.52
     depends_on:
       spark41-master:
         condition: service_started
@@ -734,6 +736,146 @@ services:
       - "4043:4040"    # Spark UI
     volumes:
       - ./ci/docker/spark4/conf/:/opt/spark/conf/:ro
+      - ./.data/kerberos/keytabs:/var/keytabs
+      - ./.data/metastore4:/opt/spark-data
+      - ./.data/metastore4-alt:/opt/spark-data-alt
+    healthcheck:
+      test: ["CMD-SHELL", "klist && netstat -an | grep 15002 | grep LISTEN || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  spark42-master:
+    image: apache/spark:4.2.1
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark42-master
+      - SPARK_MASTER_PORT=7077
+    ports:
+      - "8083:8080"   # Spark Master Web UI
+      - "7080:7077"   # Spark Master Port
+    command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
+
+  spark42-worker:
+    image: apache/spark:4.2.1
+    command: ["/opt/spark/sbin/start-worker.sh", "spark://spark42-master:7077"]
+    depends_on:
+      spark42-master:
+        condition: service_started
+    environment:
+      SPARK_NO_DAEMONIZE: true
+    healthcheck:
+      test: curl --fail http://localhost:8081
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+
+  spark42-connect-server:
+    image: ghcr.io/adbc-drivers/spark:spark42-connect
+    build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
+      context: ./ci/docker/
+      dockerfile: spark4/Dockerfile
+      target: connect
+      args:
+        SPARK_VERSION: 4.2.1
+        SPARK_VERSION_NO_PATCH: 4.2
+        HADOOP_VERSION: 3.5.0
+        AWS_SDK_V2_VERSION: 2.35.4
+        S3_ANALYTICS_VERSION: 1.3.1
+        WITH_ICEBERG: "false"
+    depends_on:
+      spark42-master:
+        condition: service_started
+      hive4-metastore:
+        condition: service_healthy
+      spark4-catalog-init:
+        condition: service_completed_successfully
+      kerberos:
+        condition: service_healthy
+      silo-init:
+        condition: service_completed_successfully
+    environment:
+      SPARK_MASTER: spark://spark42-master:7077
+    ports:
+      - "15005:15002"  # Spark Connect gRPC port
+      - "4044:4040"    # Spark UI
+    volumes:
+      - ./ci/docker/spark4/conf/:/opt/spark/conf/:ro
+      - ./ci/docker/spark4/spark-defaults-hive.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ./.data/kerberos/keytabs:/var/keytabs
+      - ./.data/metastore4:/opt/spark-data
+      - ./.data/metastore4-alt:/opt/spark-data-alt
+    healthcheck:
+      test: ["CMD-SHELL", "klist && netstat -an | grep 15002 | grep LISTEN || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  spark43-master:
+    image: apache/spark:4.3.0
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark43-master
+      - SPARK_MASTER_PORT=7077
+    ports:
+      - "8084:8080"   # Spark Master Web UI
+      - "7081:7077"   # Spark Master Port
+    command: "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master"
+
+  spark43-worker:
+    image: apache/spark:4.3.0
+    command: ["/opt/spark/sbin/start-worker.sh", "spark://spark43-master:7077"]
+    depends_on:
+      spark43-master:
+        condition: service_started
+    environment:
+      SPARK_NO_DAEMONIZE: true
+    healthcheck:
+      test: curl --fail http://localhost:8081
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 5s
+
+  spark43-connect-server:
+    image: ghcr.io/adbc-drivers/spark:spark43-connect
+    build:
+      labels:
+        org.opencontainers.image.source: https://github.com/adbc-drivers/spark
+      context: ./ci/docker/
+      dockerfile: spark4/Dockerfile
+      target: connect
+      args:
+        SPARK_VERSION: 4.3.0
+        SPARK_VERSION_NO_PATCH: 4.3
+        HADOOP_VERSION: 3.5.0
+        AWS_SDK_V2_VERSION: 2.35.4
+        S3_ANALYTICS_VERSION: 1.3.1
+        WITH_ICEBERG: "false"
+    depends_on:
+      spark43-master:
+        condition: service_started
+      hive4-metastore:
+        condition: service_healthy
+      spark4-catalog-init:
+        condition: service_completed_successfully
+      kerberos:
+        condition: service_healthy
+      silo-init:
+        condition: service_completed_successfully
+    environment:
+      SPARK_MASTER: spark://spark43-master:7077
+    ports:
+      - "15006:15002"  # Spark Connect gRPC port
+      - "4045:4040"    # Spark UI
+    volumes:
+      - ./ci/docker/spark4/conf/:/opt/spark/conf/:ro
+      - ./ci/docker/spark4/spark-defaults-hive.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./.data/kerberos/keytabs:/var/keytabs
       - ./.data/metastore4:/opt/spark-data
       - ./.data/metastore4-alt:/opt/spark-data-alt

@@ -22,10 +22,14 @@ from . import spark
 
 @pytest.fixture(scope="module")
 def connect_uri(driver) -> str | None:
-    if driver.short_version == "4.1-connect":
-        return os.environ["SPARK41_CONNECT_URI"]
-    elif driver.short_version == "4.0-connect":
+    if driver.short_version == "4.0-connect":
         return os.environ["SPARK_CONNECT_URI"]
+    elif driver.short_version == "4.1-connect":
+        return os.environ["SPARK41_CONNECT_URI"]
+    elif driver.short_version == "4.2-connect":
+        return os.environ["SPARK42_CONNECT_URI"]
+    elif driver.short_version == "4.3-connect":
+        return os.environ["SPARK43_CONNECT_URI"]
     return None
 
 
