@@ -60,9 +60,9 @@ func TestInvalidURIDoesNotExposeSecrets(t *testing.T) {
 						address    string
 						diagnostic string
 					}{
-						{"escape", "localhost/%zz", "invalid URI format"},
-						{"port", "localhost:bad/", "invalid URI format"},
-						{"missing userinfo separator and host", "", "invalid URI format"},
+						{"escape", "localhost/%zz", "invalid URL escape"},
+						{"port", "localhost:bad/", "invalid port"},
+						{"missing userinfo separator and host", "", "invalid port"},
 					} {
 						t.Run(tc.name, func(t *testing.T) {
 							uri := fmt.Sprintf("%s://user:%s@%s?token=%s", scheme, password, tc.address, token)

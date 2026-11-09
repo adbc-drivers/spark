@@ -16,8 +16,8 @@ package spark
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/spark/go/internal/connectimpl"
 	"github.com/adbc-drivers/spark/go/internal/livyimpl"
 	"github.com/adbc-drivers/spark/go/internal/sparkbase"
@@ -519,9 +519,9 @@ func validateStartupCatalog(factory sparkbase.SparkClientFactory, catalog string
 func newSparkClientFactory(ctx context.Context, options map[string]string) (func(context.Context) (sparkbase.SparkClient, error), error) {
 	uri, ok := options[adbc.OptionKeyURI]
 	if ok {
-		parsed, err := url.Parse(uri)
+		parsed, err := driverbase.SafeParseURL(uri)
 		if err != nil {
-			return nil, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, errors.New("invalid URI format"), "parse URI")
+			return nil, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
 		}
 
 		err = parseOptionsFromUri(parsed, options)
