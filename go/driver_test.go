@@ -223,7 +223,7 @@ func (q *SparkQuirks) GetMetadata(code adbc.InfoCode) any {
 	case adbc.InfoDriverArrowVersion:
 		return "v18.8.0"
 	case adbc.InfoVendorVersion:
-		return "4.0.4 (HiveServer2+binary)"
+		return "4.0.5 (HiveServer2+binary)"
 	case adbc.InfoVendorArrowVersion:
 		return "(unknown or development build)"
 	case adbc.InfoDriverADBCVersion:
