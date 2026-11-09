@@ -67,3 +67,6 @@ environment = "aws-emr-serverless"
 EMR_SERVERLESS_APPLICATION_ID = { secret = "EMR_SERVERLESS_APPLICATION_ID", contexts = ["validate"] }
 EMR_SERVERLESS_EXECUTION_ROLE_ARN = { secret = "EMR_SERVERLESS_EXECUTION_ROLE_ARN", contexts = ["validate"] }
 STAGING_S3_BUCKET = { secret = "STAGING_S3_BUCKET", contexts = ["validate"] }
+
+[validation.extra-pypi-dependencies]
+pyspark-client = ">=4.3.0, <5"

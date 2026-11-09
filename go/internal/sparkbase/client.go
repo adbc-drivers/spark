@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
+	connectpb "github.com/adbc-drivers/spark/go/internal/generated"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
@@ -43,6 +44,7 @@ type SparkClient interface {
 
 	ExecuteQuery(ctx context.Context, query QueryContext) (array.RecordReader, int64, error)
 	ExecuteUpdate(ctx context.Context, query QueryContext) (int64, error)
+	ExecuteLogicalPlan(ctx context.Context, query QueryContext, plan *connectpb.Plan) (array.RecordReader, error)
 
 	CurrentCatalog(ctx context.Context, mem memory.Allocator) (string, error)
 	SetCurrentCatalog(ctx context.Context, mem memory.Allocator, catalog string) error

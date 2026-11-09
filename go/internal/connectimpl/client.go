@@ -256,11 +256,7 @@ func (c *connectClient) Close(ctx context.Context) error {
 	return nil
 }
 
-// executeSQL runs a query as a single ExecutePlan with a SQL relation root.
-func (c *connectClient) executeSQL(ctx context.Context, q sparkbase.QueryContext) (*resultReader, error) {
-	plan := &proto.Plan{OpType: &proto.Plan_Root{Root: &proto.Relation{
-		RelType: &proto.Relation_Sql{Sql: &proto.SQL{Query: q.Query}},
-	}}}
+func (c *connectClient) executePlan(ctx context.Context, q sparkbase.QueryContext, plan *proto.Plan) (*resultReader, error) {
 	operationID := uuid.New().String()
 	// The stream outlives this call; the reader cancels it on Release.
 	streamCtx, cancel := context.WithCancel(c.outgoing(ctx))
@@ -277,6 +273,14 @@ func (c *connectClient) executeSQL(ctx context.Context, q sparkbase.QueryContext
 	}
 	interrupt := func() { c.interruptOperation(operationID) }
 	return newResultReader(streamCtx, stream, cancel, interrupt, q.Mem)
+}
+
+// executeSQL runs a query as a single ExecutePlan with a SQL relation root.
+func (c *connectClient) executeSQL(ctx context.Context, q sparkbase.QueryContext) (*resultReader, error) {
+	plan := &proto.Plan{OpType: &proto.Plan_Root{Root: &proto.Relation{
+		RelType: &proto.Relation_Sql{Sql: &proto.SQL{Query: q.Query}},
+	}}}
+	return c.executePlan(ctx, q, plan)
 }
 
 // interruptOperation stops an operation whose results are no longer wanted.
@@ -312,6 +316,14 @@ func (c *connectClient) ExecuteUpdate(ctx context.Context, q sparkbase.QueryCont
 	}
 	// Spark Connect does not surface a modified-row count.
 	return -1, rdr.Err()
+}
+
+func (c *connectClient) ExecuteLogicalPlan(ctx context.Context, q sparkbase.QueryContext, plan *proto.Plan) (array.RecordReader, error) {
+	rdr, err := c.executePlan(ctx, q, plan)
+	if err != nil {
+		return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute logical plan")
+	}
+	return rdr, nil
 }
 
 func (c *connectClient) VendorVersion(ctx context.Context, mem memory.Allocator) (string, error) {
