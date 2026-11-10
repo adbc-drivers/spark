@@ -202,7 +202,7 @@ func userID(username string) string {
 
 // clientType identifies the driver, with spark-connect-go's os/go suffix.
 func clientType() string {
-	return fmt.Sprintf("adbc-driver-spark os/%s go/%s", runtime.GOOS, runtime.Version())
+	return fmt.Sprintf("adbc-driver-spark os/%s go/%s driver/%s", runtime.GOOS, runtime.Version(), driverbase.DriverVersion())
 }
 
 func (c *connectClient) outgoing(ctx context.Context) context.Context {
@@ -275,12 +275,8 @@ func (c *connectClient) executeSQL(ctx context.Context, q sparkbase.QueryContext
 		cancel()
 		return nil, NewSparkError(err)
 	}
-	mem := q.Mem
-	if mem == nil {
-		mem = memory.DefaultAllocator
-	}
 	interrupt := func() { c.interruptOperation(operationID) }
-	return newResultReader(streamCtx, stream, cancel, interrupt, mem)
+	return newResultReader(streamCtx, stream, cancel, interrupt, q.Mem)
 }
 
 // interruptOperation stops an operation whose results are no longer wanted.
