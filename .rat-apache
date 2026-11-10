@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-.github/workflows/dev_issues.yaml
 go/buf.gen.yaml
 go/buf.work.yaml
 go/hiveserver2.thrift
