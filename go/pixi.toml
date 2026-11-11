@@ -37,15 +37,19 @@ adbc-drivers-dev = { git = "https://github.com/adbc-drivers/dev" }
 
 [target.linux-64.pypi-dependencies]
 adbc-drivers-validation = { git = "https://github.com/adbc-drivers/validation" }
+pyspark-client = ">=4.3.0, <5"
 
 [target.osx-arm64.pypi-dependencies]
 adbc-drivers-validation = { git = "https://github.com/adbc-drivers/validation" }
+pyspark-client = ">=4.3.0, <5"
 
 [target.win-64.pypi-dependencies]
 adbc-drivers-validation = { git = "https://github.com/adbc-drivers/validation" }
+pyspark-client = ">=4.3.0, <5"
 
 [target.linux-aarch64.pypi-dependencies]
 adbc-drivers-validation = { git = "https://github.com/adbc-drivers/validation" }
+pyspark-client = ">=4.3.0, <5"
 
 # We only support make and ci/test_package.py, not validation (as PyArrow is not available)
 [target.win-arm64.pypi-dependencies]

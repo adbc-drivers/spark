@@ -22,6 +22,7 @@ import (
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/driverbase-go/driverbase/arrowext"
+	connectpb "github.com/adbc-drivers/spark/go/internal/generated"
 	"github.com/adbc-drivers/spark/go/internal/sparkbase"
 	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
@@ -31,20 +32,23 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
 )
 
 type statementImpl struct {
 	driverbase.StatementImplBase
 	cnxn *connectionImpl
 
-	query  string
-	params array.RecordReader
-	ingest bulkIngestOptions
+	query       string
+	logicalPlan *connectpb.Plan
+	params      array.RecordReader
+	ingest      bulkIngestOptions
 }
 
 func (st *statementImpl) clearQueryState() {
 	// used to reset some common parameters when the query is changed
 	st.query = ""
+	st.logicalPlan = nil
 }
 
 func (st *statementImpl) clearIngestState() {
@@ -133,6 +137,17 @@ func (st *statementImpl) SetOption(ctx context.Context, key string, val string) 
 }
 
 func (st *statementImpl) SetOptionBytes(ctx context.Context, key string, value []byte) error {
+	switch key {
+	case sparkutil.OptionSparkLogicalPlan:
+		st.clearQueryState()
+		st.clearIngestState()
+		var plan connectpb.Plan
+		if err := proto.Unmarshal(value, &plan); err != nil {
+			return sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "unmarshal substrait plan")
+		}
+		st.logicalPlan = &plan
+		return nil
+	}
 	return adbc.Error{
 		Msg:  fmt.Sprintf("[spark] Unknown statement option '%s'", key),
 		Code: adbc.StatusNotImplemented,
@@ -163,6 +178,12 @@ func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, 
 	if st.ingest.IsSet() {
 		n, err := st.executeIngest(ctx)
 		return arrowext.EmptyReader{}, n, err
+	} else if st.logicalPlan != nil {
+		rdr, err := st.cnxn.client.ExecuteLogicalPlan(ctx, sparkbase.QueryContext{
+			Mem: st.cnxn.Alloc,
+			Log: st.cnxn.Logger,
+		}, st.logicalPlan)
+		return rdr, -1, err
 	} else if st.query == "" {
 		return nil, -1, adbc.Error{
 			Msg:  "[spark] no query set",
@@ -179,6 +200,18 @@ func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, 
 func (st *statementImpl) ExecuteUpdate(ctx context.Context) (int64, error) {
 	if st.ingest.IsSet() {
 		return st.executeIngest(ctx)
+	} else if st.logicalPlan != nil {
+		rdr, err := st.cnxn.client.ExecuteLogicalPlan(ctx, sparkbase.QueryContext{
+			Mem: st.cnxn.Alloc,
+			Log: st.cnxn.Logger,
+		}, st.logicalPlan)
+		if err != nil {
+			return -1, err
+		}
+		defer rdr.Release()
+		for rdr.Next() {
+		}
+		return -1, rdr.Err()
 	}
 	return st.cnxn.client.ExecuteUpdate(ctx, sparkbase.QueryContext{
 		Mem:   st.cnxn.Alloc,
