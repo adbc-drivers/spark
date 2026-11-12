@@ -96,3 +96,100 @@ class TestConnection(adbc_drivers_validation.tests.connection.TestConnection):
                 cursor.execute(
                     f"DROP VIEW IF EXISTS {driver.quote_one_identifier(view)}"
                 )
+
+    def test_get_objects_name_patterns(self, driver, conn) -> None:
+        if driver.short_version.startswith("emr-"):
+            pytest.skip("EMR tables need an S3 location")
+        # ADBC patterns use SQL LIKE syntax, which Spark's SHOW ... LIKE doesn't.
+        suffix = uuid.uuid4().hex[:8]
+        tables = [f"pattern_{suffix}_a", f"pattern_{suffix}xa", f"other_{suffix}"]
+        catalog = driver.features.current_catalog
+        schema = driver.features.current_schema
+
+        def names(table_filter, schema_filter=schema, catalog_filter=catalog):
+            objects = conn.adbc_get_objects(
+                depth="tables",
+                catalog_filter=catalog_filter,
+                db_schema_filter=schema_filter,
+                table_name_filter=table_filter,
+            )
+            return sorted(
+                t["table_name"]
+                for obj in objects.read_all().to_pylist()
+                for s in obj["catalog_db_schemas"]
+                for t in s["db_schema_tables"]
+            )
+
+        def columns(column_filter):
+            objects = conn.adbc_get_objects(
+                depth="columns",
+                catalog_filter=catalog,
+                db_schema_filter=schema,
+                table_name_filter=tables[2],
+                column_name_filter=column_filter,
+            )
+            return [
+                c["column_name"]
+                for obj in objects.read_all().to_pylist()
+                for s in obj["catalog_db_schemas"]
+                for t in s["db_schema_tables"]
+                for c in t["table_columns"]
+            ]
+
+        with conn.cursor() as cursor:
+            for table in tables:
+                cursor.execute(
+                    f"CREATE TABLE {driver.quote_one_identifier(table)} (id INT)"
+                )
+        try:
+            assert names(f"pattern_{suffix}%") == sorted(tables[:2])
+            # '_' matches any one character, and matching ignores case.
+            assert names(f"PATTERN_{suffix}_A") == sorted(tables[:2])
+            assert names(f"%_{suffix}") == [tables[2]]
+            # '__' matches any two characters.
+            assert names(f"pattern__{suffix[1:]}%") == sorted(tables[:2])
+            # '.', '*', and '|' are literal characters.
+            assert names(f"pattern.{suffix}%") == []
+            assert names(f"pattern_{suffix}*") == []
+            assert names(f"other_{suffix}|pattern%") == []
+            # Catalog and schema patterns use the same syntax.
+            assert names(
+                f"%{suffix}%", schema[:-1] + "%", catalog[:-1] + "_"
+            ) == sorted(tables)
+            # So do column patterns.
+            assert columns("I_") == ["id"]
+            assert columns("i.") == []
+            assert columns("id|x") == []
+        finally:
+            with conn.cursor() as cursor:
+                for table in tables:
+                    cursor.execute(driver.drop_table(table_name=table))
+
+    def test_get_objects_non_ascii_name_pattern(self, driver, conn) -> None:
+        # Spark ignores the case of ASCII letters only in name patterns, so this
+        # pattern must be matched on the client. Tables in the session catalog
+        # can't have such a name, but temporary views can.
+        view = f"übersicht_{uuid.uuid4().hex[:8]}"
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"CREATE TEMPORARY VIEW {driver.quote_one_identifier(view)} AS SELECT 1 AS id"
+            )
+        try:
+            objects = conn.adbc_get_objects(
+                depth="tables",
+                catalog_filter="spark_catalog",
+                db_schema_filter="default",
+                table_name_filter=view.upper(),
+            )
+            tables = [
+                t["table_name"]
+                for obj in objects.read_all().to_pylist()
+                for s in obj["catalog_db_schemas"]
+                for t in s["db_schema_tables"]
+            ]
+            assert tables == [view]
+        finally:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"DROP VIEW IF EXISTS {driver.quote_one_identifier(view)}"
+                )
