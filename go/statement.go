@@ -143,7 +143,7 @@ func (st *statementImpl) SetOptionBytes(ctx context.Context, key string, value [
 		st.clearIngestState()
 		var plan connectpb.Plan
 		if err := proto.Unmarshal(value, &plan); err != nil {
-			return sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "unmarshal substrait plan")
+			return sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "unmarshal Spark logical plan")
 		}
 		st.logicalPlan = &plan
 		return nil
