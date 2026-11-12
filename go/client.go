@@ -349,7 +349,7 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 		delete(options, adbc.OptionKeyPassword)
 	}
 
-	tls, err := parseBoolOption(sparkutil.OptionUseTls, options, false)
+	tls, err := parseBoolOption(sparkutil.OptionUseTls, options, true)
 	if err != nil {
 		return connectOpts, err
 	}
