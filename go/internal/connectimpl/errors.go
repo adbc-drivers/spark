@@ -15,6 +15,7 @@
 package connectimpl
 
 import (
+	"errors"
 	"fmt"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -25,17 +26,25 @@ import (
 // SparkError is a failed Spark Connect RPC. It keeps the gRPC status so the
 // code can be mapped, and the SQLSTATE that Spark attaches in an ErrorInfo.
 type SparkError struct {
-	status   *status.Status
-	sqlState string
+	status         *status.Status
+	sqlState       string
+	wrappedMessage string
 }
 
 // NewSparkError wraps a gRPC error; other errors are returned unchanged.
 func NewSparkError(err error) error {
-	st, ok := status.FromError(err)
-	if !ok {
+	carrier, ok := errors.AsType[interface {
+		error
+		GRPCStatus() *status.Status
+	}](err)
+	if !ok || carrier.GRPCStatus() == nil {
 		return err
 	}
+	st := carrier.GRPCStatus()
 	e := &SparkError{status: st}
+	if err.Error() != carrier.Error() {
+		e.wrappedMessage = err.Error()
+	}
 	for _, detail := range st.Details() {
 		if info, ok := detail.(*errdetails.ErrorInfo); ok {
 			e.sqlState = info.GetMetadata()["sqlState"]
@@ -45,6 +54,9 @@ func NewSparkError(err error) error {
 }
 
 func (e *SparkError) Error() string {
+	if e.wrappedMessage != "" {
+		return e.wrappedMessage
+	}
 	// Spark's own errors already start with their error class.
 	if e.status.Code() == codes.Internal {
 		return e.status.Message()

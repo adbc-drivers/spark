@@ -25,8 +25,10 @@ import (
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	statuspb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // sparkError returns the Spark Connect client's error for a failed RPC, with
@@ -104,4 +106,30 @@ func TestErrToAdbcErrMapsContextErrors(t *testing.T) {
 		require.ErrorAs(t, sparkbase.ErrToAdbcErr(adbc.StatusIO, tc.err, "execute query"), &adbcErr)
 		require.Equal(t, tc.want, adbcErr.Code, tc.err.Error())
 	}
+}
+
+func TestPreservesStatusDetails(t *testing.T) {
+	original, err := status.New(codes.Internal, "original").WithDetails(&errdetails.ErrorInfo{
+		Reason: "Exception",
+		Metadata: map[string]string{
+			"sqlState":   "42P01",
+			"errorClass": "TABLE_OR_VIEW_NOT_FOUND",
+		},
+	})
+	require.NoError(t, err)
+	wrapped := fmt.Errorf("outer: %w", connectimpl.NewSparkError(original.Err()))
+	var result adbc.Error
+	require.ErrorAs(t, sparkbase.ErrToAdbcErr(adbc.StatusIO, wrapped, "execute query"), &result)
+	require.Len(t, result.Details, 1)
+	require.Equal(t, "spark.connect.grpc_status", result.Details[0].Key())
+	payload, err := result.Details[0].Serialize()
+	require.NoError(t, err)
+	var decoded statuspb.Status
+	require.NoError(t, proto.Unmarshal(payload, &decoded))
+	require.True(t, proto.Equal(original.Proto(), &decoded))
+	require.Len(t, decoded.Details, 1)
+	var info errdetails.ErrorInfo
+	require.NoError(t, decoded.Details[0].UnmarshalTo(&info))
+	require.Equal(t, "TABLE_OR_VIEW_NOT_FOUND", info.GetMetadata()["errorClass"])
+	require.Equal(t, adbc.StatusNotFound, result.Code)
 }

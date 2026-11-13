@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow-adbc/go/adbc"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 var ErrTBD = adbc.Error{
@@ -46,6 +47,17 @@ func ErrToAdbcErr(defaultStatus adbc.Status, err error, context string, contextA
 	status := statusFromGRPC(defaultStatus, err)
 	var details []adbc.ErrorDetail
 	var sqlState [5]byte
+	if carrier, ok := errors.AsType[interface {
+		error
+		GRPCStatus() *grpcstatus.Status
+	}](err); ok && carrier.GRPCStatus() != nil {
+		payload, marshalErr := proto.Marshal(carrier.GRPCStatus().Proto())
+		if marshalErr == nil {
+			details = append(details, &adbc.BinaryErrorDetail{Name: "spark.connect.grpc_status", Detail: payload})
+		} else {
+			err = fmt.Errorf("%w (could not serialize gRPC status: %v)", err, marshalErr)
+		}
+	}
 	if sparkErr, ok := errors.AsType[sqlStateError](err); ok {
 		copy(sqlState[:], []byte(sparkErr.SQLState()))
 		status = statusFromSQLState(status, sparkErr.SQLState())
