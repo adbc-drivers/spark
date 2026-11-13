@@ -1,4 +1,4 @@
-// Copyright (c) 2025 ADBC Drivers Contributors
+// Copyright (c) 2025-2026 ADBC Drivers Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -141,6 +141,9 @@ const (
 
 	// OptionConnectSessionId specifies the Spark Connect session ID to reuse
 	OptionConnectSessionId = "spark.connect.session_id"
+
+	// OptionConnectCallHeaderPrefix configures textual metadata at database and connection scope.
+	OptionConnectCallHeaderPrefix = "spark.connect.call_header."
 
 	// OptionConnectReleaseSession specifies whether to release the Spark Connect session when closed
 	OptionConnectReleaseSession = "spark.connect.release_session"
