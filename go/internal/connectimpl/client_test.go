@@ -16,8 +16,13 @@ package connectimpl
 
 import (
 	"context"
+	proto "github.com/adbc-drivers/spark/go/internal/generated"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/stretchr/testify/require"
@@ -79,4 +84,22 @@ func TestUserIDAndClientTypeDefaults(t *testing.T) {
 	require.Equal(t, "na", userID(""))
 
 	require.True(t, strings.HasPrefix(clientType(), "adbc-driver-spark os/"), clientType())
+}
+
+func TestPlaintextToken(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	server := grpc.NewServer(grpc.UnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		md, _ := metadata.FromIncomingContext(ctx)
+		require.Equal(t, []string{"Bearer test-token"}, md.Get("authorization"))
+		return &proto.ConfigResponse{}, nil
+	}))
+	proto.RegisterSparkConnectServiceServer(server, &proto.UnimplementedSparkConnectServiceServer{})
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, err := NewClient(ctx, ConnectionOpts{Host: listener.Addr().String(), Token: "test-token"}, map[string]string{"test": "value"})
+	require.NoError(t, err)
+	require.NoError(t, client.Close(ctx))
 }

@@ -286,6 +286,7 @@ func TestParseConnectOptionsFromUri(t *testing.T) {
 			uri: "spark://localhost:10000?api=connect&auth_type=none",
 			options: connectimpl.ConnectionOpts{
 				Host:                      "localhost:10000",
+				Tls:                       true,
 				AuthType:                  connectimpl.AuthTypeNone,
 				ValidateServerCertificate: true,
 				ReleaseSession:            true,
@@ -295,6 +296,19 @@ func TestParseConnectOptionsFromUri(t *testing.T) {
 			uri: "spark://foo:bar@localhost:10000?api=connect&auth_type=token",
 			options: connectimpl.ConnectionOpts{
 				Host:                      "localhost:10000",
+				Tls:                       true,
+				AuthType:                  connectimpl.AuthTypeToken,
+				Username:                  "foo",
+				Token:                     "bar",
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			uri: "spark://foo:bar@localhost:10000?api=connect&auth_type=token&tls=false",
+			options: connectimpl.ConnectionOpts{
+				Host:                      "localhost:10000",
+				Tls:                       false,
 				AuthType:                  connectimpl.AuthTypeToken,
 				Username:                  "foo",
 				Token:                     "bar",
@@ -339,6 +353,7 @@ func TestParseConnectOptionsFromUri(t *testing.T) {
 			uri: "spark://localhost:10000?api=connect&auth_type=none&connect.session_id=session-id&connect.release_session=false",
 			options: connectimpl.ConnectionOpts{
 				Host:                      "localhost:10000",
+				Tls:                       true,
 				AuthType:                  connectimpl.AuthTypeNone,
 				ValidateServerCertificate: true,
 				SessionID:                 "session-id",

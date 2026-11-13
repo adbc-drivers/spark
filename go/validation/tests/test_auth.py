@@ -43,6 +43,7 @@ def connect_tls_uri(driver) -> str | None:
         return None
 
     uri = uri.replace("auth_type=none", "auth_type=token")
+    uri = uri.replace("tls=false", "tls=true")
     if "tls=true" not in uri:
         uri += "&tls=true"
     return uri
@@ -102,8 +103,8 @@ def test_auth(subtests, driver, driver_path, connect_uri):
         uri = connect_uri
         orig = "auth_type=none"
         cases = [
-            # Spark Connect client forces TLS
-            ("auth_type=token", "Could not execute query"),
+            # Local plaintext Connect accepts bearer tokens.
+            ("auth_type=token", None),
         ]
     elif driver.short_version.endswith("-livy"):
         uri = os.environ["SPARK_LIVY_URI"]
@@ -138,10 +139,14 @@ def test_auth(subtests, driver, driver_path, connect_uri):
             }
 
         with subtests.test(auth_type=replacement[10:]):
-            if driver.short_version.endswith("-livy") and replacement in (
-                "auth_type=aws_sigv4",
-                "auth_type=basic",
-                "auth_type=none",
+            if error_message is None or (
+                driver.short_version.endswith("-livy")
+                and replacement
+                in (
+                    "auth_type=aws_sigv4",
+                    "auth_type=basic",
+                    "auth_type=none",
+                )
             ):
                 # this seems to succeed, presumably because the local docker
                 # container doesn't actually validate things?

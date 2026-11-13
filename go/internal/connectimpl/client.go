@@ -54,7 +54,6 @@ type ConnectionOpts struct {
 	AuthType AuthType // not used
 	Username string
 	// Token is the OAuth2 bearer token used when AuthType is AuthTypeToken.
-	// TLS is enabled when a token is present.
 	Token string
 
 	Tls                       bool
@@ -115,14 +114,15 @@ func newConnectClient(opts ConnectionOpts) (*connectClient, error) {
 		grpc.WithAuthority(host),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxRecvMsgSize)),
 	}
-	if opts.Tls || opts.Token != "" {
+	if opts.Tls {
 		tlsConfig := &tls.Config{InsecureSkipVerify: !opts.ValidateServerCertificate}
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
-		if opts.Token != "" {
-			dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(bearerToken(opts.Token)))
-		}
 	} else {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
+	if opts.Token != "" {
+		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(bearerToken{token: opts.Token, requireTLS: opts.Tls}))
 	}
 
 	conn, err := grpc.NewClient(net.JoinHostPort(host, strconv.Itoa(port)), dialOpts...)
@@ -179,14 +179,17 @@ func splitHostPort(hostPort string) (string, int, error) {
 }
 
 // bearerToken sends a token on every RPC. gRPC refuses to send it over a
-// connection without transport security.
-type bearerToken string
-
-func (t bearerToken) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
-	return map[string]string{"authorization": "Bearer " + string(t)}, nil
+// connection without transport security unless explicitly configured otherwise.
+type bearerToken struct {
+	token      string
+	requireTLS bool
 }
 
-func (bearerToken) RequireTransportSecurity() bool { return true }
+func (t bearerToken) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
+	return map[string]string{"authorization": "Bearer " + t.token}, nil
+}
+
+func (t bearerToken) RequireTransportSecurity() bool { return t.requireTLS }
 
 // userID defaults to $USER, as spark-connect-go did. Spark scopes server
 // sessions by user and session ID.

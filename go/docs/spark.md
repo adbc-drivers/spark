@@ -123,7 +123,7 @@ These parameters can be specified in the URI as query parameters, or as connecti
   For the Livy backend, whether to delete the session when the connection is closed. Set to `false` to keep a session available after closing the connection.
 
 `spark.tls` (query parameter: `tls`)
-: **Type** boolean. **Default**: false.
+: **Type** boolean. **Default**: true for `connect`, false otherwise.
 
   Whether to use TLS for connecting. Only applies to `connect`, `livy`, and `thrift+http`.
 
