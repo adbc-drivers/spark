@@ -1,4 +1,4 @@
-// Copyright (c) 2025 ADBC Drivers Contributors
+// Copyright (c) 2025-2026 ADBC Drivers Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -516,20 +516,28 @@ func validateStartupCatalog(factory sparkbase.SparkClientFactory, catalog string
 	}
 }
 
-func newSparkClientFactory(ctx context.Context, options map[string]string) (func(context.Context) (sparkbase.SparkClient, error), error) {
+func parseDatabaseURI(options map[string]string) error {
 	uri, ok := options[adbc.OptionKeyURI]
 	if ok {
 		parsed, err := driverbase.SafeParseURL(uri)
 		if err != nil {
-			return nil, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
+			return sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
 		}
 
 		err = parseOptionsFromUri(parsed, options)
 		if err != nil {
-			return nil, sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
+			return sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI")
 		}
 
 		delete(options, adbc.OptionKeyURI)
+	}
+
+	return nil
+}
+
+func newSparkClientFactory(ctx context.Context, options map[string]string, headers *sparkbase.CallHeaders) (func(context.Context) (sparkbase.SparkClient, error), error) {
+	if err := parseDatabaseURI(options); err != nil {
+		return nil, err
 	}
 
 	catalog := options[adbc.OptionKeyCurrentCatalog]
@@ -540,6 +548,18 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 		return nil, sparkbase.MissingRequiredOptionErr(sparkutil.OptionApi)
 	}
 	delete(options, sparkutil.OptionApi)
+
+	for key, value := range options {
+		if name, ok := strings.CutPrefix(key, sparkutil.OptionConnectCallHeaderPrefix); ok {
+			if api != sparkutil.OptionValueApiConnect {
+				return nil, adbc.Error{Code: adbc.StatusNotImplemented, Msg: "[spark] call headers require Spark Connect"}
+			}
+			if err := headers.SetCallHeader(name, value); err != nil {
+				return nil, err
+			}
+			delete(options, key)
+		}
+	}
 
 	switch api {
 	case sparkutil.OptionValueApiThriftBinary, sparkutil.OptionValueApiThriftHttp:
@@ -574,7 +594,9 @@ func newSparkClientFactory(ctx context.Context, options map[string]string) (func
 
 		sessionOptions := sessionOptionsFromOptions(options, catalog)
 		factory := func(ctx context.Context) (sparkbase.SparkClient, error) {
-			return connectimpl.NewClient(ctx, connectOpts, sessionOptions)
+			opts := connectOpts
+			opts.CallHeaders = headers.Snapshot()
+			return connectimpl.NewClient(ctx, opts, sessionOptions)
 		}
 		return validateStartupCatalog(factory, catalog), nil
 

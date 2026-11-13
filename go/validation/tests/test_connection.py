@@ -1,4 +1,4 @@
-# Copyright (c) 2025 ADBC Drivers Contributors
+# Copyright (c) 2025-2026 ADBC Drivers Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 import uuid
 
+import adbc_driver_manager
 import adbc_drivers_validation.tests.connection
 import pytest
 
@@ -96,3 +97,19 @@ class TestConnection(adbc_drivers_validation.tests.connection.TestConnection):
                 cursor.execute(
                     f"DROP VIEW IF EXISTS {driver.quote_one_identifier(view)}"
                 )
+
+
+def test_call_headers_unsupported(driver, conn, db_kwargs, driver_path):
+    if driver.short_version.endswith("-connect"):
+        pytest.skip("test is only for non-Connect backends")
+    option = "spark.connect.call_header.x-route"
+    with pytest.raises(adbc_driver_manager.NotSupportedError):
+        adbc_driver_manager.AdbcDatabase(
+            driver=driver_path, **{**db_kwargs, option: "private"}
+        )
+    with adbc_driver_manager.AdbcDatabase(driver=driver_path, **db_kwargs) as db:
+        for handle in (db, conn.adbc_connection):
+            with pytest.raises(adbc_driver_manager.NotSupportedError):
+                handle.set_options(**{option: "private"})
+            with pytest.raises(adbc_driver_manager.NotSupportedError):
+                handle.get_option(option)

@@ -48,6 +48,7 @@ const (
 )
 
 type ConnectionOpts struct {
+	CallHeaders metadata.MD
 	// Host is "hostname" or "hostname:port".
 	Host string
 
@@ -76,6 +77,7 @@ const (
 )
 
 type connectClient struct {
+	sparkbase.CallHeaders
 	conn           *grpc.ClientConn
 	service        proto.SparkConnectServiceClient
 	sessionID      string
@@ -94,6 +96,14 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 	c, err := newConnectClient(opts)
 	if err != nil {
 		return nil, err
+	}
+	for name, values := range opts.CallHeaders {
+		for _, value := range values {
+			if err := c.SetCallHeader(name, value); err != nil {
+				_ = c.Close(ctx)
+				return nil, err
+			}
+		}
 	}
 	for k, v := range sessionConfig {
 		if err := c.setConfig(ctx, k, v); err != nil {
@@ -209,10 +219,8 @@ func clientType() string {
 }
 
 func (c *connectClient) outgoing(ctx context.Context) context.Context {
-	if len(c.headers) == 0 {
-		return ctx
-	}
-	return metadata.NewOutgoingContext(ctx, c.headers)
+	existing, _ := metadata.FromOutgoingContext(ctx)
+	return metadata.NewOutgoingContext(ctx, metadata.Join(existing, c.headers, c.Snapshot()))
 }
 
 func (c *connectClient) setConfig(ctx context.Context, key, value string) error {

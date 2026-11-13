@@ -102,6 +102,11 @@ These parameters can be specified in the URI as query parameters, or as connecti
   Currently only `sql` is tested/supported.
   :::
 
+`spark.connect.call_header.<HEADER_NAME>` (query parameter: `connect.call_header.<HEADER_NAME>`)
+: **Type**: string. **Scope**: database and connection.
+
+  Only supported for Spark Connect. Add arbitrary HTTP headers to be sent on requests. Binary headers are not currently supported.
+
 `spark.connect.session_id` (query parameter: `connect.session_id`)
 : **Type**: string.
 
