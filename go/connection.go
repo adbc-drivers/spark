@@ -174,6 +174,10 @@ func (c *connectionImpl) NewStatement(ctx context.Context) (adbc.StatementWithCo
 	return driverbase.NewStatement(&statementImpl{
 		StatementImplBase: driverbase.NewStatementImplBase(&c.ConnectionImplBase, c.ErrorHelper),
 		cnxn:              c,
+		action: ActionState{
+			supported: supportedActions,
+			eh:        c.ErrorHelper,
+		},
 		ingest: bulkIngestOptions{
 			BulkIngestOptions: driverbase.NewBulkIngestOptions(),
 			s3BaseEndpoint:    c.s3BaseEndpoint,
