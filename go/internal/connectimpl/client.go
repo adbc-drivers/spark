@@ -399,3 +399,36 @@ func (c *ConnectClient) GetOptionInt(_ context.Context, _ string) (int64, bool, 
 var _ sparkbase.SparkClient = (*ConnectClient)(nil)
 
 func (c *ConnectClient) InterruptOperation(id string) { c.interruptOperation(id) }
+
+// UnaryRaw relays protocol content with connection-owned identity.
+func (c *ConnectClient) UnaryRaw(ctx context.Context, message pb.Message) (pb.Message, error) {
+	request := pb.Clone(message)
+	var response pb.Message
+	var err error
+	switch r := request.(type) {
+	case *proto.AnalyzePlanRequest:
+		r.SessionId = c.sessionID
+		r.UserContext = c.userContext
+		r.ClientObservedServerSideSessionId = nil
+		response, err = c.service.AnalyzePlan(c.outgoing(ctx), r)
+	case *proto.ConfigRequest:
+		r.SessionId = c.sessionID
+		r.UserContext = c.userContext
+		r.ClientObservedServerSideSessionId = nil
+		response, err = c.service.Config(c.outgoing(ctx), r)
+	case *proto.ArtifactStatusesRequest:
+		r.SessionId = c.sessionID
+		r.UserContext = c.userContext
+		r.ClientObservedServerSideSessionId = nil
+		response, err = c.service.ArtifactStatus(c.outgoing(ctx), r)
+	case *proto.InterruptRequest:
+		r.SessionId = c.sessionID
+		r.UserContext = c.userContext
+		r.ClientObservedServerSideSessionId = nil
+		response, err = c.service.Interrupt(c.outgoing(ctx), r)
+	}
+	if err != nil {
+		return nil, NewSparkError(err)
+	}
+	return response, nil
+}
