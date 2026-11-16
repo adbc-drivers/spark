@@ -20,16 +20,22 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/adbc-drivers/spark/go/connectclient/sparkerrors"
 	"github.com/adbc-drivers/spark/go/internal/hiveserver2"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 var ErrTBD = adbc.Error{
 	Code: adbc.StatusNotImplemented,
 	Msg:  "[spark] TBD",
+}
+
+// sqlStateError is an error that carries a Spark SQLSTATE.
+type sqlStateError interface {
+	error
+	SQLState() string
 }
 
 // errToAdbcErr converts an error to an ADBC error.
@@ -41,9 +47,20 @@ func ErrToAdbcErr(defaultStatus adbc.Status, err error, context string, contextA
 	status := statusFromGRPC(defaultStatus, err)
 	var details []adbc.ErrorDetail
 	var sqlState [5]byte
-	if sparkErr, ok := errors.AsType[*sparkerrors.SparkError](err); ok {
-		copy(sqlState[:], []byte(sparkErr.SqlState))
-		status = statusFromSQLState(status, sparkErr.SqlState)
+	if carrier, ok := errors.AsType[interface {
+		error
+		GRPCStatus() *grpcstatus.Status
+	}](err); ok && carrier.GRPCStatus() != nil {
+		payload, marshalErr := proto.Marshal(carrier.GRPCStatus().Proto())
+		if marshalErr == nil {
+			details = append(details, &adbc.BinaryErrorDetail{Name: "spark.connect.grpc_status", Detail: payload})
+		} else {
+			err = fmt.Errorf("%w (could not serialize gRPC status: %v)", err, marshalErr)
+		}
+	}
+	if sparkErr, ok := errors.AsType[sqlStateError](err); ok {
+		copy(sqlState[:], []byte(sparkErr.SQLState()))
+		status = statusFromSQLState(status, sparkErr.SQLState())
 	}
 
 	var builder strings.Builder
@@ -121,9 +138,7 @@ func statusFromSQLState(defaultStatus adbc.Status, sqlState string) adbc.Status 
 // statuses, keeping defaultStatus for codes without a more specific one.
 func statusFromGRPC(defaultStatus adbc.Status, err error) adbc.Status {
 	code := codes.Unknown
-	if sparkErr, ok := errors.AsType[*sparkerrors.SparkError](err); ok {
-		code = sparkErr.Code
-	} else if grpcStatus, ok := grpcstatus.FromError(err); ok {
+	if grpcStatus, ok := grpcstatus.FromError(err); ok {
 		code = grpcStatus.Code()
 	} else if errors.Is(err, context.Canceled) {
 		code = codes.Canceled

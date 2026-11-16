@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package sparkbase
+package sparkbase_test
 
 import (
 	"context"
@@ -20,19 +20,32 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/adbc-drivers/spark/go/connectclient/sparkerrors"
+	"github.com/adbc-drivers/spark/go/internal/connectimpl"
+	"github.com/adbc-drivers/spark/go/internal/sparkbase"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	statuspb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
-func TestErrToAdbcErrUsesSparkSQLState(t *testing.T) {
-	sparkErr := &sparkerrors.SparkError{
-		SqlState: "42P01",
-		Message:  "table not found",
+// sparkError returns the Spark Connect client's error for a failed RPC, with
+// the SQLSTATE in an ErrorInfo as Spark sends it.
+func sparkError(t *testing.T, code codes.Code, sqlState string) error {
+	t.Helper()
+	st := status.New(code, "boom")
+	if sqlState != "" {
+		var err error
+		st, err = st.WithDetails(&errdetails.ErrorInfo{Metadata: map[string]string{"sqlState": sqlState}})
+		require.NoError(t, err)
 	}
-	err := ErrToAdbcErr(adbc.StatusIO, sparkerrors.WithType(sparkErr, sparkerrors.ExecutionError), "execute query")
+	return connectimpl.NewSparkError(st.Err())
+}
+
+func TestErrToAdbcErrUsesSparkSQLState(t *testing.T) {
+	err := sparkbase.ErrToAdbcErr(adbc.StatusIO, fmt.Errorf("execute: %w", sparkError(t, codes.Internal, "42P01")), "execute query")
 
 	var adbcErr adbc.Error
 	require.ErrorAs(t, err, &adbcErr)
@@ -60,13 +73,12 @@ func TestErrToAdbcErrMapsGRPCStatus(t *testing.T) {
 		{codes.Unknown, adbc.StatusInvalidState},
 	} {
 		t.Run(tc.code.String(), func(t *testing.T) {
-			rpcErr := status.Error(tc.code, "boom")
 			for _, err := range []error{
-				fmt.Errorf("execute: %w", rpcErr),
-				sparkerrors.WithType(sparkerrors.FromRPCError(rpcErr), sparkerrors.ExecutionError),
+				fmt.Errorf("execute: %w", status.Error(tc.code, "boom")),
+				sparkError(t, tc.code, ""),
 			} {
 				var adbcErr adbc.Error
-				require.ErrorAs(t, ErrToAdbcErr(adbc.StatusInvalidState, err, "execute query"), &adbcErr)
+				require.ErrorAs(t, sparkbase.ErrToAdbcErr(adbc.StatusInvalidState, err, "execute query"), &adbcErr)
 				require.Equal(t, tc.want, adbcErr.Code)
 			}
 		})
@@ -74,14 +86,10 @@ func TestErrToAdbcErrMapsGRPCStatus(t *testing.T) {
 }
 
 func TestErrToAdbcErrPrefersSQLStateOverGRPCStatus(t *testing.T) {
-	sparkErr := &sparkerrors.SparkError{
-		Code:     codes.InvalidArgument,
-		SqlState: "42P01",
-		Message:  "table not found",
-	}
+	err := sparkError(t, codes.InvalidArgument, "42P01")
 
 	var adbcErr adbc.Error
-	require.ErrorAs(t, ErrToAdbcErr(adbc.StatusIO, sparkErr, "execute query"), &adbcErr)
+	require.ErrorAs(t, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute query"), &adbcErr)
 	require.Equal(t, adbc.StatusNotFound, adbcErr.Code)
 }
 
@@ -95,7 +103,33 @@ func TestErrToAdbcErrMapsContextErrors(t *testing.T) {
 		{errors.New("boom"), adbc.StatusIO},
 	} {
 		var adbcErr adbc.Error
-		require.ErrorAs(t, ErrToAdbcErr(adbc.StatusIO, tc.err, "execute query"), &adbcErr)
+		require.ErrorAs(t, sparkbase.ErrToAdbcErr(adbc.StatusIO, tc.err, "execute query"), &adbcErr)
 		require.Equal(t, tc.want, adbcErr.Code, tc.err.Error())
 	}
+}
+
+func TestPreservesStatusDetails(t *testing.T) {
+	original, err := status.New(codes.Internal, "original").WithDetails(&errdetails.ErrorInfo{
+		Reason: "Exception",
+		Metadata: map[string]string{
+			"sqlState":   "42P01",
+			"errorClass": "TABLE_OR_VIEW_NOT_FOUND",
+		},
+	})
+	require.NoError(t, err)
+	wrapped := fmt.Errorf("outer: %w", connectimpl.NewSparkError(original.Err()))
+	var result adbc.Error
+	require.ErrorAs(t, sparkbase.ErrToAdbcErr(adbc.StatusIO, wrapped, "execute query"), &result)
+	require.Len(t, result.Details, 1)
+	require.Equal(t, "spark.connect.grpc_status", result.Details[0].Key())
+	payload, err := result.Details[0].Serialize()
+	require.NoError(t, err)
+	var decoded statuspb.Status
+	require.NoError(t, proto.Unmarshal(payload, &decoded))
+	require.True(t, proto.Equal(original.Proto(), &decoded))
+	require.Len(t, decoded.Details, 1)
+	var info errdetails.ErrorInfo
+	require.NoError(t, decoded.Details[0].UnmarshalTo(&info))
+	require.Equal(t, "TABLE_OR_VIEW_NOT_FOUND", info.GetMetadata()["errorClass"])
+	require.Equal(t, adbc.StatusNotFound, result.Code)
 }

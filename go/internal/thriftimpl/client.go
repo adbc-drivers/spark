@@ -23,6 +23,7 @@ import (
 	"net/http"
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
+	connectpb "github.com/adbc-drivers/spark/go/internal/generated"
 	"github.com/adbc-drivers/spark/go/internal/hiveserver2"
 	"github.com/adbc-drivers/spark/go/internal/sasl"
 	"github.com/adbc-drivers/spark/go/internal/sparkbase"
@@ -270,6 +271,13 @@ func (c *thriftClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryC
 	return -1, nil
 }
 
+func (c *thriftClient) ExecuteLogicalPlan(ctx context.Context, q sparkbase.QueryContext, plan *connectpb.Plan) (array.RecordReader, error) {
+	return nil, adbc.Error{
+		Code: adbc.StatusNotImplemented,
+		Msg:  "[spark] logical plan execution not supported for Thrift",
+	}
+}
+
 func (c *thriftClient) GetCatalogs(ctx context.Context, catalogFilter *string) ([]string, error) {
 	return sparkbase.DefaultGetCatalogsImpl(c, ctx, catalogFilter)
 }
@@ -400,6 +408,9 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 	tables := make([]driverbase.TableInfo, 0)
 	tableIndex := make(map[string]int)
 	for _, row := range result.tableResp.Results.Rows {
+		if !inSchema(row, schema) {
+			continue
+		}
 		tableName := *row.ColVals[2].GetStringVal().Value
 		if !sparkbase.MatchesName(tableMatch, tableName) {
 			continue
@@ -415,6 +426,9 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 
 	if result.colResp != nil {
 		for _, row := range result.colResp.Results.Rows {
+			if !inSchema(row, schema) {
+				continue
+			}
 			tableName := *row.ColVals[2].GetStringVal().Value
 			idx, ok := tableIndex[tableName]
 			if !ok {
@@ -456,6 +470,16 @@ func (c *thriftClient) GetTablesForDBSchema(ctx context.Context, catalog string,
 	}
 
 	return tables, nil
+}
+
+// inSchema reports whether a row of GetTables or GetColumns belongs to schema.
+// Spark's Thrift server reads the schema name as a pattern, in which '_'
+// matches any character, so it also returns the rows of other schemas that
+// the name matches. Temporary views have no schema and stay listed in every
+// schema, as SHOW TABLES does.
+func inSchema(row *hiveserver2.TRow, schema string) bool {
+	v := row.ColVals[1].GetStringVal()
+	return v == nil || v.Value == nil || *v.Value == schema
 }
 
 func (c *thriftClient) GetOption(_ context.Context, _ string) (string, bool, error) {

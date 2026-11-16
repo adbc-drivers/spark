@@ -61,3 +61,72 @@ def test_session_id(driver, conn, db_kwargs, driver_path):
             cur.execute("SELECT 1")
             result = cur.fetchall()
             assert result == [(1,)]
+
+
+def test_large_value(driver, conn):
+    # Spark sends at least one row per Arrow batch, so this row is a single
+    # message over gRPC's default 4 MiB limit.
+    size = 6 * 1024 * 1024
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT repeat('x', {size}) AS s")
+        assert cur.fetchall() == [("x" * size,)]
+
+
+def test_many_batches(driver, conn):
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM range(0, 10000, 1, 10)")
+        batches = list(cur.fetch_record_batch())
+    assert len(batches) > 1
+    assert [i for b in batches for i in b.column(0).to_pylist()] == list(range(10000))
+
+
+def test_query_error(driver, conn):
+    with conn.cursor() as cur, pytest.raises(adbc_driver_manager.Error) as excinfo:
+        cur.execute("SELECT * FROM table_that_does_not_exist")
+        cur.fetchall()
+    assert excinfo.value.status_code == adbc_driver_manager.AdbcStatusCode.NOT_FOUND
+    assert excinfo.value.sqlstate == "42P01"
+
+
+def test_call_headers(driver, db_kwargs, driver_path):
+    prefix = "spark.connect.call_header."
+    with adbc_driver_manager.AdbcDatabase(
+        driver=driver_path,
+        **{**db_kwargs, prefix + "X-Route": "initial"},
+    ) as db:
+        assert db.get_option(prefix + "x-route") == "initial"
+        with (
+            adbc_driver_manager.AdbcConnection(
+                db, **{prefix + "X-Route": "queued"}
+            ) as first,
+            adbc_driver_manager.AdbcConnection(db) as sibling,
+        ):
+            # Constructor options are queued before AdbcConnectionInit.
+            assert first.get_option(prefix + "x-route") == "queued"
+            assert sibling.get_option(prefix + "x-route") == "initial"
+            db.set_options(**{prefix + "x-route": "new"})
+            assert first.get_option(prefix + "x-route") == "queued"
+            assert sibling.get_option(prefix + "x-route") == "initial"
+            with adbc_driver_manager.AdbcConnection(db) as newer:
+                assert newer.get_option(prefix + "x-route") == "new"
+            with adbc_driver_manager.AdbcStatement(first) as stmt:
+                stmt.set_sql_query("SELECT 1")
+                stmt.execute_query()[0].release()
+                first.set_options(**{prefix + "x-route": "updated"})
+                stmt.execute_query()[0].release()
+                assert first.get_option(prefix + "X-ROUTE") == "updated"
+                with pytest.raises(adbc_driver_manager.NotSupportedError):
+                    stmt.set_options(**{prefix + "x-route": "statement"})
+            first.set_options(**{prefix + "x-route": ""})
+            assert first.get_option(prefix + "x-route") == ""
+            with pytest.raises(adbc_driver_manager.Error) as excinfo:
+                first.get_option(prefix + "unset")
+            assert (
+                excinfo.value.status_code
+                == adbc_driver_manager.AdbcStatusCode.NOT_FOUND
+            )
+            for handle in (db, first):
+                for name, value in [("bad name", "private"), ("valid", "private\n")]:
+                    with pytest.raises(adbc_driver_manager.ProgrammingError) as excinfo:
+                        handle.set_options(**{prefix + name: value})
+                    assert "private" not in str(excinfo.value)

@@ -80,7 +80,7 @@ Before opening a pull request:
 - Ensure the Apache license header is at the top of all files.
 - Check if there is an existing issue.  If not, please file one, unless the
   change is trivial.
-- Assign the issue to yourself by commenting just the word `take`.
+- Ask a maintainer to assign the issue to you before proceeding.
 - Run the static checks by installing [pre-commit](https://pre-commit.com/),
   then running `pre-commit run --all-files` from inside the repository.  Make
   sure all your changes are staged/committed (unstaged changes will be

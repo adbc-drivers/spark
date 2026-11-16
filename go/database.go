@@ -1,4 +1,4 @@
-// Copyright (c) 2025 ADBC Drivers Contributors
+// Copyright (c) 2025-2026 ADBC Drivers Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package spark
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/spark/go/internal/sparkbase"
@@ -27,18 +28,49 @@ import (
 type databaseImpl struct {
 	driverbase.DatabaseImplBase
 
+	callHeaders    sparkbase.CallHeaders
+	connectBackend bool
 	clientFactory  sparkbase.SparkClientFactory
 	s3BaseEndpoint string
 	s3UsePathStyle bool
 }
 
 func (d *databaseImpl) GetOption(ctx context.Context, key string) (string, error) {
+	if name, ok := strings.CutPrefix(key, sparkutil.OptionConnectCallHeaderPrefix); ok {
+		if !d.connectBackend {
+			return "", adbc.Error{Code: adbc.StatusNotImplemented, Msg: "[spark] call headers require Spark Connect"}
+		}
+		return d.callHeaders.GetCallHeader(name)
+	}
 	return d.DatabaseImplBase.GetOption(ctx, key)
 }
 
+func (d *databaseImpl) SetOption(ctx context.Context, key, value string) error {
+	if name, ok := strings.CutPrefix(key, sparkutil.OptionConnectCallHeaderPrefix); ok {
+		if !d.connectBackend {
+			return adbc.Error{Code: adbc.StatusNotImplemented, Msg: "[spark] call headers require Spark Connect"}
+		}
+		return d.callHeaders.SetCallHeader(name, value)
+	}
+	return d.DatabaseImplBase.SetOption(ctx, key, value)
+}
+
 func (d *databaseImpl) SetOptions(ctx context.Context, options map[string]string) error {
+	if d.clientFactory != nil {
+		for key, value := range options {
+			if err := d.SetOption(ctx, key, value); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := parseDatabaseURI(options); err != nil {
+		return err
+	}
+
+	d.connectBackend = options[sparkutil.OptionApi] == sparkutil.OptionValueApiConnect
 	var err error
-	d.clientFactory, err = newSparkClientFactory(ctx, options)
+	d.clientFactory, err = newSparkClientFactory(ctx, options, &d.callHeaders)
 	if err != nil {
 		return err
 	}

@@ -182,6 +182,44 @@ class Spark41ConnectQuirks(Spark4ConnectQuirks):
     )
 
 
+class Spark42ConnectQuirks(Spark4ConnectQuirks):
+    vendor_version = re.compile(r"4\.2\.\d+.*\(Spark Connect\)")
+    short_version = "4.2-connect"
+    features = Spark4ConnectQuirks.features.with_values(
+        secondary_catalog=None,
+        secondary_catalog_schema=None,
+    )
+    setup = model.DriverSetup(
+        database={
+            "uri": model.FromEnv("SPARK42_CONNECT_URI"),
+            "spark.ingest.s3.use_path_style": "true",
+        },
+        connection={},
+        statement={
+            "spark.ingest.staging_area_uri": "s3://test/temporary",
+        },
+    )
+
+
+class Spark43ConnectQuirks(Spark4ConnectQuirks):
+    vendor_version = re.compile(r"4\.3\.\d+.*\(Spark Connect\)")
+    short_version = "4.3-connect"
+    features = Spark4ConnectQuirks.features.with_values(
+        secondary_catalog=None,
+        secondary_catalog_schema=None,
+    )
+    setup = model.DriverSetup(
+        database={
+            "uri": model.FromEnv("SPARK43_CONNECT_URI"),
+            "spark.ingest.s3.use_path_style": "true",
+        },
+        connection={},
+        statement={
+            "spark.ingest.staging_area_uri": "s3://test/temporary",
+        },
+    )
+
+
 class Spark41ConnectIcebergQuirks(Spark41ConnectQuirks):
     name = "spark4iceberg"
     setup = model.DriverSetup(
@@ -342,6 +380,10 @@ def get_quirks(combined_version: str) -> model.DriverQuirks:
             return Spark4ThriftHttpQuirks()
         elif version == "4.0-connect":
             return Spark4ConnectQuirks()
+        elif version == "4.2-connect":
+            return Spark42ConnectQuirks()
+        elif version == "4.3-connect":
+            return Spark43ConnectQuirks()
         elif version == "4.1-connect":
             return Spark41ConnectQuirks()
         elif version in ("emr-8.0-connect"):

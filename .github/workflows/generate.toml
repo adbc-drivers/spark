@@ -50,6 +50,14 @@ service_name = "spark41-connect-server"
 vendor_version = "spark4iceberg_4.1-connect"
 
 [[lang.go.validation.configs]]
+service_name = "spark42-connect-server"
+vendor_version = "spark4_4.2-connect"
+
+[[lang.go.validation.configs]]
+service_name = "spark43-connect-server"
+vendor_version = "spark4_4.3-connect"
+
+[[lang.go.validation.configs]]
 service_name = ""
 vendor_version = "emr_8.0-connect"
 aws = true
@@ -59,3 +67,6 @@ environment = "aws-emr-serverless"
 EMR_SERVERLESS_APPLICATION_ID = { secret = "EMR_SERVERLESS_APPLICATION_ID", contexts = ["validate"] }
 EMR_SERVERLESS_EXECUTION_ROLE_ARN = { secret = "EMR_SERVERLESS_EXECUTION_ROLE_ARN", contexts = ["validate"] }
 STAGING_S3_BUCKET = { secret = "STAGING_S3_BUCKET", contexts = ["validate"] }
+
+[validation.extra-pypi-dependencies]
+pyspark-client = ">=4.3.0, <5"

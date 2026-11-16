@@ -21,6 +21,7 @@ import (
 
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/spark/go/internal/sparkbase"
+	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -163,7 +164,23 @@ func (c *connectionImpl) ReadPartition(ctx context.Context, serializedPartition 
 	}
 }
 
+func (c *connectionImpl) SetOption(ctx context.Context, key, value string) error {
+	if name, ok := strings.CutPrefix(key, sparkutil.OptionConnectCallHeaderPrefix); ok {
+		if client, ok := c.client.(sparkbase.CallHeaderClient); ok {
+			return client.SetCallHeader(name, value)
+		}
+		return adbc.Error{Code: adbc.StatusNotImplemented, Msg: "[spark] call headers require Spark Connect"}
+	}
+	return c.ConnectionImplBase.SetOption(ctx, key, value)
+}
+
 func (c *connectionImpl) GetOption(ctx context.Context, key string) (string, error) {
+	if name, ok := strings.CutPrefix(key, sparkutil.OptionConnectCallHeaderPrefix); ok {
+		if client, ok := c.client.(sparkbase.CallHeaderClient); ok {
+			return client.GetCallHeader(name)
+		}
+		return "", adbc.Error{Code: adbc.StatusNotImplemented, Msg: "[spark] call headers require Spark Connect"}
+	}
 	if val, ok, err := c.client.GetOption(ctx, key); err != nil {
 		return "", err
 	} else if ok {

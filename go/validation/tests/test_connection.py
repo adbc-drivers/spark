@@ -1,4 +1,4 @@
-# Copyright (c) 2025 ADBC Drivers Contributors
+# Copyright (c) 2025-2026 ADBC Drivers Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 import uuid
 
+import adbc_driver_manager
 import adbc_drivers_validation.tests.connection
 import pytest
 
@@ -26,6 +27,48 @@ def pytest_generate_tests(metafunc) -> None:
 
 
 class TestConnection(adbc_drivers_validation.tests.connection.TestConnection):
+    def test_get_objects_schema_name_is_not_a_pattern(self, driver, conn) -> None:
+        if driver.short_version.startswith("emr-"):
+            pytest.skip("EMR tables need an S3 location")
+        # Spark's Thrift server reads the schema name in GetTables and
+        # GetColumns as a pattern, in which '_' matches any character.
+        suffix = uuid.uuid4().hex[:8]
+        catalog = driver.features.current_catalog
+        schema, other = f"pa_{suffix}", f"pax{suffix}"
+        tables = [
+            (schema, f"shared_{suffix}", "a"),
+            (other, f"shared_{suffix}", "b"),
+            (other, f"other_{suffix}", "c"),
+        ]
+
+        def qualified(*names):
+            return ".".join(driver.quote_one_identifier(n) for n in (catalog, *names))
+
+        with conn.cursor() as cursor:
+            for s in (schema, other):
+                cursor.execute(f"CREATE SCHEMA {qualified(s)}")
+            for s, table, column in tables:
+                cursor.execute(f"CREATE TABLE {qualified(s, table)} ({column} INT)")
+        try:
+            objects = conn.adbc_get_objects(
+                depth="columns", catalog_filter=catalog, db_schema_filter=schema
+            )
+            listed = sorted(
+                (t["table_name"], [c["column_name"] for c in t["table_columns"]])
+                for obj in objects.read_all().to_pylist()
+                for s in obj["catalog_db_schemas"]
+                if s["db_schema_name"] == schema
+                for t in s["db_schema_tables"]
+                if t["table_name"].endswith(suffix)
+            )
+            assert listed == [(f"shared_{suffix}", ["a"])]
+        finally:
+            with conn.cursor() as cursor:
+                for s, table, _ in tables:
+                    cursor.execute(f"DROP TABLE IF EXISTS {qualified(s, table)}")
+                for s in (schema, other):
+                    cursor.execute(f"DROP SCHEMA IF EXISTS {qualified(s)}")
+
     def test_get_objects_temporary_view(self, driver, conn) -> None:
         # SHOW TABLES lists temporary views in every schema of the session
         # catalog, but DESCRIBE TABLE can't find them there. Other catalogs,
@@ -151,3 +194,19 @@ class TestConnection(adbc_drivers_validation.tests.connection.TestConnection):
                 cursor.execute(
                     f"DROP VIEW IF EXISTS {driver.quote_one_identifier(view)}"
                 )
+
+
+def test_call_headers_unsupported(driver, conn, db_kwargs, driver_path):
+    if driver.short_version.endswith("-connect"):
+        pytest.skip("test is only for non-Connect backends")
+    option = "spark.connect.call_header.x-route"
+    with pytest.raises(adbc_driver_manager.NotSupportedError):
+        adbc_driver_manager.AdbcDatabase(
+            driver=driver_path, **{**db_kwargs, option: "private"}
+        )
+    with adbc_driver_manager.AdbcDatabase(driver=driver_path, **db_kwargs) as db:
+        for handle in (db, conn.adbc_connection):
+            with pytest.raises(adbc_driver_manager.NotSupportedError):
+                handle.set_options(**{option: "private"})
+            with pytest.raises(adbc_driver_manager.NotSupportedError):
+                handle.get_option(option)

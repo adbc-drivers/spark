@@ -33,6 +33,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
+	connectpb "github.com/adbc-drivers/spark/go/internal/generated"
 	"github.com/adbc-drivers/spark/go/internal/sparkbase"
 	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
@@ -828,6 +829,13 @@ func (c *livyClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryCon
 		return -1, adbcErrFromLivyOutput(adbc.StatusUnknown, stmt.Output, "query error")
 	}
 	return -1, nil
+}
+
+func (c *livyClient) ExecuteLogicalPlan(ctx context.Context, query sparkbase.QueryContext, plan *connectpb.Plan) (array.RecordReader, error) {
+	return nil, adbc.Error{
+		Code: adbc.StatusNotImplemented,
+		Msg:  "[spark] logical plan execution not supported for Livy",
+	}
 }
 
 func (c *livyClient) GetCatalogs(ctx context.Context, catalogFilter *string) ([]string, error) {
