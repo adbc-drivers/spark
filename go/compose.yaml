@@ -13,6 +13,25 @@
 # limitations under the License.
 
 services:
+  # Run from go/: docker compose run --rm regenerate-add-constant
+  regenerate-add-constant:
+    image: apache/spark:4.0.5
+    profiles: [tools]
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    volumes:
+      - ./validation/tests/fixtures:/fixtures
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        javac --release 17 -cp '/opt/spark/jars/*' -d /tmp /fixtures/AddConstant.java
+        python3 - <<'PYTHON'
+        from pathlib import Path
+        from zipfile import ZipFile, ZipInfo
+        with ZipFile('/fixtures/add-constant.jar', 'w') as jar:
+            entry = ZipInfo('AddConstant.class', (2026, 1, 1, 0, 0, 0))
+            jar.writestr(entry, Path('/tmp/AddConstant.class').read_bytes())
+        PYTHON
+
   kerberos:
     image: ghcr.io/adbc-drivers/spark:kerberos
     build:
