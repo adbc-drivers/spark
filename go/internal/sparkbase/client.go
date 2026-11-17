@@ -315,6 +315,29 @@ func listTablesExtended(c SparkClient, ctx context.Context, catalog string, sche
 	}
 
 	query := "SHOW TABLE EXTENDED IN " + QuoteIdentifier(catalog) + "." + QuoteIdentifier(schema) + like
+	tables, err := listTablesByQuery(c, ctx, query, pattern)
+	if isV2ShowTableExtendedError(err) {
+		// Spark 3.5 rejects SHOW TABLE EXTENDED on a V2 catalog, such as an
+		// Iceberg catalog. SHOW TABLES still lists it. Its rows have no Type:
+		// line, so its tables are TABLE, and temporary views are VIEW.
+		query = "SHOW TABLES IN " + QuoteIdentifier(catalog) + "." + QuoteIdentifier(schema) + like
+		return listTablesByQuery(c, ctx, query, pattern)
+	}
+	return tables, err
+}
+
+// v2ShowTableExtendedMsg is the message of the error Spark 3.5 raises for SHOW
+// TABLE EXTENDED on a V2 table (_LEGACY_ERROR_TEMP_1200, "<name> is not
+// supported for v2 tables.").
+const v2ShowTableExtendedMsg = "SHOW TABLE EXTENDED is not supported for v2 tables"
+
+func isV2ShowTableExtendedError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), v2ShowTableExtendedMsg)
+}
+
+// listTablesByQuery runs a SHOW TABLES or SHOW TABLE EXTENDED query and returns
+// the rows whose names match pattern.
+func listTablesByQuery(c SparkClient, ctx context.Context, query string, pattern *regexp.Regexp) ([]listedTable, error) {
 	rr, err := executeMetadataQuery(c, ctx, query)
 	if err != nil {
 		return nil, err

@@ -33,6 +33,10 @@ type catalogClient struct {
 	SparkClient
 	listSchema *arrow.Schema
 	listRows   [][]any
+	// extendedErr, when set, is returned by SHOW TABLE EXTENDED.
+	extendedErr error
+	// tablesRows are the rows of SHOW TABLES, which has no information column.
+	tablesRows [][]any
 	describe   map[string][][]string
 	queries    []string
 }
@@ -41,7 +45,12 @@ func (c *catalogClient) ExecuteQuery(_ context.Context, query QueryContext) (arr
 	c.queries = append(c.queries, query.Query)
 	switch {
 	case strings.HasPrefix(query.Query, "SHOW TABLE EXTENDED"):
+		if c.extendedErr != nil {
+			return nil, 0, c.extendedErr
+		}
 		return recordReader(c.listSchema, c.listRows)
+	case strings.HasPrefix(query.Query, "SHOW TABLES IN"):
+		return recordReader(tablesSchema, c.tablesRows)
 	case strings.HasPrefix(query.Query, "DESCRIBE TABLE "):
 		ref := strings.TrimPrefix(query.Query, "DESCRIBE TABLE ")
 		rows, ok := c.describe[ref]
@@ -102,6 +111,20 @@ func information(tableType string) string {
 		lines = append(lines, "Type: "+tableType)
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// tablesSchema is the result schema of SHOW TABLES.
+var tablesSchema = arrow.NewSchema([]arrow.Field{
+	{Name: "namespace", Type: arrow.BinaryTypes.String, Nullable: true},
+	{Name: "tableName", Type: arrow.BinaryTypes.String, Nullable: false},
+	{Name: "isTemporary", Type: arrow.FixedWidthTypes.Boolean, Nullable: false},
+}, nil)
+
+// v2Error is the error Spark 3.5 returns for SHOW TABLE EXTENDED on a V2
+// catalog, as Connect reports it.
+var v2Error = adbc.Error{
+	Code: adbc.StatusIO,
+	Msg:  "[spark] Could not execute query: [_LEGACY_ERROR_TEMP_1200] SHOW TABLE EXTENDED is not supported for v2 tables. SQLSTATE: 0A000",
 }
 
 func tableTypes(t *testing.T, client *catalogClient, tableFilter *string) map[string]string {
@@ -232,4 +255,51 @@ func TestGetTablesRequiresNameColumn(t *testing.T) {
 	client := &catalogClient{listSchema: bad}
 	_, err := DefaultGetTablesForDBSchemaImpl(client, context.Background(), "spark_catalog", "default", nil, nil, false)
 	require.Error(t, err)
+}
+
+func TestGetTablesFallsBackToShowTablesForV2Catalog(t *testing.T) {
+	client := &catalogClient{
+		listSchema:  listSchema,
+		extendedErr: v2Error,
+		tablesRows: [][]any{
+			{"default", "iceberg_t", false},
+			{"", "tmp", true},
+		},
+	}
+	require.Equal(t, map[string]string{
+		"iceberg_t": TableTypeTable,
+		"tmp":       TableTypeView,
+	}, tableTypes(t, client, nil))
+	require.Equal(t, []string{
+		"SHOW TABLE EXTENDED IN `spark_catalog`.`default` LIKE '*'",
+		"SHOW TABLES IN `spark_catalog`.`default` LIKE '*'",
+	}, client.queries)
+}
+
+func TestGetTablesFallbackKeepsNameFilter(t *testing.T) {
+	client := &catalogClient{
+		listSchema:  listSchema,
+		extendedErr: v2Error,
+		tablesRows: [][]any{
+			{"default", "iceberg_t", false},
+			{"default", "other", false},
+		},
+	}
+	filter := "iceberg%"
+	require.Equal(t, map[string]string{"iceberg_t": TableTypeTable}, tableTypes(t, client, &filter))
+	require.Equal(t, "SHOW TABLES IN `spark_catalog`.`default` LIKE 'iceberg*'", client.queries[1])
+}
+
+func TestGetTablesDoesNotFallBackOnOtherErrors(t *testing.T) {
+	client := &catalogClient{
+		listSchema: listSchema,
+		extendedErr: adbc.Error{
+			Code: adbc.StatusNotFound,
+			Msg:  "[spark] Could not execute query: [SCHEMA_NOT_FOUND] The schema `spark_catalog`.`missing` cannot be found.",
+		},
+		tablesRows: [][]any{{"default", "t", false}},
+	}
+	_, err := DefaultGetTablesForDBSchemaImpl(client, context.Background(), "spark_catalog", "default", nil, nil, false)
+	require.Error(t, err)
+	require.Len(t, client.queries, 1, "an unrelated error must not run SHOW TABLES")
 }

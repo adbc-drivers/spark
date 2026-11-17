@@ -206,6 +206,54 @@ class TestConnection(adbc_drivers_validation.tests.connection.TestConnection):
                         driver.drop_table(table_name=external, schema_name=schema)
                     )
 
+    def test_get_objects_secondary_catalog(self, driver, conn) -> None:
+        # A V2 catalog, such as Iceberg, rejects SHOW TABLE EXTENDED on Spark
+        # 3.5, so its schema is listed with SHOW TABLES there. An unfiltered
+        # call reaches the catalog too.
+        catalog = driver.features.secondary_catalog
+        schema = driver.features.secondary_catalog_schema
+        if catalog is None or schema is None:
+            pytest.skip("no secondary catalog")
+        if driver.short_version.endswith(("-thrift", "-thrifthttp")):
+            pytest.skip("Thrift lists tables with GetTables")
+        if driver.short_version.startswith("emr-"):
+            pytest.skip("EMR tables need an S3 location")
+        table = f"v2_table_{uuid.uuid4().hex[:8]}"
+        qualified = ".".join(
+            driver.quote_one_identifier(n) for n in (catalog, schema, table)
+        )
+        with conn.cursor() as cursor:
+            cursor.execute(f"CREATE TABLE {qualified} (id INT)")
+        try:
+            objects = conn.adbc_get_objects(
+                depth="tables",
+                catalog_filter=catalog,
+                db_schema_filter=schema,
+                table_name_filter=table,
+            )
+            types = [
+                t["table_type"]
+                for obj in objects.read_all().to_pylist()
+                for s in obj["catalog_db_schemas"]
+                for t in s["db_schema_tables"]
+                if t["table_name"] == table
+            ]
+            assert len(types) == 1
+            assert types[0] in conn.adbc_get_table_types()
+
+            # An unfiltered call succeeds, and it lists the table too.
+            objects = conn.adbc_get_objects(depth="tables")
+            names = [
+                t["table_name"]
+                for obj in objects.read_all().to_pylist()
+                for s in obj["catalog_db_schemas"]
+                for t in s["db_schema_tables"]
+            ]
+            assert table in names
+        finally:
+            with conn.cursor() as cursor:
+                cursor.execute(f"DROP TABLE IF EXISTS {qualified}")
+
     def test_get_objects_name_patterns(self, driver, conn) -> None:
         if driver.short_version.startswith("emr-"):
             pytest.skip("EMR tables need an S3 location")
