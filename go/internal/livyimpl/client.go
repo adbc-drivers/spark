@@ -734,6 +734,9 @@ func (c *livyClient) SetCurrentSchema(ctx context.Context, mem memory.Allocator,
 }
 
 func (c *livyClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryContext) (array.RecordReader, int64, error) {
+	if err := sparkbase.RejectPosArgs(c.BackendName(), query); err != nil {
+		return nil, -1, err
+	}
 	// TODO(serramatutu): do we need this really?
 	// Check if we're using SQL session kind
 	if c.sessionKind != SessionKindSql {
@@ -809,6 +812,9 @@ func (c *livyClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCont
 }
 
 func (c *livyClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryContext) (int64, error) {
+	if err := sparkbase.RejectPosArgs(c.BackendName(), query); err != nil {
+		return -1, err
+	}
 	// Fabric requires an explicit statement kind; mirror the session kind.
 	stmt, err := c.CreateStatement(ctx, CreateStatementRequest{Code: query.Query, Kind: string(c.sessionKind)})
 	if err != nil {

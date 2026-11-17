@@ -12,8 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
+import decimal
 import urllib.parse
 
+import adbc_driver_manager.dbapi
 import adbc_drivers_validation.tests.statement
 import pyarrow
 import pytest
@@ -37,6 +40,75 @@ class TestStatement(adbc_drivers_validation.tests.statement.TestStatement):
         if driver.short_version.startswith("emr-"):
             pytest.skip("EMR Spark does not support UPDATE etc.")
         super().test_rows_affected(driver, conn)
+
+    def test_bind_parameters_without_markers(self, driver, conn):
+        # A query with no '?' markers runs as before, with or without a binding.
+        with conn.cursor() as cur:
+            cur.execute("SELECT 'plain' AS s", parameters=[1, 2])
+            assert cur.fetchall() == [("plain",)]
+
+    def test_bind_parameters(self, driver, conn):
+        if not driver.short_version.endswith("-connect"):
+            # Only Spark Connect binds parameters. Other backends say so.
+            with (
+                conn.cursor() as cur,
+                pytest.raises(adbc_driver_manager.dbapi.NotSupportedError),
+            ):
+                cur.execute("SELECT ?", parameters=[1])
+            return
+
+        cases = [
+            ("SELECT ?, ?", [1, "a+b/c=="], [(1, "a+b/c==")]),
+            ("SELECT ?, ?, ?", [True, 1.5, b"\x01\x02"], [(True, 1.5, b"\x01\x02")]),
+            ("SELECT ?", [decimal.Decimal("123.45")], [(decimal.Decimal("123.45"),)]),
+            ("SELECT ?", [datetime.date(2024, 1, 2)], [(datetime.date(2024, 1, 2),)]),
+            ("SELECT ?", [None], [(None,)]),
+            # A '?' inside a string literal is not a marker.
+            ("SELECT ? AS x, '?' AS y", [42], [(42, "?")]),
+        ]
+        with conn.cursor() as cur:
+            for sql, params, expected in cases:
+                cur.execute(sql, parameters=params)
+                assert cur.fetchall() == expected, sql
+
+        # Arrow types bind as their Spark types.
+        arrow_cases = [
+            (pyarrow.timestamp("us"), datetime.datetime(2024, 5, 6, 7, 8, 9, 123456)),
+            (
+                pyarrow.timestamp("ms", tz="UTC"),
+                datetime.datetime(2024, 5, 6, 7, 8, 9, tzinfo=datetime.UTC),
+            ),
+            (pyarrow.date64(), datetime.date(2024, 1, 2)),
+            (pyarrow.decimal128(10, 2), decimal.Decimal("1.25")),
+            (pyarrow.decimal256(38, 3), decimal.Decimal("1.500")),
+        ]
+        with conn.cursor() as cur:
+            for arrow_type, value in arrow_cases:
+                batch = pyarrow.record_batch(
+                    [pyarrow.array([value], type=arrow_type)], names=["v"]
+                )
+                cur.adbc_statement.bind(batch)
+                cur.adbc_statement.set_sql_query("SELECT ? AS v")
+                handle, _ = cur.adbc_statement.execute_query()
+                with pyarrow.RecordBatchReader._import_from_c(handle.address) as reader:
+                    assert reader.read_all().column(0).to_pylist() == [value]
+
+        # A uint64 above the signed maximum is rejected, not wrapped.
+        with conn.cursor() as cur:
+            batch = pyarrow.record_batch(
+                [pyarrow.array([2**63], type=pyarrow.uint64())], names=["v"]
+            )
+            cur.adbc_statement.bind(batch)
+            cur.adbc_statement.set_sql_query("SELECT ?")
+            with pytest.raises(adbc_driver_manager.dbapi.ProgrammingError):
+                cur.adbc_statement.execute_query()
+
+        # The number of values must match the markers.
+        with (
+            conn.cursor() as cur,
+            pytest.raises(adbc_driver_manager.dbapi.ProgrammingError),
+        ):
+            cur.execute("SELECT ?, ?", parameters=[1])
 
     def test_logical_plan_passthrough(self, driver, conn, db_kwargs):
         if not driver.short_version.startswith("4."):

@@ -190,10 +190,15 @@ func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, 
 			Code: adbc.StatusInvalidState,
 		}
 	}
+	posArgs, err := st.positionalArgs(st.query)
+	if err != nil {
+		return nil, -1, err
+	}
 	return st.cnxn.client.ExecuteQuery(ctx, sparkbase.QueryContext{
-		Mem:   st.cnxn.Alloc,
-		Log:   st.cnxn.Logger,
-		Query: st.query,
+		Mem:     st.cnxn.Alloc,
+		Log:     st.cnxn.Logger,
+		Query:   st.query,
+		PosArgs: posArgs,
 	})
 }
 
@@ -213,10 +218,15 @@ func (st *statementImpl) ExecuteUpdate(ctx context.Context) (int64, error) {
 		}
 		return -1, rdr.Err()
 	}
+	posArgs, err := st.positionalArgs(st.query)
+	if err != nil {
+		return -1, err
+	}
 	return st.cnxn.client.ExecuteUpdate(ctx, sparkbase.QueryContext{
-		Mem:   st.cnxn.Alloc,
-		Log:   st.cnxn.Logger,
-		Query: st.query,
+		Mem:     st.cnxn.Alloc,
+		Log:     st.cnxn.Logger,
+		Query:   st.query,
+		PosArgs: posArgs,
 	})
 }
 

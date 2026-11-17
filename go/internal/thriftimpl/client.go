@@ -224,6 +224,9 @@ func (c *thriftClient) SetCurrentSchema(ctx context.Context, mem memory.Allocato
 }
 
 func (c *thriftClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryContext) (array.RecordReader, int64, error) {
+	if err := sparkbase.RejectPosArgs(c.BackendName(), query); err != nil {
+		return nil, -1, err
+	}
 	req := &hiveserver2.TExecuteStatementReq{
 		SessionHandle: c.session,
 		Statement:     query.Query,
@@ -236,6 +239,9 @@ func (c *thriftClient) ExecuteQuery(ctx context.Context, query sparkbase.QueryCo
 }
 
 func (c *thriftClient) ExecuteUpdate(ctx context.Context, query sparkbase.QueryContext) (int64, error) {
+	if err := sparkbase.RejectPosArgs(c.BackendName(), query); err != nil {
+		return -1, err
+	}
 	req := &hiveserver2.TExecuteStatementReq{
 		SessionHandle: c.session,
 		Statement:     query.Query,

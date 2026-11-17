@@ -35,6 +35,21 @@ type QueryContext struct {
 	Mem           memory.Allocator
 	Log           *slog.Logger
 	Query         string
+	// PosArgs binds the '?' markers of Query. A backend that can't bind them
+	// must return an error, not run the query without them. See RejectPosArgs.
+	PosArgs []*connectpb.Expression_Literal
+}
+
+// RejectPosArgs returns an error if the query has bound parameters, for a
+// backend that can't bind them.
+func RejectPosArgs(backend string, q QueryContext) error {
+	if len(q.PosArgs) == 0 {
+		return nil
+	}
+	return adbc.Error{
+		Code: adbc.StatusNotImplemented,
+		Msg:  fmt.Sprintf("[spark] query parameters are only supported with Spark Connect, not %s", backend),
+	}
 }
 
 type SparkClient interface {
