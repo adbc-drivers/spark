@@ -16,6 +16,7 @@ package spark
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -207,6 +208,23 @@ func TestCountParameterMarkers(t *testing.T) {
 		// of the identifier, so the quote starts an ordinary string.
 		{`SELECT colr'\', ?`, 0},
 		{`SELECT 'r\'', ?`, 1},
+		// Dollar-quoted strings end at the same tag, compared exactly.
+		{"SELECT $$a?b$$, ?", 1},
+		{"SELECT $t$ ? $T$ $t$ ?", 1},
+		{"SELECT $t$ ? $t$ ?", 1},
+		{"SELECT $a$ ?", 0},
+		{"SELECT $1, ?", 1},
+		// $ is never part of an identifier, so a$b$ is a and a dollar-quoted string.
+		{"SELECT a$b$ ?", 0},
+		{`SELECT $r'\', ?`, 1},
+		// A backslash right before a newline continues a -- comment.
+		{"-- a\\\n? \nSELECT ?", 1},
+		{"-- x\n?", 1},
+		// A hint's markers count; a comment's don't.
+		{"/*+ ? */ SELECT 1", 1},
+		{"/*+ ? */ SELECT ?", 2},
+		{"/* /*+ ? */ ?", 1},
+		{"/* ? /* ? */ ? */ ?", 1},
 	} {
 		require.Equal(t, tc.want, countParameterMarkers(tc.sql), "SQL: %s", tc.sql)
 	}
@@ -548,7 +566,7 @@ func TestExecuteRejectsRowsWithDifferentResultSchemas(t *testing.T) {
 	err = rdr.Err()
 	requireAdbcCode(t, err, adbc.StatusInvalidArgument)
 	require.ErrorContains(t, err, "parameter row 1")
-	require.ErrorContains(t, err, "row 0 returned")
+	require.ErrorContains(t, err, "row 0 gave")
 }
 
 func TestExecuteWithTypedNullsKeepsResultSchema(t *testing.T) {
@@ -603,4 +621,234 @@ func TestRowsReaderAcceptsNullabilityDifferences(t *testing.T) {
 	}
 	require.NoError(t, r.Err())
 	require.Equal(t, 2, count)
+}
+
+// checkedInt64Batch is a one-column int64 record built with mem, with the given
+// JSON values. Its schema has a nullable column, as a bound column does.
+func checkedInt64Batch(t *testing.T, mem memory.Allocator, values string) arrow.RecordBatch {
+	t.Helper()
+	col, _, err := array.FromJSON(mem, arrow.PrimitiveTypes.Int64, strings.NewReader(values))
+	require.NoError(t, err)
+	defer col.Release()
+	schema := arrow.NewSchema([]arrow.Field{{Name: "v", Type: arrow.PrimitiveTypes.Int64, Nullable: true}}, nil)
+	// The caller releases the batch, before its checked allocator is checked.
+	return array.NewRecordBatch(schema, []arrow.Array{col}, int64(col.Len()))
+}
+
+// resultClient answers each execution with the result that result returns for
+// the row's first argument. It builds its results with mem.
+type resultClient struct {
+	sparkbase.SparkClient
+	mem    memory.Allocator
+	result func(mem memory.Allocator, arg *connectpb.Expression_Literal) array.RecordReader
+}
+
+func (c *resultClient) ExecuteQuery(_ context.Context, q sparkbase.QueryContext) (array.RecordReader, int64, error) {
+	return c.result(c.mem, q.PosArgs[0]), -1, nil
+}
+
+// int64Result returns one row, v: int64. The value is null for a null argument,
+// and the field is nullable only then, as Spark marks it.
+func int64Result(name string) func(memory.Allocator, *connectpb.Expression_Literal) array.RecordReader {
+	return func(mem memory.Allocator, arg *connectpb.Expression_Literal) array.RecordReader {
+		bldr := array.NewInt64Builder(mem)
+		defer bldr.Release()
+		isNull := arg.GetNull() != nil
+		if isNull {
+			bldr.AppendNull()
+		} else {
+			bldr.Append(arg.GetLong())
+		}
+		arr := bldr.NewArray()
+		defer arr.Release()
+		schema := arrow.NewSchema([]arrow.Field{{Name: name, Type: arrow.PrimitiveTypes.Int64, Nullable: isNull}}, nil)
+		rec := array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
+		defer rec.Release()
+		rdr, err := array.NewRecordReader(schema, []arrow.RecordBatch{rec})
+		if err != nil {
+			panic(err)
+		}
+		return rdr
+	}
+}
+
+// readNullableValues reads the first column of rdr. Each batch's schema must be
+// the reader's, and the values are nil for nulls.
+func readNullableValues(t *testing.T, rdr array.RecordReader) []*int64 {
+	t.Helper()
+	var values []*int64
+	for rdr.Next() {
+		rec := rdr.RecordBatch()
+		require.True(t, rec.Schema().Equal(rdr.Schema()), "batch schema %s, reader schema %s", rec.Schema(), rdr.Schema())
+		col := rec.Column(0).(*array.Int64)
+		for i := range col.Len() {
+			if col.IsNull(i) {
+				values = append(values, nil)
+			} else {
+				v := col.Value(i)
+				values = append(values, &v)
+			}
+		}
+	}
+	require.NoError(t, rdr.Err())
+	return values
+}
+
+func TestNullParameterOrderKeepsNullableSchema(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		json string
+		want []string
+	}{
+		{"value then null", `[42, null]`, []string{"42", "<nil>"}},
+		{"null then value", `[null, 42]`, []string{"<nil>", "42"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer mem.AssertSize(t, 0)
+
+			st := &statementImpl{cnxn: &connectionImpl{client: &resultClient{mem: mem, result: int64Result("v")}}}
+			require.NoError(t, st.SetSqlQuery(ctx, "SELECT ? AS v"))
+			bind := checkedInt64Batch(t, mem, tc.json)
+			require.NoError(t, st.Bind(ctx, bind))
+
+			rdr, _, err := st.ExecuteQuery(ctx)
+			require.NoError(t, err)
+			require.True(t, rdr.Schema().Field(0).Nullable, "the advertised field must be nullable")
+			require.Equal(t, "v", rdr.Schema().Field(0).Name)
+			var got []string
+			for _, v := range readNullableValues(t, rdr) {
+				if v == nil {
+					got = append(got, "<nil>")
+				} else {
+					got = append(got, fmt.Sprint(*v))
+				}
+			}
+			require.Equal(t, tc.want, got)
+			rdr.Release()
+			require.NoError(t, st.Close(ctx))
+			bind.Release()
+		})
+	}
+}
+
+func TestLaterRowWithDifferentNameIsRelabelled(t *testing.T) {
+	ctx := context.Background()
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	// Spark names "1 + ?" after its literal, so each row has its own name.
+	named := func(mem memory.Allocator, arg *connectpb.Expression_Literal) array.RecordReader {
+		return int64Result(fmt.Sprintf("(1 + %d)", arg.GetLong()))(mem, arg)
+	}
+	st := &statementImpl{cnxn: &connectionImpl{client: &resultClient{mem: mem, result: named}}}
+	require.NoError(t, st.SetSqlQuery(ctx, "SELECT 1 + ?"))
+	bind := checkedInt64Batch(t, mem, `[1, 2, 3]`)
+	require.NoError(t, st.Bind(ctx, bind))
+
+	rdr, _, err := st.ExecuteQuery(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "(1 + 1)", rdr.Schema().Field(0).Name, "the advertised name is row 0's")
+	values := readNullableValues(t, rdr)
+	require.Len(t, values, 3)
+	require.Equal(t, int64(1), *values[0])
+	require.Equal(t, int64(3), *values[2])
+	rdr.Release()
+	require.NoError(t, st.Close(ctx))
+	bind.Release()
+}
+
+func TestLaterRowWithDifferentTypeFails(t *testing.T) {
+	ctx := context.Background()
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	// Row 1 is int64; row 2 is int32, so the query's type depends on the value.
+	typeChanges := func(mem memory.Allocator, arg *connectpb.Expression_Literal) array.RecordReader {
+		if arg.GetLong() == 2 {
+			bldr := array.NewInt32Builder(mem)
+			defer bldr.Release()
+			bldr.Append(2)
+			arr := bldr.NewArray()
+			defer arr.Release()
+			schema := arrow.NewSchema([]arrow.Field{{Name: "v", Type: arrow.PrimitiveTypes.Int32}}, nil)
+			rec := array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
+			defer rec.Release()
+			rdr, err := array.NewRecordReader(schema, []arrow.RecordBatch{rec})
+			if err != nil {
+				panic(err)
+			}
+			return rdr
+		}
+		return int64Result("v")(mem, arg)
+	}
+	st := &statementImpl{cnxn: &connectionImpl{client: &resultClient{mem: mem, result: typeChanges}}}
+	require.NoError(t, st.SetSqlQuery(ctx, "SELECT ? AS v"))
+	bind := checkedInt64Batch(t, mem, `[1, 2]`)
+	require.NoError(t, st.Bind(ctx, bind))
+
+	rdr, _, err := st.ExecuteQuery(ctx)
+	require.NoError(t, err)
+	require.True(t, rdr.Next())
+	require.False(t, rdr.Next())
+	err = rdr.Err()
+	requireAdbcCode(t, err, adbc.StatusInvalidArgument)
+	require.Equal(t, "[spark] parameter row 1 gives result columns (v: int32), but row 0 gave (v: int64): "+
+		"a query whose result type depends on the bound values can't return one result for several rows; "+
+		"execute the rows separately", err.Error()[len("Invalid Argument: "):])
+	require.NotContains(t, err.Error(), "\n", "the error is one line")
+	rdr.Release()
+	require.NoError(t, st.Close(ctx))
+	bind.Release()
+}
+
+func TestNestedNullabilityChangeFails(t *testing.T) {
+	// Row 0's list has non-nullable elements and row 1's are nullable. Nested
+	// nullability counts, so the rows can't share one result.
+	rowSchema := func(list arrow.DataType) *arrow.Schema {
+		return arrow.NewSchema([]arrow.Field{{Name: "v", Type: list}}, nil)
+	}
+	oneList := func(mem memory.Allocator, list arrow.DataType) arrow.RecordBatch {
+		bldr := array.NewBuilder(mem, list).(*array.ListBuilder)
+		defer bldr.Release()
+		bldr.Append(true)
+		bldr.ValueBuilder().(*array.Int64Builder).Append(1)
+		arr := bldr.NewArray()
+		defer arr.Release()
+		return array.NewRecordBatch(rowSchema(list), []arrow.Array{arr}, 1)
+	}
+	nonNull := arrow.ListOfNonNullable(arrow.PrimitiveTypes.Int64)
+	nullable := arrow.ListOf(arrow.PrimitiveTypes.Int64)
+
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+	rows := 0
+	client := &resultClient{mem: mem, result: func(mem memory.Allocator, arg *connectpb.Expression_Literal) array.RecordReader {
+		rows++
+		list := nonNull
+		if rows > 1 {
+			list = nullable
+		}
+		rec := oneList(mem, list)
+		defer rec.Release()
+		rdr, err := array.NewRecordReader(rec.Schema(), []arrow.RecordBatch{rec})
+		if err != nil {
+			panic(err)
+		}
+		return rdr
+	}}
+	st := &statementImpl{cnxn: &connectionImpl{client: client}}
+	require.NoError(t, st.SetSqlQuery(context.Background(), "SELECT ? AS v"))
+	bind := checkedInt64Batch(t, mem, `[1, 2]`)
+	require.NoError(t, st.Bind(context.Background(), bind))
+
+	rdr, _, err := st.ExecuteQuery(context.Background())
+	require.NoError(t, err)
+	require.True(t, rdr.Next())
+	require.False(t, rdr.Next())
+	requireAdbcCode(t, rdr.Err(), adbc.StatusInvalidArgument)
+	rdr.Release()
+	require.NoError(t, st.Close(context.Background()))
+	bind.Release()
 }

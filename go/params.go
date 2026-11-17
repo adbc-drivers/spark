@@ -105,23 +105,35 @@ func (st *statementImpl) rebindParams() ([]arrow.RecordBatch, error) {
 }
 
 // countParameterMarkers counts the positional '?' markers in a Spark SQL
-// statement. Markers inside string literals, quoted identifiers, and comments
-// don't count.
+// statement. It skips every construct that hides a '?' in Spark's lexer
+// (SqlBaseLexer.g4): string literals, raw strings, quoted identifiers,
+// dollar-quoted strings, and comments. A hint, /*+ ... */, is not a comment,
+// so its contents are tokens and their markers count.
 func countParameterMarkers(sql string) int {
 	count := 0
 	for i := 0; i < len(sql); i++ {
-		switch c := sql[i]; {
-		case (c == 'r' || c == 'R') && i+1 < len(sql) && isQuote(sql[i+1]) && !afterIdentifier(sql, i):
+		c := sql[i]
+		next := byte(0)
+		if i+1 < len(sql) {
+			next = sql[i+1]
+		}
+		switch {
+		case c == '-' && next == '-':
+			i = skipLineComment(sql, i)
+		case c == '/' && next == '*' && i+2 < len(sql) && sql[i+2] == '+':
+			// A hint opens with /*+. Its contents are ordinary tokens.
+			i += 2
+		case c == '/' && next == '*':
+			i = skipBracketedComment(sql, i)
+		case (c == 'r' || c == 'R') && isQuote(next) && !afterIdentifier(sql, i):
 			// A raw string, R'...' or R"...", has no backslash escapes.
 			i = skipRaw(sql, i+1)
 		case c == '\'' || c == '"' || c == '`':
 			i = skipQuoted(sql, i)
-		case c == '-' && i+1 < len(sql) && sql[i+1] == '-':
-			for i < len(sql) && sql[i] != '\n' {
-				i++
+		case c == '$':
+			if end, ok := skipDollarQuoted(sql, i); ok {
+				i = end
 			}
-		case c == '/' && i+1 < len(sql) && sql[i+1] == '*':
-			i = skipBracketedComment(sql, i)
 		case c == '?':
 			count++
 		}
@@ -136,14 +148,31 @@ func isQuote(c byte) bool {
 // afterIdentifier reports whether the byte before position i could continue an
 // identifier, in which case the character at i is part of that identifier and
 // not a string prefix. Spark's lexer matches identifiers greedily, so
-// colr'...' is an identifier followed by a string.
+// colr'...' is an identifier followed by a string. An identifier is letters,
+// digits and underscores; a byte of 0x80 or more is part of a Unicode letter.
+// '$' is never part of an identifier.
 func afterIdentifier(sql string, i int) bool {
 	if i == 0 {
 		return false
 	}
 	c := sql[i-1]
-	return c == '_' || c == '$' || c >= 0x80 ||
+	return c == '_' || c >= 0x80 ||
 		('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9')
+}
+
+// skipLineComment returns the index of the last byte of the -- comment that
+// starts at start. Spark's comment continues past a backslash that ends a
+// line, so a '?' on the next line is part of the comment.
+func skipLineComment(sql string, start int) int {
+	for j := start + 2; j < len(sql); j++ {
+		switch {
+		case sql[j] == '\\' && j+1 < len(sql) && sql[j+1] == '\n':
+			j++
+		case sql[j] == '\r' || sql[j] == '\n':
+			return j - 1
+		}
+	}
+	return len(sql) - 1
 }
 
 // skipRaw returns the index of the quote that closes the raw string whose
@@ -177,13 +206,40 @@ func skipQuoted(sql string, start int) int {
 	return len(sql) - 1
 }
 
+// skipDollarQuoted handles a dollar-quoted string, $tag$ ... $tag$, where tag is
+// letters and may be empty. It reports the index of the last byte of the string
+// and whether sql has one at i. The string ends at the first occurrence of the
+// same tag text, compared case-sensitively, as Spark's lexer does. A '$' that
+// doesn't open a tag, such as $1, is not a string. An unterminated string runs
+// to the end of the statement.
+func skipDollarQuoted(sql string, start int) (int, bool) {
+	j := start + 1
+	for j < len(sql) && isASCIILetter(sql[j]) {
+		j++
+	}
+	if j >= len(sql) || sql[j] != '$' {
+		return 0, false
+	}
+	tag := sql[start : j+1]
+	body := j + 1
+	if k := strings.Index(sql[body:], tag); k >= 0 {
+		return body + k + len(tag) - 1, true
+	}
+	return len(sql) - 1, true
+}
+
+func isASCIILetter(c byte) bool {
+	return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
+}
+
 // skipBracketedComment returns the index of the '/' that ends the bracketed
-// comment starting at start. Spark allows nested bracketed comments.
+// comment starting at start. Comments nest. A '/*+' inside a comment is text,
+// not a nested comment, because a hint is never a comment.
 func skipBracketedComment(sql string, start int) int {
 	depth := 0
 	for j := start; j+1 < len(sql); j++ {
 		switch {
-		case sql[j] == '/' && sql[j+1] == '*':
+		case sql[j] == '/' && sql[j+1] == '*' && !(j+2 < len(sql) && sql[j+2] == '+'):
 			depth++
 			j++
 		case sql[j] == '*' && sql[j+1] == '/':
@@ -456,25 +512,13 @@ func timestampToMicros(v int64, unit arrow.TimeUnit) (int64, error) {
 	}
 }
 
-// rowsReader concatenates the results of one execution per bound row. Rows are
-// executed as the reader is consumed, so their results stream like one query.
-type rowsReader struct {
-	open   func(args []*connectpb.Expression_Literal) (array.RecordReader, error)
-	rows   [][]*connectpb.Expression_Literal
-	schema *arrow.Schema
-	// index is the row whose execution is current. Row 0 is the first.
-	index int
-	cur   array.RecordReader
-	err   error
-	refs  int64
-}
-
 // sameColumnTypes reports whether two result schemas have the same number of
-// columns and the same column types. Two things are left out. Nullability: Spark
-// marks a column that holds no null as not nullable, and a non-nullable column
-// still fits the advertised schema. Names: Spark names an unaliased expression
-// after its literal values, so "1 + ?" is named "(1 + 1)" for one value and
-// "(1 + 2)" for another. The advertised names are the first row's.
+// columns and the same type for each, with nested nullability counted. Two
+// things are left out. Top-level nullability: Spark marks a column with no null
+// as not nullable, so a row can differ from another only there. Names: Spark
+// names an unaliased expression after its literal, so "1 + ?" is "(1 + 1)" for
+// one value and "(1 + 2)" for another. Batches from later rows are re-labelled
+// with the advertised schema.
 func sameColumnTypes(a, b *arrow.Schema) bool {
 	if len(a.Fields()) != len(b.Fields()) {
 		return false
@@ -487,8 +531,44 @@ func sameColumnTypes(a, b *arrow.Schema) bool {
 	return true
 }
 
+// withNullableFields returns s with every top-level field nullable. Names, types,
+// field metadata and schema metadata are kept.
+func withNullableFields(s *arrow.Schema) *arrow.Schema {
+	fields := make([]arrow.Field, len(s.Fields()))
+	for i, f := range s.Fields() {
+		f.Nullable = true
+		fields[i] = f
+	}
+	md := s.Metadata()
+	return arrow.NewSchema(fields, &md)
+}
+
+// formatColumns lists the columns of a result compactly, as "(v: decimal(5, 2))".
+func formatColumns(s *arrow.Schema) string {
+	parts := make([]string, 0, len(s.Fields()))
+	for _, f := range s.Fields() {
+		parts = append(parts, f.Name+": "+formatType(f.Type))
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// formatType writes a type the way Spark writes it. Decimals are decimal(p, s).
+func formatType(dt arrow.DataType) string {
+	switch t := dt.(type) {
+	case *arrow.Decimal128Type:
+		return fmt.Sprintf("decimal(%d, %d)", t.Precision, t.Scale)
+	case *arrow.Decimal256Type:
+		return fmt.Sprintf("decimal(%d, %d)", t.Precision, t.Scale)
+	}
+	return dt.String()
+}
+
 // newRowsReader executes the first row, to learn the schema, and returns a
 // reader over all rows. rows must not be empty.
+//
+// The advertised schema is the first row's. When more than one row is bound,
+// every top-level field is nullable, since a later row may hold a null where the
+// first row held a value. A single row keeps its schema as it is.
 func newRowsReader(open func([]*connectpb.Expression_Literal) (array.RecordReader, error), rows [][]*connectpb.Expression_Literal) (array.RecordReader, error) {
 	first, err := open(rows[0])
 	if err != nil {
@@ -496,9 +576,33 @@ func newRowsReader(open func([]*connectpb.Expression_Literal) (array.RecordReade
 	}
 	r := &rowsReader{open: open, rows: rows[1:], cur: first, refs: 1}
 	if first != nil {
-		r.schema = first.Schema()
+		r.rowSchema = first.Schema()
+		r.schema = r.rowSchema
+		if len(rows) > 1 {
+			r.schema = withNullableFields(r.rowSchema)
+		}
 	}
 	return r, nil
+}
+
+// rowsReader concatenates the results of one execution per bound row. Rows are
+// executed as the reader is consumed, so their results stream like one query.
+// Every batch it returns has the advertised schema.
+type rowsReader struct {
+	open func(args []*connectpb.Expression_Literal) (array.RecordReader, error)
+	rows [][]*connectpb.Expression_Literal
+	// schema is the advertised schema. rowSchema is row 0's own schema, which
+	// later rows are compared with.
+	schema    *arrow.Schema
+	rowSchema *arrow.Schema
+	// index is the row whose execution is current. Row 0 is the first.
+	index int
+	cur   array.RecordReader
+	// wrapped is the current batch re-labelled with the advertised schema, if the
+	// batch's own schema differs. It's released by the next Next or by Release.
+	wrapped arrow.RecordBatch
+	err     error
+	refs    int64
 }
 
 func (r *rowsReader) Retain() {
@@ -507,9 +611,19 @@ func (r *rowsReader) Retain() {
 
 func (r *rowsReader) Release() {
 	r.refs--
-	if r.refs == 0 && r.cur != nil {
-		r.cur.Release()
-		r.cur = nil
+	if r.refs == 0 {
+		r.dropWrapped()
+		if r.cur != nil {
+			r.cur.Release()
+			r.cur = nil
+		}
+	}
+}
+
+func (r *rowsReader) dropWrapped() {
+	if r.wrapped != nil {
+		r.wrapped.Release()
+		r.wrapped = nil
 	}
 }
 
@@ -518,6 +632,7 @@ func (r *rowsReader) Schema() *arrow.Schema {
 }
 
 func (r *rowsReader) Next() bool {
+	r.dropWrapped()
 	for {
 		if r.cur != nil {
 			if r.cur.Next() {
@@ -543,15 +658,15 @@ func (r *rowsReader) Next() bool {
 			r.err = err
 			return false
 		}
-		// The result schema is advertised from the first row, so a later row
-		// whose type differs can't be streamed as part of it. That happens when
-		// the query's result type depends on the bound values.
-		if r.schema != nil && rdr != nil && !sameColumnTypes(rdr.Schema(), r.schema) {
+		// A later row must have the same column types. A query whose result
+		// type depends on the bound values can't return one result for them.
+		if r.rowSchema != nil && rdr != nil && !sameColumnTypes(rdr.Schema(), r.rowSchema) {
 			r.err = adbc.Error{
 				Code: adbc.StatusInvalidArgument,
-				Msg: fmt.Sprintf("[spark] parameter row %d returned result schema %s, but row 0 returned %s; "+
-					"the query's result type depends on the bound values, so the rows can't be combined into one result",
-					r.index, rdr.Schema(), r.schema),
+				Msg: fmt.Sprintf("[spark] parameter row %d gives result columns %s, but row 0 gave %s: "+
+					"a query whose result type depends on the bound values can't return one result for several rows; "+
+					"execute the rows separately",
+					r.index, formatColumns(rdr.Schema()), formatColumns(r.rowSchema)),
 			}
 			rdr.Release()
 			return false
@@ -560,11 +675,21 @@ func (r *rowsReader) Next() bool {
 	}
 }
 
+// RecordBatch returns the current batch with the advertised schema. A batch
+// whose schema differs, such as one with another nullability or column names,
+// is re-labelled. The wrapper is released by the next Next or by Release.
 func (r *rowsReader) RecordBatch() arrow.RecordBatch {
 	if r.cur == nil {
 		return nil
 	}
-	return r.cur.RecordBatch()
+	rec := r.cur.RecordBatch()
+	if rec == nil || r.schema == nil || rec.Schema().Equal(r.schema) {
+		return rec
+	}
+	if r.wrapped == nil {
+		r.wrapped = array.NewRecordBatch(r.schema, rec.Columns(), rec.NumRows())
+	}
+	return r.wrapped
 }
 
 // Record is deprecated in arrow-go; it's RecordBatch.
