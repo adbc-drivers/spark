@@ -239,7 +239,7 @@ func skipBracketedComment(sql string, start int) int {
 	depth := 0
 	for j := start; j+1 < len(sql); j++ {
 		switch {
-		case sql[j] == '/' && sql[j+1] == '*' && !(j+2 < len(sql) && sql[j+2] == '+'):
+		case sql[j] == '/' && sql[j+1] == '*' && (j+2 >= len(sql) || sql[j+2] != '+'):
 			depth++
 			j++
 		case sql[j] == '*' && sql[j+1] == '/':
