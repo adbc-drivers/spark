@@ -58,3 +58,26 @@ func TestRelayReaderIsLazy(t *testing.T) {
 	require.NoError(t, reader.Err())
 	reader.Release()
 }
+
+func TestAddArtifactsBindingIsLazy(t *testing.T) {
+	q := &addArtifactsQuery{}
+	alloc := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer alloc.AssertSize(t, 0)
+	builder := array.NewRecordBuilder(alloc, q.ParameterSchema())
+	builder.Field(0).(*array.BinaryBuilder).Append([]byte{0xff})
+	batch := builder.NewRecordBatch()
+	builder.Release()
+	reader, err := array.NewRecordReader(batch.Schema(), []arrow.RecordBatch{batch})
+	require.NoError(t, err)
+	batch.Release()
+	require.NoError(t, q.BindStream(context.Background(), reader))
+	reader.Release()
+	require.NotNil(t, q.input)
+	// Malformed payloads are inspected during execution, never binding.
+	q.input.Retain()
+	retained := q.input
+	require.NoError(t, q.BindStream(context.Background(), retained))
+	retained.Release()
+	q.Close(context.Background())
+	require.Nil(t, q.input)
+}

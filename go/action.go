@@ -197,6 +197,7 @@ func (q *executePlanQuery) getClient(impl any) (*connectimpl.ConnectClient, erro
 
 var (
 	supportedActions SupportedActions = map[string]Action{
+		"spark.connect.add_artifacts":   addArtifactsAction{},
 		"spark.connect.execute_plan":    executePlanAction{},
 		"spark.connect.analyze_plan":    unaryAction{name: "analyze_plan", request: func() pb.Message { return &proto.AnalyzePlanRequest{} }},
 		"spark.connect.config":          unaryAction{name: "config", request: func() pb.Message { return &proto.ConfigRequest{} }},
@@ -343,6 +344,96 @@ func (q *unaryQuery) ExecuteQuery(ctx context.Context, impl any) (array.RecordRe
 		return nil, -1, q.eh.InvalidArgument("serialize response: %s", err)
 	}
 	builder := array.NewRecordBuilder(impl.(*statementImpl).cnxn.Alloc, q.Schema())
+	defer builder.Release()
+	builder.Field(0).(*array.BinaryBuilder).Append(data)
+	batch := builder.NewRecordBatch()
+	defer batch.Release()
+	reader, err := array.NewRecordReader(q.Schema(), []arrow.RecordBatch{batch})
+	return reader, -1, err
+}
+
+// addArtifactsAction consumes its binding only during execution.
+type addArtifactsAction struct{}
+
+func (addArtifactsAction) Name() string    { return "spark.connect.add_artifacts" }
+func (addArtifactsAction) Remarks() string { return "Upload Spark Connect artifacts" }
+func (addArtifactsAction) Init(eh driverbase.ErrorHelper) ActionQuery {
+	return &addArtifactsQuery{eh: eh}
+}
+
+type addArtifactsQuery struct {
+	executePlanQuery
+	input array.RecordReader
+}
+
+func (q *addArtifactsQuery) Close(context.Context) {
+	if q.input != nil {
+		q.input.Release()
+		q.input = nil
+	}
+}
+func (q *addArtifactsQuery) BindStream(ctx context.Context, input array.RecordReader) error {
+	q.Close(ctx)
+	if input == nil || !input.Schema().Equal(q.ParameterSchema()) {
+		return q.eh.InvalidArgument("expected one non-null binary request column")
+	}
+	input.Retain()
+	q.input = input
+	return nil
+}
+func (q *addArtifactsQuery) ExecuteUpdate(context.Context, any) (int64, error) {
+	return -1, q.eh.NotImplemented("ExecuteUpdate is unsupported for AddArtifacts actions")
+}
+func (q *addArtifactsQuery) ExecuteQuery(ctx context.Context, impl any) (array.RecordReader, int64, error) {
+	stmt := impl.(*statementImpl)
+	client, ok := stmt.cnxn.client.(*connectimpl.ConnectClient)
+	if !ok {
+		return nil, -1, q.eh.NotImplemented("AddArtifacts requires Spark Connect")
+	}
+	if q.input == nil {
+		return nil, -1, q.eh.InvalidState("bind a request before execution")
+	}
+	input := q.input
+	q.input = nil
+	defer input.Release()
+	var values *array.Binary
+	index, count := 0, 0
+	response, err := client.AddArtifactsRaw(ctx, func() (*proto.AddArtifactsRequest, error) {
+		for values == nil || index == values.Len() {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if !input.Next() {
+				if err := input.Err(); err != nil {
+					return nil, err
+				}
+				if count == 0 {
+					return nil, q.eh.InvalidArgument("expected at least one request")
+				}
+				return nil, io.EOF
+			}
+			values = input.RecordBatch().Column(0).(*array.Binary)
+			index = 0
+		}
+		if values.IsNull(index) {
+			return nil, q.eh.InvalidArgument("expected non-null request")
+		}
+		request := &proto.AddArtifactsRequest{}
+		if err := pb.Unmarshal(values.Value(index), request); err != nil {
+			return nil, q.eh.InvalidArgument("invalid AddArtifacts request: %s", err)
+		}
+		index++
+		count++
+		return request, nil
+	})
+	if err != nil {
+		return nil, -1, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "upload artifacts")
+	}
+	data, err := pb.Marshal(response)
+	if err != nil {
+		return nil, -1, q.eh.InvalidArgument("serialize AddArtifacts response: %s", err)
+	}
+	builder := array.NewRecordBuilder(stmt.cnxn.Alloc, q.Schema())
 	defer builder.Release()
 	builder.Field(0).(*array.BinaryBuilder).Append(data)
 	batch := builder.NewRecordBatch()

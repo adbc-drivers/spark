@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"runtime"
@@ -427,6 +428,47 @@ func (c *ConnectClient) UnaryRaw(ctx context.Context, message pb.Message) (pb.Me
 		r.ClientObservedServerSideSessionId = nil
 		response, err = c.service.Interrupt(c.outgoing(ctx), r)
 	}
+	if err != nil {
+		return nil, NewSparkError(err)
+	}
+	return response, nil
+}
+
+// AddArtifactsRaw uploads requests once using connection-owned identity.
+func (c *ConnectClient) AddArtifactsRaw(ctx context.Context, next func() (*proto.AddArtifactsRequest, error)) (*proto.AddArtifactsResponse, error) {
+	request, err := next()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(c.outgoing(ctx))
+	defer cancel()
+	stream, err := c.service.AddArtifacts(ctx)
+	if err != nil {
+		return nil, NewSparkError(err)
+	}
+	for {
+		request.SessionId = c.sessionID
+		request.UserContext = c.userContext
+		request.ClientObservedServerSideSessionId = nil
+		if err := stream.Send(request); err != nil {
+			if err == io.EOF {
+				_, err = stream.CloseAndRecv()
+				if err != nil {
+					return nil, NewSparkError(err)
+				}
+				return nil, io.ErrUnexpectedEOF
+			}
+			return nil, NewSparkError(err)
+		}
+		request, err = next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	response, err := stream.CloseAndRecv()
 	if err != nil {
 		return nil, NewSparkError(err)
 	}

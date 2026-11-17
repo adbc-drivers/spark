@@ -115,6 +115,174 @@ class TestStatement(adbc_drivers_validation.tests.statement.TestStatement):
         result = pyarrow.concat_tables(tables)
         assert result.to_pydict() == {"id": [5, 6, 7, 8, 9]}
 
+    def test_add_artifacts_cached_dataframe(self, unary_relay, conn):
+        import hashlib
+        import zlib
+
+        from pyspark.sql.connect import proto
+
+        expected = pyarrow.table({"id": list(range(100)), "value": ["data"] * 100})
+        sink = pyarrow.BufferOutputStream()
+        with pyarrow.ipc.new_stream(sink, expected.schema) as writer:
+            writer.write_table(expected)
+        payload = proto.LocalRelation(
+            data=sink.getvalue().to_pybytes()
+        ).SerializeToString()
+        digest = hashlib.sha256(payload).hexdigest()
+        name = "cache/" + digest
+        chunks = [payload[i : i + 256] for i in range(0, len(payload), 256)]
+        schema = pyarrow.schema(
+            [pyarrow.field("request", pyarrow.binary(), nullable=False)]
+        )
+        consumed = []
+
+        def batches():
+            for index, chunk in enumerate(chunks):
+                consumed.append(index)
+                part = proto.AddArtifactsRequest.ArtifactChunk(
+                    data=chunk, crc=zlib.crc32(chunk)
+                )
+                request = proto.AddArtifactsRequest()
+                if index == 0:
+                    request.begin_chunk.CopyFrom(
+                        proto.AddArtifactsRequest.BeginChunkedArtifact(
+                            name=name,
+                            total_bytes=len(payload),
+                            num_chunks=len(chunks),
+                            initial_chunk=part,
+                        )
+                    )
+                else:
+                    request.chunk.CopyFrom(part)
+                yield pyarrow.RecordBatch.from_arrays(
+                    [
+                        pyarrow.array(
+                            [request.SerializeToString()], type=pyarrow.binary()
+                        )
+                    ],
+                    schema=schema,
+                )
+
+        with conn.cursor() as cur:
+            cur.adbc_statement.set_options(
+                **{"adbc.action": "spark.connect.add_artifacts"}
+            )
+            cur.adbc_statement.bind_stream(
+                pyarrow.RecordBatchReader.from_batches(schema, batches())
+            )
+            assert not consumed
+            handle, _ = cur.adbc_statement.execute_query()
+            with pyarrow.RecordBatchReader._import_from_c(handle.address) as reader:
+                table = reader.read_all()
+            assert table.num_rows == 1
+            response = proto.AddArtifactsResponse.FromString(table.column(0)[0].as_py())
+            assert [(a.name, a.is_crc_successful) for a in response.artifacts] == [
+                (name, True)
+            ]
+        status = unary_relay(
+            "artifact_status",
+            proto.ArtifactStatusesRequest(names=[name]),
+            proto.ArtifactStatusesResponse,
+        )
+        assert status.statuses[name].exists
+        request = proto.ExecutePlanRequest(
+            plan=proto.Plan(
+                root=proto.Relation(
+                    cached_local_relation=proto.CachedLocalRelation(hash=digest)
+                )
+            )
+        )
+        with conn.cursor() as cur:
+            cur.adbc_statement.set_options(
+                **{"adbc.action": "spark.connect.execute_plan"}
+            )
+            batch = pyarrow.RecordBatch.from_arrays(
+                [pyarrow.array([request.SerializeToString()], type=pyarrow.binary())],
+                schema=schema,
+            )
+            cur.adbc_statement.bind_stream(
+                pyarrow.RecordBatchReader.from_batches(schema, [batch])
+            )
+            handle, _ = cur.adbc_statement.execute_query()
+            tables = []
+            with pyarrow.RecordBatchReader._import_from_c(handle.address) as reader:
+                for batch in reader:
+                    for value in batch.column(0):
+                        response = proto.ExecutePlanResponse.FromString(value.as_py())
+                        if response.HasField("arrow_batch"):
+                            with pyarrow.ipc.open_stream(
+                                response.arrow_batch.data
+                            ) as result:
+                                tables.append(result.read_all())
+            assert pyarrow.concat_tables(tables).equals(expected)
+
+    def test_add_artifacts_uploaded_code(self, unary_relay, conn):
+        import uuid
+        import zlib
+        from pathlib import Path
+
+        from pyspark.sql.connect import proto
+
+        data = (Path(__file__).parent / "fixtures" / "add-constant.jar").read_bytes()
+        name = "jars/adbc-add-constant.jar"
+        response = unary_relay(
+            "add_artifacts",
+            proto.AddArtifactsRequest(
+                batch=proto.AddArtifactsRequest.Batch(
+                    artifacts=[
+                        proto.AddArtifactsRequest.SingleChunkArtifact(
+                            name=name,
+                            data=proto.AddArtifactsRequest.ArtifactChunk(
+                                data=data, crc=zlib.crc32(data)
+                            ),
+                        )
+                    ]
+                )
+            ),
+            proto.AddArtifactsResponse,
+        )
+        assert [(a.name, a.is_crc_successful) for a in response.artifacts] == [
+            (name, True)
+        ]
+        function = "adbc_add_" + uuid.uuid4().hex
+        registration = proto.ExecutePlanRequest(
+            plan=proto.Plan(
+                command=proto.Command(
+                    register_function=proto.CommonInlineUserDefinedFunction(
+                        function_name=function,
+                        deterministic=True,
+                        java_udf=proto.JavaUDF(
+                            class_name="AddConstant",
+                            output_type=proto.DataType(long=proto.DataType.Long()),
+                        ),
+                    )
+                )
+            )
+        )
+        unary_schema = pyarrow.schema(
+            [pyarrow.field("request", pyarrow.binary(), nullable=False)]
+        )
+        with conn.cursor() as cur:
+            cur.adbc_statement.set_options(
+                **{"adbc.action": "spark.connect.execute_plan"}
+            )
+            batch = pyarrow.RecordBatch.from_arrays(
+                [
+                    pyarrow.array(
+                        [registration.SerializeToString()], type=pyarrow.binary()
+                    )
+                ],
+                schema=unary_schema,
+            )
+            cur.adbc_statement.bind_stream(
+                pyarrow.RecordBatchReader.from_batches(unary_schema, [batch])
+            )
+            handle, _ = cur.adbc_statement.execute_query()
+            with pyarrow.RecordBatchReader._import_from_c(handle.address) as reader:
+                reader.read_all()
+            cur.execute(f"SELECT {function}(id) AS result FROM range(3)")
+            assert cur.fetch_arrow_table().to_pydict() == {"result": [7, 8, 9]}
+
     def test_analyze_plan_passthrough(self, unary_relay):
         from pyspark.sql.connect import proto
 
