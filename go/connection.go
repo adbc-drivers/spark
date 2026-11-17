@@ -45,16 +45,20 @@ func (c *connectionImpl) Close(ctx context.Context) error {
 		return c.ErrorHelper.Errorf(adbc.StatusInvalidState, "connection not initialized or already closed")
 	}
 
+	// The connection is closed even when the client reports an error. Keeping
+	// the client would let later calls reach a client that's already released.
 	if err := c.client.Close(ctx); err != nil {
 		// Prefer to log/warn so that connection object can be closed
 		c.Logger.WarnContext(ctx, "error closing spark client", "err", err)
-		return nil
 	}
 	c.client = nil
 	return nil
 }
 
 func (c *connectionImpl) PrepareDriverInfo(ctx context.Context, infoCodes []adbc.InfoCode) error {
+	if c.client == nil {
+		return errConnectionClosed
+	}
 	backendName := c.client.BackendName()
 	if version, err := c.client.VendorVersion(ctx, c.Alloc); err == nil && version != "" {
 		fullVersion := fmt.Sprintf("%s (%s)", version, backendName)
@@ -68,7 +72,10 @@ func (c *connectionImpl) PrepareDriverInfo(ctx context.Context, infoCodes []adbc
 	return c.DriverInfo.RegisterInfoCode(adbc.InfoVendorSubstrait, false)
 }
 
-func (*connectionImpl) ListTableTypes(ctx context.Context) ([]string, error) {
+func (c *connectionImpl) ListTableTypes(ctx context.Context) ([]string, error) {
+	if c.client == nil {
+		return nil, errConnectionClosed
+	}
 	return []string{
 		"VIEW",
 		"FOREIGN",
@@ -82,18 +89,30 @@ func (*connectionImpl) ListTableTypes(ctx context.Context) ([]string, error) {
 }
 
 func (c *connectionImpl) GetCurrentCatalog(ctx context.Context) (string, error) {
+	if c.client == nil {
+		return "", errConnectionClosed
+	}
 	return c.client.CurrentCatalog(ctx, c.Alloc)
 }
 
 func (c *connectionImpl) GetCurrentDbSchema(ctx context.Context) (string, error) {
+	if c.client == nil {
+		return "", errConnectionClosed
+	}
 	return c.client.CurrentSchema(ctx, c.Alloc)
 }
 
 func (c *connectionImpl) SetCurrentCatalog(ctx context.Context, value string) error {
+	if c.client == nil {
+		return errConnectionClosed
+	}
 	return c.client.SetCurrentCatalog(ctx, c.Alloc, value)
 }
 
 func (c *connectionImpl) SetCurrentDbSchema(ctx context.Context, value string) error {
+	if c.client == nil {
+		return errConnectionClosed
+	}
 	return c.client.SetCurrentSchema(ctx, c.Alloc, value)
 }
 
@@ -108,6 +127,9 @@ func (c *connectionImpl) SetAutocommit(ctx context.Context, enabled bool) error 
 }
 
 func (c *connectionImpl) GetTableSchema(ctx context.Context, catalog *string, dbSchema *string, tableName string) (*arrow.Schema, error) {
+	if c.client == nil {
+		return nil, errConnectionClosed
+	}
 	parts := make([]string, 0, 3)
 	if catalog != nil && *catalog != "" {
 		parts = append(parts, sparkbase.QuoteIdentifier(*catalog))
@@ -146,9 +168,16 @@ func (c *connectionImpl) Rollback(ctx context.Context) error {
 }
 
 func (c *connectionImpl) NewStatement(ctx context.Context) (adbc.StatementWithContext, error) {
+	if c.client == nil {
+		return nil, errConnectionClosed
+	}
 	return driverbase.NewStatement(&statementImpl{
 		StatementImplBase: driverbase.NewStatementImplBase(&c.ConnectionImplBase, c.ErrorHelper),
 		cnxn:              c,
+		action: ActionState{
+			supported: supportedActions,
+			eh:        c.ErrorHelper,
+		},
 		ingest: bulkIngestOptions{
 			BulkIngestOptions: driverbase.NewBulkIngestOptions(),
 			s3BaseEndpoint:    c.s3BaseEndpoint,
@@ -181,6 +210,9 @@ func (c *connectionImpl) GetOption(ctx context.Context, key string) (string, err
 		}
 		return "", adbc.Error{Code: adbc.StatusNotImplemented, Msg: "[spark] call headers require Spark Connect"}
 	}
+	if c.client == nil {
+		return "", errConnectionClosed
+	}
 	if val, ok, err := c.client.GetOption(ctx, key); err != nil {
 		return "", err
 	} else if ok {
@@ -190,6 +222,9 @@ func (c *connectionImpl) GetOption(ctx context.Context, key string) (string, err
 }
 
 func (c *connectionImpl) GetOptionInt(ctx context.Context, key string) (int64, error) {
+	if c.client == nil {
+		return 0, errConnectionClosed
+	}
 	if val, ok, err := c.client.GetOptionInt(ctx, key); err != nil {
 		return 0, err
 	} else if ok {

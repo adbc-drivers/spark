@@ -39,6 +39,7 @@ type statementImpl struct {
 	driverbase.StatementImplBase
 	cnxn *connectionImpl
 
+	action      ActionState
 	query       string
 	logicalPlan *connectpb.Plan
 	params      array.RecordReader
@@ -57,6 +58,7 @@ func (st *statementImpl) clearIngestState() {
 }
 
 func (st *statementImpl) Close(ctx context.Context) error {
+	st.action.Close(ctx)
 	if st.params != nil {
 		st.params.Release()
 		st.params = nil
@@ -72,6 +74,12 @@ func (st *statementImpl) Close(ctx context.Context) error {
 }
 
 func (st *statementImpl) GetOption(ctx context.Context, key string) (string, error) {
+	if key == "spark.connect.operation_id" {
+		if q, ok := st.action.current.(*executePlanQuery); ok && q.operationID != "" {
+			return q.operationID, nil
+		}
+		return "", st.ErrorHelper.InvalidState("bind a request first")
+	}
 	return "", adbc.Error{
 		Msg:  fmt.Sprintf("[spark] Unknown statement option '%s'", key),
 		Code: adbc.StatusNotFound,
@@ -98,15 +106,24 @@ func (st *statementImpl) GetOptionDouble(ctx context.Context, key string) (float
 
 // SetOption sets a string option on this statement
 func (st *statementImpl) SetOption(ctx context.Context, key string, val string) error {
+	if key == ActionOption {
+		st.clearQueryState()
+		st.clearIngestState()
+		_, err := st.action.SetOption(ctx, key, val)
+		return err
+	}
 	if ok, err := st.ingest.SetOption(&st.ErrorHelper, key, val); err != nil {
 		st.clearQueryState()
 		return err
 	} else if ok {
+		st.action.Close(ctx)
+		st.clearQueryState()
 		return nil
 	}
 
 	switch key {
 	case sparkutil.StatementOptionIngestStagingAreaURI:
+		st.action.Close(ctx)
 		parsed, err := url.Parse(val)
 		if err != nil {
 			return sparkbase.ErrToAdbcErr(adbc.StatusInternal, err, "parse staging area URI `%s`", val)
@@ -114,6 +131,7 @@ func (st *statementImpl) SetOption(ctx context.Context, key string, val string) 
 		st.clearQueryState()
 		st.ingest.staging = parsed
 	case sparkutil.OptionIngestLocation:
+		st.action.Close(ctx)
 		st.clearQueryState()
 		st.ingest.location = val
 	case sparkutil.OptionIngestS3BaseEndpoint:
@@ -139,6 +157,7 @@ func (st *statementImpl) SetOption(ctx context.Context, key string, val string) 
 func (st *statementImpl) SetOptionBytes(ctx context.Context, key string, value []byte) error {
 	switch key {
 	case sparkutil.OptionSparkLogicalPlan:
+		st.action.Close(ctx)
 		st.clearQueryState()
 		st.clearIngestState()
 		var plan connectpb.Plan
@@ -170,11 +189,16 @@ func (st *statementImpl) SetOptionDouble(ctx context.Context, key string, value 
 
 func (st *statementImpl) SetSqlQuery(ctx context.Context, query string) error {
 	st.clearIngestState()
+	st.clearQueryState()
+	st.action.Close(ctx)
 	st.query = query
 	return nil
 }
 
 func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, int64, error) {
+	if st.action.current != nil {
+		return st.action.current.ExecuteQuery(ctx, st)
+	}
 	if st.ingest.IsSet() {
 		n, err := st.executeIngest(ctx)
 		return arrowext.EmptyReader{}, n, err
@@ -226,6 +250,9 @@ func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, 
 }
 
 func (st *statementImpl) ExecuteUpdate(ctx context.Context) (int64, error) {
+	if st.action.current != nil {
+		return st.action.current.ExecuteUpdate(ctx, st)
+	}
 	if st.ingest.IsSet() {
 		return st.executeIngest(ctx)
 	} else if st.logicalPlan != nil {
@@ -268,10 +295,16 @@ func (st *statementImpl) ExecuteUpdate(ctx context.Context) (int64, error) {
 }
 
 func (st *statementImpl) ExecuteSchema(ctx context.Context) (*arrow.Schema, error) {
+	if st.action.current != nil {
+		return nil, st.ErrorHelper.NotImplemented("schema execution is unsupported for actions")
+	}
 	return nil, sparkbase.ErrTBD
 }
 
 func (st *statementImpl) Prepare(ctx context.Context) error {
+	if st.action.current != nil {
+		return st.ErrorHelper.NotImplemented("preparation is unsupported for actions")
+	}
 	if st.query == "" {
 		return adbc.Error{
 			Msg:  "[spark] no query set",
@@ -286,7 +319,15 @@ func (st *statementImpl) SetSubstraitPlan(ctx context.Context, plan []byte) erro
 	return st.ErrorHelper.NotImplemented("SetSubstraitPlan not supported")
 }
 
-func (st *statementImpl) Bind(_ context.Context, values arrow.RecordBatch) error {
+func (st *statementImpl) Bind(ctx context.Context, values arrow.RecordBatch) error {
+	if st.action.current != nil {
+		rdr, err := array.NewRecordReader(values.Schema(), []arrow.RecordBatch{values})
+		if err != nil {
+			return err
+		}
+		defer rdr.Release()
+		return st.action.current.BindStream(ctx, rdr)
+	}
 	if st.params != nil {
 		st.params.Release()
 		st.params = nil
@@ -303,7 +344,10 @@ func (st *statementImpl) Bind(_ context.Context, values arrow.RecordBatch) error
 	return nil
 }
 
-func (st *statementImpl) BindStream(_ context.Context, stream array.RecordReader) error {
+func (st *statementImpl) BindStream(ctx context.Context, stream array.RecordReader) error {
+	if st.action.current != nil {
+		return st.action.current.BindStream(ctx, stream)
+	}
 	if st.params != nil {
 		st.params.Release()
 		st.params = nil
@@ -316,6 +360,9 @@ func (st *statementImpl) BindStream(_ context.Context, stream array.RecordReader
 }
 
 func (st *statementImpl) GetParameterSchema(ctx context.Context) (*arrow.Schema, error) {
+	if st.action.current != nil {
+		return st.action.current.ParameterSchema(), nil
+	}
 	return nil, sparkbase.ErrTBD
 }
 
