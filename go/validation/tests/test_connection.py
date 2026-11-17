@@ -100,14 +100,17 @@ class TestConnection(adbc_drivers_validation.tests.connection.TestConnection):
 
     def test_get_objects_table_types(self, driver, conn) -> None:
         if driver.short_version.endswith(("-thrift", "-thrifthttp")):
-            # Spark's Thrift GetTables reports temporary views as VIEW.
-            pytest.skip("Thrift reports temporary views as VIEW")
+            # Spark's Thrift GetTables reports temporary views as VIEW, with its
+            # own types. This test covers SHOW TABLE EXTENDED.
+            pytest.skip("Thrift lists tables with GetTables")
         if driver.short_version.startswith("emr-"):
             pytest.skip("EMR tables need an S3 location")
         suffix = uuid.uuid4().hex[:8]
-        table = f"types_table_{suffix}"
-        view = f"types_view_{suffix}"
         catalog, schema = "spark_catalog", "default"
+        managed = f"types_managed_{suffix}"
+        external = f"types_external_{suffix}"
+        view = f"types_view_{suffix}"
+        temp_view = f"types_temp_{suffix}"
 
         def qualified(name):
             return ".".join(
@@ -115,40 +118,82 @@ class TestConnection(adbc_drivers_validation.tests.connection.TestConnection):
             )
 
         with conn.cursor() as cursor:
-            cursor.execute(f"CREATE TABLE {qualified(table)} (id INT)")
+            cursor.execute(f"CREATE TABLE {qualified(managed)} (id INT)")
+            cursor.execute(f"CREATE VIEW {qualified(view)} AS SELECT 1 AS id")
             cursor.execute(
-                f"CREATE TEMPORARY VIEW {driver.quote_one_identifier(view)} AS SELECT 1 AS id"
+                f"CREATE TEMPORARY VIEW {driver.quote_one_identifier(temp_view)} AS SELECT 1 AS id"
             )
+            # An external table needs a location the server can use. Skip it
+            # where the server refuses to create one.
+            try:
+                cursor.execute(
+                    f"CREATE TABLE {qualified(external)} (id INT) USING parquet "
+                    f"LOCATION '/tmp/adbc_types_{suffix}'"
+                )
+                has_external = True
+            except adbc_driver_manager.dbapi.Error:
+                has_external = False
+        expected = {
+            managed: "MANAGED",
+            view: "VIEW",
+            temp_view: "VIEW",
+        }
+        if has_external:
+            expected[external] = "EXTERNAL"
         try:
 
-            def listed(types_filter=None):
+            def listed(types_filter=None, depth="tables"):
                 objects = conn.adbc_get_objects(
-                    depth="tables",
+                    depth=depth,
                     catalog_filter=catalog,
                     db_schema_filter=schema,
                     table_name_filter=f"%{suffix}",
                     table_types_filter=types_filter,
                 )
                 return sorted(
-                    (t["table_name"], t["table_type"])
+                    (
+                        t["table_name"],
+                        t["table_type"],
+                        [c["column_name"] for c in (t.get("table_columns") or [])],
+                    )
                     for obj in objects.read_all().to_pylist()
                     for s in obj["catalog_db_schemas"]
                     for t in s["db_schema_tables"]
                 )
 
-            # Temporary views are reported as TEMPORARY, other tables as TABLE.
-            assert listed() == [(table, "TABLE"), (view, "TEMPORARY")]
-            assert listed(["TABLE"]) == [(table, "TABLE")]
-            assert listed(["TEMPORARY"]) == [(view, "TEMPORARY")]
-            assert listed(["VIEW"]) == []
-            # GetTableTypes lists the types that GetObjects reports.
-            assert {"TABLE", "TEMPORARY"} <= set(conn.adbc_get_table_types())
+            def names_and_types(types_filter=None):
+                return [(name, kind) for name, kind, _ in listed(types_filter)]
+
+            # Every table is listed with its type, temporary views included.
+            assert names_and_types() == sorted(expected.items())
+            assert names_and_types(["MANAGED"]) == [(managed, "MANAGED")]
+            assert names_and_types(["VIEW"]) == sorted(
+                (n, "VIEW") for n in (view, temp_view)
+            )
+            if has_external:
+                assert names_and_types(["EXTERNAL"]) == [(external, "EXTERNAL")]
+            # TEMPORARY isn't a type, so GetTableTypes doesn't list it.
+            types = conn.adbc_get_table_types()
+            assert {"MANAGED", "VIEW"} <= set(types)
+            assert "TEMPORARY" not in types
+            # At depth ALL, temporary views list their columns too.
+            columns = {name: cols for name, _, cols in listed(depth="all")}
+            assert columns[temp_view] == ["id"]
+            assert columns[view] == ["id"]
+            assert columns[managed] == ["id"]
         finally:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    f"DROP VIEW IF EXISTS {driver.quote_one_identifier(view)}"
+                    f"DROP VIEW IF EXISTS {driver.quote_one_identifier(temp_view)}"
                 )
-                cursor.execute(driver.drop_table(table_name=table, schema_name=schema))
+                cursor.execute(f"DROP VIEW IF EXISTS {qualified(view)}")
+                cursor.execute(
+                    driver.drop_table(table_name=managed, schema_name=schema)
+                )
+                if has_external:
+                    cursor.execute(
+                        driver.drop_table(table_name=external, schema_name=schema)
+                    )
 
     def test_get_objects_name_patterns(self, driver, conn) -> None:
         if driver.short_version.startswith("emr-"):

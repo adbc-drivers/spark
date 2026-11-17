@@ -27,14 +27,13 @@ import (
 type openClient struct{ sparkbase.SparkClient }
 
 func TestListTableTypes(t *testing.T) {
-	// TABLE and TEMPORARY, which GetObjects reports, come first; the types
-	// listed before stay listed, in the same order.
+	// TABLE is the fallback type of a table with no Type: line, so GetTableTypes
+	// lists it. The types listed before stay listed, in the same order.
 	conn := &connectionImpl{client: openClient{}}
 	types, err := conn.ListTableTypes(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []string{
 		"TABLE",
-		"TEMPORARY",
 		"VIEW",
 		"FOREIGN",
 		"MANAGED",

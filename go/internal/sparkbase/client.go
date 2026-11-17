@@ -264,102 +264,189 @@ func DefaultGetDBSchemasForCatalogImpl(c SparkClient, ctx context.Context, catal
 	return schemas, nil
 }
 
-// Table types that GetObjects reports. SHOW TABLES marks session-scoped
-// temporary views with isTemporary; every other table is a TABLE.
-const (
-	TableTypeTable     = "TABLE"
-	TableTypeTemporary = "TEMPORARY"
-)
+// TableTypeTable is the type of a table whose SHOW TABLE EXTENDED information
+// has no Type: line. Every other table type comes from that line.
+const TableTypeTable = "TABLE"
+
+// TableTypeView is the type of a view and of a temporary view.
+const TableTypeView = "VIEW"
 
 func DefaultGetTablesForDBSchemaImpl(c SparkClient, ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string, includeColumns bool) ([]driverbase.TableInfo, error) {
-	if includeColumns {
-		return defaultGetTablesWithColumns(c, ctx, catalog, schema, tableFilter, columnFilter)
+	tables, err := listTablesExtended(c, ctx, catalog, schema, tableFilter)
+	if err != nil {
+		return nil, err
 	}
-	return defaultGetTablesOnly(c, ctx, catalog, schema, tableFilter)
+	if includeColumns {
+		return defaultGetTablesWithColumns(c, ctx, catalog, schema, tables, columnFilter)
+	}
+	infos := make([]driverbase.TableInfo, 0, len(tables))
+	for _, table := range tables {
+		infos = append(infos, driverbase.TableInfo{
+			TableName:    table.name,
+			TableType:    table.tableType,
+			TableColumns: []driverbase.ColumnInfo{},
+		})
+	}
+	return infos, nil
 }
 
-func defaultGetTablesOnly(c SparkClient, ctx context.Context, catalog string, schema string, tableFilter *string) ([]driverbase.TableInfo, error) {
+// listedTable is a row of SHOW TABLE EXTENDED that matches the name filter.
+type listedTable struct {
+	// namespace is the database of a temporary view: "" for a local view, and
+	// "global_temp" for a global one. It's empty for other tables.
+	namespace string
+	name      string
+	tableType string
+	temporary bool
+}
+
+// listTablesExtended lists the tables of a schema with SHOW TABLE EXTENDED,
+// which reads each table's metadata to get its type. Temporary views are
+// listed too, in every schema.
+func listTablesExtended(c SparkClient, ctx context.Context, catalog string, schema string, tableFilter *string) ([]listedTable, error) {
 	like, pattern, err := nameFilter(tableFilter)
 	if err != nil {
 		return nil, err
 	}
+	// SHOW TABLE EXTENDED requires a LIKE clause. A pattern that can't be
+	// translated lists everything, and the names are matched on the client.
+	if like == "" {
+		like = " LIKE " + QuoteString("*")
+	}
 
-	query := "SHOW TABLES IN " + QuoteIdentifier(catalog) + "." + QuoteIdentifier(schema) + like
+	query := "SHOW TABLE EXTENDED IN " + QuoteIdentifier(catalog) + "." + QuoteIdentifier(schema) + like
 	rr, err := executeMetadataQuery(c, ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	defer rr.Release()
 
-	temporaryIdx := temporaryColumn(rr.Schema())
-	tables := make([]driverbase.TableInfo, 0)
+	namespaceIdx, nameIdx, temporaryIdx, informationIdx := extendedColumns(rr.Schema())
+	if nameIdx < 0 {
+		return nil, adbc.Error{
+			Code: adbc.StatusInternal,
+			Msg:  "[spark] SHOW TABLE EXTENDED did not return expected columns",
+		}
+	}
+
+	tables := make([]listedTable, 0)
 	for rr.Next() {
 		rec := rr.RecordBatch()
-		nameCol, ok := rec.Column(1).(array.StringLike)
+		nameCol, ok := rec.Column(nameIdx).(array.StringLike)
 		if !ok {
 			return nil, adbc.Error{
 				Code: adbc.StatusInternal,
-				Msg:  "[spark] SHOW TABLES did not return expected columns",
+				Msg:  "[spark] SHOW TABLE EXTENDED did not return expected columns",
 			}
 		}
+		namespaceCol := stringColumn(rec, namespaceIdx)
+		informationCol := stringColumn(rec, informationIdx)
 		var temporary *array.Boolean
 		if temporaryIdx >= 0 {
 			temporary, _ = rec.Column(temporaryIdx).(*array.Boolean)
 		}
 		for i := range int(rec.NumRows()) {
-			if !MatchesName(pattern, nameCol.Value(i)) {
+			name := nameCol.Value(i)
+			if !MatchesName(pattern, name) {
 				continue
 			}
-			tableName := strings.Clone(nameCol.Value(i))
-			tableType := TableTypeTable
-			if temporary != nil && !temporary.IsNull(i) && temporary.Value(i) {
-				tableType = TableTypeTemporary
+			table := listedTable{
+				name:      strings.Clone(name),
+				temporary: temporary != nil && !temporary.IsNull(i) && temporary.Value(i),
 			}
-			tables = append(tables, driverbase.TableInfo{
-				TableName:    tableName,
-				TableType:    tableType,
-				TableColumns: []driverbase.ColumnInfo{},
-			})
+			if namespaceCol != nil && !namespaceCol.IsNull(i) {
+				table.namespace = strings.Clone(namespaceCol.Value(i))
+			}
+			information := ""
+			if informationCol != nil && !informationCol.IsNull(i) {
+				information = informationCol.Value(i)
+			}
+			table.tableType = tableTypeOf(information, table.temporary)
+			tables = append(tables, table)
 		}
+	}
+	if err := rr.Err(); err != nil {
+		return nil, err
 	}
 	return tables, nil
 }
 
-// temporaryColumn returns the index of SHOW TABLES' isTemporary column, or -1
-// if the result doesn't have one.
-func temporaryColumn(schema *arrow.Schema) int {
+// extendedColumns finds the columns of a SHOW TABLE EXTENDED result by name. A
+// missing column has index -1.
+func extendedColumns(schema *arrow.Schema) (namespace, name, temporary, information int) {
+	namespace, name, temporary, information = -1, -1, -1, -1
 	if schema == nil {
-		return -1
+		return
 	}
 	for i, field := range schema.Fields() {
-		if strings.EqualFold(field.Name, "isTemporary") {
-			return i
+		switch {
+		case strings.EqualFold(field.Name, "namespace"):
+			namespace = i
+		case strings.EqualFold(field.Name, "tableName"):
+			name = i
+		case strings.EqualFold(field.Name, "isTemporary"):
+			temporary = i
+		case strings.EqualFold(field.Name, "information"):
+			information = i
 		}
 	}
-	return -1
+	return
 }
 
-func defaultGetTablesWithColumns(c SparkClient, ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string) ([]driverbase.TableInfo, error) {
-	tables, err := defaultGetTablesOnly(c, ctx, catalog, schema, tableFilter)
-	if err != nil {
-		return nil, err
+// stringColumn returns column idx of rec as a string column, or nil if idx is
+// -1 or the column isn't a string.
+func stringColumn(rec arrow.RecordBatch, idx int) array.StringLike {
+	if idx < 0 {
+		return nil
 	}
+	col, _ := rec.Column(idx).(array.StringLike)
+	return col
+}
 
+// tableTypeOf returns the ADBC type of a table from the Type: line of its
+// SHOW TABLE EXTENDED information. A temporary view is a VIEW. A table with
+// no Type: line is a TABLE.
+func tableTypeOf(information string, temporary bool) string {
+	if temporary {
+		return TableTypeView
+	}
+	for _, line := range strings.Split(information, "\n") {
+		if value, ok := strings.CutPrefix(line, "Type: "); ok {
+			if value = strings.TrimSpace(value); value != "" {
+				return value
+			}
+		}
+	}
+	return TableTypeTable
+}
+
+func defaultGetTablesWithColumns(c SparkClient, ctx context.Context, catalog string, schema string, tables []listedTable, columnFilter *string) ([]driverbase.TableInfo, error) {
 	columnFilterRe, err := driverbase.PatternToRegexp(columnFilter)
 	if err != nil {
 		return nil, err
 	}
 
-	for idx := range tables {
-		columns, err := defaultDescribeTable(c, ctx, catalog, schema, tables[idx].TableName)
+	infos := make([]driverbase.TableInfo, 0, len(tables))
+	for _, table := range tables {
+		info := driverbase.TableInfo{
+			TableName:    table.name,
+			TableType:    table.tableType,
+			TableColumns: []driverbase.ColumnInfo{},
+		}
+		// A temporary view isn't in the schema's catalog, so it's described by
+		// its unqualified name, or global_temp.name for a global view.
+		ref := qualifiedTable(catalog, schema, table.name)
+		if table.temporary {
+			ref = temporaryViewRef(table.namespace, table.name)
+		}
+		columns, err := describeRelation(c, ctx, ref)
 		if err != nil {
 			// A table that's missing or can't be read shouldn't fail the
-			// whole listing; list it without columns. For example, SHOW
-			// TABLES lists temporary views in every schema of the session
-			// catalog, but DESCRIBE can't find them there. Other errors
-			// still fail the call.
+			// whole listing; list it without columns. Other errors still
+			// fail the call.
 			adbcErr, ok := errors.AsType[adbc.Error](err)
 			if ok && (adbcErr.Code == adbc.StatusNotFound || adbcErr.Code == adbc.StatusUnauthorized) {
+				infos = append(infos, info)
 				continue
 			}
 			return nil, err
@@ -373,18 +460,27 @@ func defaultGetTablesWithColumns(c SparkClient, ctx context.Context, catalog str
 			}
 			columns = filtered
 		}
-		tables[idx].TableColumns = columns
+		info.TableColumns = columns
+		infos = append(infos, info)
 	}
-	return tables, nil
+	return infos, nil
 }
 
-func defaultDescribeTable(c SparkClient, ctx context.Context, catalog string, schema string, table string) ([]driverbase.ColumnInfo, error) {
-	sql := fmt.Sprintf("DESCRIBE TABLE %s.%s.%s",
-		QuoteIdentifier(catalog),
-		QuoteIdentifier(schema),
-		QuoteIdentifier(table))
+func qualifiedTable(catalog, schema, table string) string {
+	return QuoteIdentifier(catalog) + "." + QuoteIdentifier(schema) + "." + QuoteIdentifier(table)
+}
 
-	rr, err := executeMetadataQuery(c, ctx, sql)
+func temporaryViewRef(namespace, view string) string {
+	if namespace == "" {
+		return QuoteIdentifier(view)
+	}
+	return QuoteIdentifier(namespace) + "." + QuoteIdentifier(view)
+}
+
+// describeRelation lists the columns of a table or view. ref is its name, as
+// DESCRIBE TABLE takes it.
+func describeRelation(c SparkClient, ctx context.Context, ref string) ([]driverbase.ColumnInfo, error) {
+	rr, err := executeMetadataQuery(c, ctx, "DESCRIBE TABLE "+ref)
 	if err != nil {
 		return nil, err
 	}
