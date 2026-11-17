@@ -112,12 +112,13 @@ func (d *databaseImpl) Open(ctx context.Context) (adbc.ConnectionWithContext, er
 		return nil, err
 	}
 
+	guard := &closedGuard{conn: conn, objects: client}
 	return driverbase.NewConnectionBuilder(conn).
 		WithAutocommitSetter(conn).
 		WithCurrentNamespacer(conn).
 		WithTableTypeLister(conn).
 		WithDriverInfoPreparer(conn).
-		WithDbObjectsEnumerator(client).
+		WithDbObjectsEnumerator(guard).
 		Connection(), nil
 }
 
