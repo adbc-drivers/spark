@@ -26,6 +26,7 @@ import (
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	connectpb "github.com/adbc-drivers/spark/go/internal/generated"
 	"github.com/apache/arrow-adbc/go/adbc"
+	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 )
@@ -263,6 +264,13 @@ func DefaultGetDBSchemasForCatalogImpl(c SparkClient, ctx context.Context, catal
 	return schemas, nil
 }
 
+// Table types that GetObjects reports. SHOW TABLES marks session-scoped
+// temporary views with isTemporary; every other table is a TABLE.
+const (
+	TableTypeTable     = "TABLE"
+	TableTypeTemporary = "TEMPORARY"
+)
+
 func DefaultGetTablesForDBSchemaImpl(c SparkClient, ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string, includeColumns bool) ([]driverbase.TableInfo, error) {
 	if includeColumns {
 		return defaultGetTablesWithColumns(c, ctx, catalog, schema, tableFilter, columnFilter)
@@ -283,6 +291,7 @@ func defaultGetTablesOnly(c SparkClient, ctx context.Context, catalog string, sc
 	}
 	defer rr.Release()
 
+	temporaryIdx := temporaryColumn(rr.Schema())
 	tables := make([]driverbase.TableInfo, 0)
 	for rr.Next() {
 		rec := rr.RecordBatch()
@@ -293,19 +302,41 @@ func defaultGetTablesOnly(c SparkClient, ctx context.Context, catalog string, sc
 				Msg:  "[spark] SHOW TABLES did not return expected columns",
 			}
 		}
+		var temporary *array.Boolean
+		if temporaryIdx >= 0 {
+			temporary, _ = rec.Column(temporaryIdx).(*array.Boolean)
+		}
 		for i := range int(rec.NumRows()) {
 			if !MatchesName(pattern, nameCol.Value(i)) {
 				continue
 			}
 			tableName := strings.Clone(nameCol.Value(i))
+			tableType := TableTypeTable
+			if temporary != nil && !temporary.IsNull(i) && temporary.Value(i) {
+				tableType = TableTypeTemporary
+			}
 			tables = append(tables, driverbase.TableInfo{
 				TableName:    tableName,
-				TableType:    "TABLE",
+				TableType:    tableType,
 				TableColumns: []driverbase.ColumnInfo{},
 			})
 		}
 	}
 	return tables, nil
+}
+
+// temporaryColumn returns the index of SHOW TABLES' isTemporary column, or -1
+// if the result doesn't have one.
+func temporaryColumn(schema *arrow.Schema) int {
+	if schema == nil {
+		return -1
+	}
+	for i, field := range schema.Fields() {
+		if strings.EqualFold(field.Name, "isTemporary") {
+			return i
+		}
+	}
+	return -1
 }
 
 func defaultGetTablesWithColumns(c SparkClient, ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string) ([]driverbase.TableInfo, error) {

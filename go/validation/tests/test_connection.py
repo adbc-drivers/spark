@@ -98,6 +98,58 @@ class TestConnection(adbc_drivers_validation.tests.connection.TestConnection):
                     f"DROP VIEW IF EXISTS {driver.quote_one_identifier(view)}"
                 )
 
+    def test_get_objects_table_types(self, driver, conn) -> None:
+        if driver.short_version.endswith(("-thrift", "-thrifthttp")):
+            # Spark's Thrift GetTables reports temporary views as VIEW.
+            pytest.skip("Thrift reports temporary views as VIEW")
+        if driver.short_version.startswith("emr-"):
+            pytest.skip("EMR tables need an S3 location")
+        suffix = uuid.uuid4().hex[:8]
+        table = f"types_table_{suffix}"
+        view = f"types_view_{suffix}"
+        catalog, schema = "spark_catalog", "default"
+
+        def qualified(name):
+            return ".".join(
+                driver.quote_one_identifier(n) for n in (catalog, schema, name)
+            )
+
+        with conn.cursor() as cursor:
+            cursor.execute(f"CREATE TABLE {qualified(table)} (id INT)")
+            cursor.execute(
+                f"CREATE TEMPORARY VIEW {driver.quote_one_identifier(view)} AS SELECT 1 AS id"
+            )
+        try:
+
+            def listed(types_filter=None):
+                objects = conn.adbc_get_objects(
+                    depth="tables",
+                    catalog_filter=catalog,
+                    db_schema_filter=schema,
+                    table_name_filter=f"%{suffix}",
+                    table_types_filter=types_filter,
+                )
+                return sorted(
+                    (t["table_name"], t["table_type"])
+                    for obj in objects.read_all().to_pylist()
+                    for s in obj["catalog_db_schemas"]
+                    for t in s["db_schema_tables"]
+                )
+
+            # Temporary views are reported as TEMPORARY, other tables as TABLE.
+            assert listed() == [(table, "TABLE"), (view, "TEMPORARY")]
+            assert listed(["TABLE"]) == [(table, "TABLE")]
+            assert listed(["TEMPORARY"]) == [(view, "TEMPORARY")]
+            assert listed(["VIEW"]) == []
+            # GetTableTypes lists the types that GetObjects reports.
+            assert {"TABLE", "TEMPORARY"} <= set(conn.adbc_get_table_types())
+        finally:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"DROP VIEW IF EXISTS {driver.quote_one_identifier(view)}"
+                )
+                cursor.execute(driver.drop_table(table_name=table, schema_name=schema))
+
     def test_get_objects_name_patterns(self, driver, conn) -> None:
         if driver.short_version.startswith("emr-"):
             pytest.skip("EMR tables need an S3 location")

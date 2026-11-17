@@ -68,8 +68,12 @@ func (c *connectionImpl) PrepareDriverInfo(ctx context.Context, infoCodes []adbc
 	return c.DriverInfo.RegisterInfoCode(adbc.InfoVendorSubstrait, false)
 }
 
+// ListTableTypes lists the table types. GetObjects reports TABLE, and TEMPORARY
+// for session temporary views; the other types are listed as before.
 func (*connectionImpl) ListTableTypes(ctx context.Context) ([]string, error) {
 	return []string{
+		sparkbase.TableTypeTable,
+		sparkbase.TableTypeTemporary,
 		"VIEW",
 		"FOREIGN",
 		"MANAGED",
