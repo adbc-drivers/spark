@@ -72,7 +72,8 @@ sc://localhost:15002/;token=abc123;use_ssl=true;user_id=alice
   - `session_id` sets `spark.connect.session_id`.
   - Any other key is sent as a gRPC call header, as `spark.connect.call_header.<key>`.
 - A parameter that sets an option already set elsewhere in the URI, to a different value, is an error.
-- Parameters are not PySpark's defaults. PySpark's `sc://` is plaintext by default; here TLS is on by default, so set `use_ssl=false` for a plaintext server. Authentication still needs `auth_type` when there is no `token`: use `auth_type=none`.
+- `auth_type` defaults to `token` when the URI has a token or a password (`/;token=...` or `sc://:token@host`), and to `none` otherwise, so `sc://host:15002` works as is. Set `auth_type` explicitly to override the default. A conflict with an explicit `auth_type` is an error.
+- TLS is on by default for Spark Connect, unlike PySpark's `sc://`, which is plaintext by default. Set `use_ssl=false` for a plaintext server.
 
 :::{note}
 Reserved characters in URI elements must be URI-encoded. For example, `@` becomes `%40`, and `;`, `?`, and `#` inside a parameter value must be encoded as `%3B`, `%3F`, and `%23`.

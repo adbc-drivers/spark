@@ -118,14 +118,32 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 	// carries its parameters in the path. Any other path keeps its meaning
 	// as the Livy base URL.
 	if scheme == "sc" && strings.HasPrefix(uri.EscapedPath(), "/;") {
-		return parseSparkConnectParams(uri.EscapedPath()[len("/;"):], options)
-	}
-
-	if uri.Path != "" && uri.Path != "/" {
+		if err := parseSparkConnectParams(uri.EscapedPath()[len("/;"):], options); err != nil {
+			return err
+		}
+	} else if uri.Path != "" && uri.Path != "/" {
 		options[sparkutil.OptionLivyBaseURL] = uri.Path
 	}
 
+	if scheme == "sc" {
+		defaultSparkConnectAuthType(options)
+	}
 	return nil
+}
+
+// defaultSparkConnectAuthType sets the auth type of an sc:// URI that doesn't
+// give one. A URI with a token, as /;token= or a password in the userinfo
+// (sc://:token@host), uses token auth. Any other URI uses none. An explicit
+// auth_type is never changed, so a conflict with it is still an error.
+func defaultSparkConnectAuthType(options map[string]string) {
+	if _, ok := options[sparkutil.OptionAuthType]; ok {
+		return
+	}
+	if _, ok := options[adbc.OptionKeyPassword]; ok {
+		options[sparkutil.OptionAuthType] = sparkutil.OptionValueAuthTypeToken
+		return
+	}
+	options[sparkutil.OptionAuthType] = sparkutil.OptionValueAuthTypeNone
 }
 
 // parseURIQuery splits a raw query the way url.ParseQuery does, except that

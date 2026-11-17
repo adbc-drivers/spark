@@ -63,9 +63,10 @@ func TestParseOptionsFromUri(t *testing.T) {
 		{
 			uri: "sc://localhost:10000",
 			options: map[string]string{
-				"spark.host": "localhost",
-				"spark.port": "10000",
-				"spark.api":  "connect",
+				"spark.host":      "localhost",
+				"spark.port":      "10000",
+				"spark.api":       "connect",
+				"spark.auth_type": "none",
 			},
 		},
 		{
@@ -117,8 +118,9 @@ func TestParseOptionsFromUri(t *testing.T) {
 		{
 			uri: "sc://localhost?api=connect",
 			options: map[string]string{
-				"spark.host": "localhost",
-				"spark.api":  "connect",
+				"spark.host":      "localhost",
+				"spark.api":       "connect",
+				"spark.auth_type": "none",
 			},
 		},
 		{
@@ -554,9 +556,10 @@ func TestParseOptionsFromUriExistingForms(t *testing.T) {
 		{
 			uri: "sc://localhost:15002/",
 			options: map[string]string{
-				"spark.host": "localhost",
-				"spark.port": "15002",
-				"spark.api":  "connect",
+				"spark.host":      "localhost",
+				"spark.port":      "15002",
+				"spark.api":       "connect",
+				"spark.auth_type": "none",
 			},
 		},
 		{
@@ -567,6 +570,7 @@ func TestParseOptionsFromUriExistingForms(t *testing.T) {
 				"spark.host":          "localhost",
 				"spark.port":          "15002",
 				"spark.api":           "connect",
+				"spark.auth_type":     "none",
 				"spark.livy.base_url": "/foo",
 			},
 		},
@@ -586,6 +590,7 @@ func TestParseOptionsFromUriExistingForms(t *testing.T) {
 				"spark.host":               "localhost",
 				"spark.port":               "15002",
 				"spark.api":                "connect",
+				"spark.auth_type":          "none",
 				"spark.connect.session_id": "a b",
 			},
 		},
@@ -713,9 +718,10 @@ func TestParseSparkConnectParams(t *testing.T) {
 			// An empty parameter list adds nothing.
 			uri: "sc://localhost:15002/;",
 			options: map[string]string{
-				"spark.host": "localhost",
-				"spark.port": "15002",
-				"spark.api":  "connect",
+				"spark.host":      "localhost",
+				"spark.port":      "15002",
+				"spark.api":       "connect",
+				"spark.auth_type": "none",
 			},
 		},
 	} {
@@ -788,4 +794,106 @@ func TestParseSparkConnectParamsRejectsInvalidValues(t *testing.T) {
 	require.ErrorAs(t, err, &adbcErr)
 	require.Equal(t, adbc.StatusInvalidArgument, adbcErr.Code)
 	require.NotContains(t, err.Error(), secret)
+}
+
+// An sc:// URI without an auth_type defaults it: token when the URI has a token
+// or a password, and none otherwise. An explicit auth_type always wins.
+func TestSparkConnectDefaultAuthType(t *testing.T) {
+	for _, tc := range []struct {
+		uri      string
+		authType string
+		conn     connectimpl.ConnectionOpts
+	}{
+		{
+			uri:      "sc://localhost:15002",
+			authType: "none",
+			conn: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeNone,
+				Tls:                       true,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			uri:      "sc://localhost:15002/;use_ssl=false",
+			authType: "none",
+			conn: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeNone,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			uri:      "sc://:abc@localhost:15002",
+			authType: "token",
+			conn: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeToken,
+				Token:                     "abc",
+				Tls:                       true,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			uri:      "sc://localhost:15002/;token=abc",
+			authType: "token",
+			conn: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeToken,
+				Token:                     "abc",
+				Tls:                       true,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			// A user name alone isn't a token.
+			uri:      "sc://alice@localhost:15002",
+			authType: "none",
+			conn: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeNone,
+				Username:                  "alice",
+				Tls:                       true,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			// An explicit auth_type is kept.
+			uri:      "sc://localhost:15002?auth_type=token&password=x",
+			authType: "token",
+		},
+	} {
+		u, err := url.Parse(tc.uri)
+		require.NoError(t, err)
+		options := map[string]string{}
+		require.NoError(t, parseOptionsFromUri(u, options), "URI %s", tc.uri)
+		require.Equal(t, tc.authType, options[sparkutil.OptionAuthType], "auth type for %s", tc.uri)
+		if tc.conn.Host == "" {
+			continue
+		}
+		parsed, err := connectOptsFromOptions(options)
+		require.NoError(t, err, "URI %s", tc.uri)
+		require.Equal(t, tc.conn, parsed, "URI %s", tc.uri)
+	}
+}
+
+func TestSparkConnectExplicitAuthTypeConflicts(t *testing.T) {
+	// A password in the userinfo with auth_type=none is a conflict, as before.
+	u, err := url.Parse("sc://:abc@localhost:15002?auth_type=none")
+	require.NoError(t, err)
+	options := map[string]string{}
+	require.NoError(t, parseOptionsFromUri(u, options))
+	_, err = connectOptsFromOptions(options)
+	require.Error(t, err)
+
+	// A token in the path with an explicit non-token auth_type is a conflict too.
+	u, err = url.Parse("sc://localhost:15002/;token=abc?auth_type=none")
+	require.NoError(t, err)
+	options = map[string]string{}
+	require.Error(t, parseOptionsFromUri(u, options))
 }
