@@ -196,6 +196,9 @@ func (st *statementImpl) SetSqlQuery(ctx context.Context, query string) error {
 }
 
 func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, int64, error) {
+	if st.cnxn.client == nil {
+		return nil, -1, errConnectionClosed
+	}
 	if st.action.current != nil {
 		return st.action.current.ExecuteQuery(ctx, st)
 	}
@@ -222,6 +225,9 @@ func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, 
 }
 
 func (st *statementImpl) ExecuteUpdate(ctx context.Context) (int64, error) {
+	if st.cnxn.client == nil {
+		return -1, errConnectionClosed
+	}
 	if st.action.current != nil {
 		return st.action.current.ExecuteUpdate(ctx, st)
 	}

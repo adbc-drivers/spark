@@ -18,9 +18,14 @@ import (
 	"context"
 	"testing"
 
+	connectpb "github.com/adbc-drivers/spark/go/internal/generated"
+	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 )
 
 // The connection is opened lazily, so none of these calls reach a server. The
@@ -98,4 +103,61 @@ func TestConnectionCallsAfterCloseReturnInvalidState(t *testing.T) {
 
 	// Closing twice still reports an error.
 	require.Error(t, conn.Close(ctx))
+}
+
+// A statement keeps its connection, so it must not reach the released client
+// after the connection is closed. Each kind of statement returns InvalidState
+// from both execute calls instead of panicking.
+func TestStatementExecuteAfterConnectionCloseReturnsInvalidState(t *testing.T) {
+	ctx := context.Background()
+	db, err := NewDriver(memory.NewGoAllocator()).NewDatabaseWithContext(ctx, map[string]string{
+		adbc.OptionKeyURI: "sc://localhost:1?api=connect&auth_type=none&tls=false",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close(ctx) })
+
+	plan, err := proto.Marshal(&connectpb.Plan{OpType: &connectpb.Plan_Root{Root: &connectpb.Relation{
+		RelType: &connectpb.Relation_Sql{Sql: &connectpb.SQL{Query: "SELECT 1"}},
+	}}})
+	require.NoError(t, err)
+
+	setups := map[string]func(t *testing.T, stmt adbc.StatementWithContext){
+		"query": func(t *testing.T, stmt adbc.StatementWithContext) {
+			require.NoError(t, stmt.SetSqlQuery(ctx, "SELECT 1"))
+		},
+		"logical plan": func(t *testing.T, stmt adbc.StatementWithContext) {
+			require.NoError(t, stmt.(adbc.GetSetOptionsWithContext).SetOptionBytes(ctx, sparkutil.OptionSparkLogicalPlan, plan))
+		},
+		"ingest": func(t *testing.T, stmt adbc.StatementWithContext) {
+			require.NoError(t, stmt.SetOption(ctx, adbc.OptionKeyIngestTargetTable, "t"))
+			schema := arrow.NewSchema([]arrow.Field{{Name: "v", Type: arrow.PrimitiveTypes.Int64}}, nil)
+			rec := array.NewRecordBatch(schema, []arrow.Array{array.NewInt64Builder(memory.DefaultAllocator).NewArray()}, 0)
+			defer rec.Release()
+			require.NoError(t, stmt.Bind(ctx, rec))
+		},
+		"action": func(t *testing.T, stmt adbc.StatementWithContext) {
+			require.NoError(t, stmt.SetOption(ctx, ActionOption, executePlanAction{}.Name()))
+		},
+	}
+	for name, setup := range setups {
+		t.Run(name, func(t *testing.T) {
+			conn, err := db.Open(ctx)
+			require.NoError(t, err)
+			stmt, err := conn.NewStatement(ctx)
+			require.NoError(t, err)
+			setup(t, stmt)
+			require.NoError(t, conn.Close(ctx))
+
+			var queryErr, updateErr error
+			require.NotPanics(t, func() { _, _, queryErr = stmt.ExecuteQuery(ctx) })
+			require.NotPanics(t, func() { _, updateErr = stmt.ExecuteUpdate(ctx) })
+			for _, err := range []error{queryErr, updateErr} {
+				var adbcErr adbc.Error
+				require.ErrorAs(t, err, &adbcErr)
+				require.Equal(t, adbc.StatusInvalidState, adbcErr.Code, "unexpected error: %v", err)
+				require.ErrorContains(t, err, "connection is closed")
+			}
+			require.NoError(t, stmt.Close(ctx))
+		})
+	}
 }
