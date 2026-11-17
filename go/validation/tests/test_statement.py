@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import datetime
-import decimal
 import urllib.parse
 
 import adbc_driver_manager.dbapi
@@ -48,6 +46,9 @@ class TestStatement(adbc_drivers_validation.tests.statement.TestStatement):
             assert cur.fetchall() == [("plain",)]
 
     def test_bind_parameters(self, driver, conn):
+        # The standard bind tests cover types and multiple rows. These cover
+        # what they don't: the marker rules, the uint64 limit, and backends
+        # that can't bind.
         if not driver.short_version.endswith("-connect"):
             # Only Spark Connect binds parameters. Other backends say so.
             with (
@@ -57,41 +58,10 @@ class TestStatement(adbc_drivers_validation.tests.statement.TestStatement):
                 cur.execute("SELECT ?", parameters=[1])
             return
 
-        cases = [
-            ("SELECT ?, ?", [1, "a+b/c=="], [(1, "a+b/c==")]),
-            ("SELECT ?, ?, ?", [True, 1.5, b"\x01\x02"], [(True, 1.5, b"\x01\x02")]),
-            ("SELECT ?", [decimal.Decimal("123.45")], [(decimal.Decimal("123.45"),)]),
-            ("SELECT ?", [datetime.date(2024, 1, 2)], [(datetime.date(2024, 1, 2),)]),
-            ("SELECT ?", [None], [(None,)]),
-            # A '?' inside a string literal is not a marker.
-            ("SELECT ? AS x, '?' AS y", [42], [(42, "?")]),
-        ]
+        # A '?' inside a string literal is not a marker.
         with conn.cursor() as cur:
-            for sql, params, expected in cases:
-                cur.execute(sql, parameters=params)
-                assert cur.fetchall() == expected, sql
-
-        # Arrow types bind as their Spark types.
-        arrow_cases = [
-            (pyarrow.timestamp("us"), datetime.datetime(2024, 5, 6, 7, 8, 9, 123456)),
-            (
-                pyarrow.timestamp("ms", tz="UTC"),
-                datetime.datetime(2024, 5, 6, 7, 8, 9, tzinfo=datetime.UTC),
-            ),
-            (pyarrow.date64(), datetime.date(2024, 1, 2)),
-            (pyarrow.decimal128(10, 2), decimal.Decimal("1.25")),
-            (pyarrow.decimal256(38, 3), decimal.Decimal("1.500")),
-        ]
-        with conn.cursor() as cur:
-            for arrow_type, value in arrow_cases:
-                batch = pyarrow.record_batch(
-                    [pyarrow.array([value], type=arrow_type)], names=["v"]
-                )
-                cur.adbc_statement.bind(batch)
-                cur.adbc_statement.set_sql_query("SELECT ? AS v")
-                handle, _ = cur.adbc_statement.execute_query()
-                with pyarrow.RecordBatchReader._import_from_c(handle.address) as reader:
-                    assert reader.read_all().column(0).to_pylist() == [value]
+            cur.execute("SELECT ? AS x, '?' AS y", parameters=[42])
+            assert cur.fetchall() == [(42, "?")]
 
         # A uint64 above the signed maximum is rejected, not wrapped.
         with conn.cursor() as cur:

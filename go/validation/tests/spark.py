@@ -76,6 +76,7 @@ class Spark3ThriftQuirks(model.DriverQuirks):
         if context in (
             "TestConnection.test_get_table_schema_catalog",
             "TestConnection.test_get_table_schema_schema",
+            "TestStatement.sample_table",
         ):
             return default.replace("VARCHAR", "STRING")
         return default
@@ -147,6 +148,13 @@ class Spark4ThriftHttpQuirks(Spark4ThriftQuirks):
 class Spark4ConnectQuirks(Spark4ThriftQuirks):
     vendor_version = re.compile(r"4\.0\.\d+.*\(Spark Connect\)")
     short_version = "4.0-connect"
+    # Spark Connect binds parameters, which the Thrift quirks don't. Spark SQL
+    # has no $1 markers, so the positional marker is '?'.
+    features = Spark4ThriftQuirks.features.with_values(statement_bind=True)
+
+    def bind_parameter(self, index: int) -> str:
+        return "?"
+
     setup = model.DriverSetup(
         database={
             "uri": model.FromEnv("SPARK_CONNECT_URI"),
