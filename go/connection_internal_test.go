@@ -18,13 +18,19 @@ import (
 	"context"
 	"testing"
 
+	"github.com/adbc-drivers/spark/go/internal/sparkbase"
 	"github.com/stretchr/testify/require"
 )
+
+// openClient stands in for the Spark client of an open connection.
+// ListTableTypes doesn't call it.
+type openClient struct{ sparkbase.SparkClient }
 
 func TestListTableTypes(t *testing.T) {
 	// TABLE and TEMPORARY, which GetObjects reports, come first; the types
 	// listed before stay listed, in the same order.
-	types, err := (&connectionImpl{}).ListTableTypes(context.Background())
+	conn := &connectionImpl{client: openClient{}}
+	types, err := conn.ListTableTypes(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []string{
 		"TABLE",
