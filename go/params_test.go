@@ -106,10 +106,11 @@ func decimalLiteral(value string, precision, scale int32) *connectpb.Expression_
 }
 
 func TestColumnToLiteralNullAndErrors(t *testing.T) {
-	// A null of any type binds as Spark's NULL type.
+	// A null of a typed column binds as a null of the column's type, so
+	// every row of the column has the same type.
 	lit, err := columnToLiteral(arrayFromJSON(t, arrow.PrimitiveTypes.Int64, `[null]`), 0)
 	require.NoError(t, err)
-	require.True(t, proto.Equal(nullLiteral(), lit))
+	require.True(t, proto.Equal(typedNullOf(&connectpb.DataType{Kind: &connectpb.DataType_Long_{Long: &connectpb.DataType_Long{}}}), lit))
 
 	// A uint64 above the signed maximum is rejected, not wrapped.
 	_, err = columnToLiteral(arrayFromJSON(t, arrow.PrimitiveTypes.Uint64, `[9223372036854775808]`), 0)
@@ -125,6 +126,55 @@ func requireAdbcCode(t *testing.T, err error, code adbc.Status) {
 	var adbcErr adbc.Error
 	require.ErrorAs(t, err, &adbcErr)
 	require.Equal(t, code, adbcErr.Code)
+}
+
+func typedNullOf(dt *connectpb.DataType) *connectpb.Expression_Literal {
+	return &connectpb.Expression_Literal{LiteralType: &connectpb.Expression_Literal_Null{Null: dt}}
+}
+
+func TestTypedNullLiterals(t *testing.T) {
+	tzUTC := &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}
+	precision := func(p int32) *int32 { return &p }
+	for _, tc := range []struct {
+		name string
+		arr  arrow.Array
+		want *connectpb.DataType
+	}{
+		{"boolean", arrayFromJSON(t, arrow.FixedWidthTypes.Boolean, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Boolean_{Boolean: &connectpb.DataType_Boolean{}}}},
+		{"int8", arrayFromJSON(t, arrow.PrimitiveTypes.Int8, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Byte_{Byte: &connectpb.DataType_Byte{}}}},
+		{"int16", arrayFromJSON(t, arrow.PrimitiveTypes.Int16, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Short_{Short: &connectpb.DataType_Short{}}}},
+		{"int32", arrayFromJSON(t, arrow.PrimitiveTypes.Int32, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Integer_{Integer: &connectpb.DataType_Integer{}}}},
+		{"uint64", arrayFromJSON(t, arrow.PrimitiveTypes.Uint64, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Long_{Long: &connectpb.DataType_Long{}}}},
+		{"float32", arrayFromJSON(t, arrow.PrimitiveTypes.Float32, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Float_{Float: &connectpb.DataType_Float{}}}},
+		{"float64", arrayFromJSON(t, arrow.PrimitiveTypes.Float64, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Double_{Double: &connectpb.DataType_Double{}}}},
+		{"string", arrayFromJSON(t, arrow.BinaryTypes.String, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_String_{String_: &connectpb.DataType_String{}}}},
+		{"binary", arrayFromJSON(t, arrow.BinaryTypes.Binary, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Binary_{Binary: &connectpb.DataType_Binary{}}}},
+		{"date32", arrayFromJSON(t, arrow.PrimitiveTypes.Date32, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Date_{Date: &connectpb.DataType_Date{}}}},
+		{"timestamp with zone", arrayFromJSON(t, tzUTC, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Timestamp_{Timestamp: &connectpb.DataType_Timestamp{}}}},
+		{"timestamp without zone", arrayFromJSON(t, &arrow.TimestampType{Unit: arrow.Microsecond}, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_TimestampNtz{TimestampNtz: &connectpb.DataType_TimestampNTZ{}}}},
+		{"decimal128", arrayFromJSON(t, &arrow.Decimal128Type{Precision: 10, Scale: 2}, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Decimal_{Decimal: &connectpb.DataType_Decimal{Precision: precision(10), Scale: precision(2)}}}},
+		{"decimal256", arrayFromJSON(t, &arrow.Decimal256Type{Precision: 40, Scale: 3}, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Decimal_{Decimal: &connectpb.DataType_Decimal{Precision: precision(40), Scale: precision(3)}}}},
+		{"time64 micros", arrayFromJSON(t, arrow.FixedWidthTypes.Time64us, `[null]`), &connectpb.DataType{Kind: &connectpb.DataType_Time_{Time: &connectpb.DataType_Time{Precision: precision(6)}}}},
+		{"dictionary", dictNullArray(t), &connectpb.DataType{Kind: &connectpb.DataType_String_{String_: &connectpb.DataType_String{}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lit, err := columnToLiteral(tc.arr, 0)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(typedNullOf(tc.want), lit), "got %v, want a null of %v", lit, tc.want)
+		})
+	}
+}
+
+func dictNullArray(t *testing.T) arrow.Array {
+	t.Helper()
+	bldr := array.NewDictionaryBuilder(memory.DefaultAllocator, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String})
+	defer bldr.Release()
+	b := bldr.(*array.BinaryDictionaryBuilder)
+	b.AppendNull()
+	require.NoError(t, b.AppendString("x"))
+	arr := bldr.NewArray()
+	t.Cleanup(arr.Release)
+	return arr
 }
 
 func TestCountParameterMarkers(t *testing.T) {
@@ -146,6 +196,17 @@ func TestCountParameterMarkers(t *testing.T) {
 		{"/* outer /* inner ? */ ? */ SELECT ?", 1},
 		{"SELECT :named", 0},
 		{"SELECT '", 0},
+		// A raw string has no backslash escapes, so the quote after the
+		// backslash closes it, and the marker after it counts.
+		{`SELECT r'abc\' AS s, ? AS v`, 1},
+		{`SELECT R'abc\' AS s, ? AS v`, 1},
+		{`SELECT r"abc\" AS s, ? AS v`, 1},
+		{`SELECT R"abc\" AS s, ? AS v`, 1},
+		{`SELECT r'a' AS a, r'b\' AS b, ?`, 1},
+		// A raw prefix is only a token start: after an identifier, the r is part
+		// of the identifier, so the quote starts an ordinary string.
+		{`SELECT colr'\', ?`, 0},
+		{`SELECT 'r\'', ?`, 1},
 	} {
 		require.Equal(t, tc.want, countParameterMarkers(tc.sql), "SQL: %s", tc.sql)
 	}
@@ -444,4 +505,102 @@ func float16Array(t *testing.T, value float32) arrow.Array {
 	arr := bldr.NewArray()
 	t.Cleanup(arr.Release)
 	return arr
+}
+
+// typedClient answers a query whose result type depends on the first bound
+// value: a null gives a null-typed result, and any other value gives int64.
+type typedClient struct {
+	sparkbase.SparkClient
+}
+
+func (c *typedClient) ExecuteQuery(_ context.Context, q sparkbase.QueryContext) (array.RecordReader, int64, error) {
+	if len(q.PosArgs) == 1 && q.PosArgs[0].GetNull() != nil {
+		return nullTypedReader(), -1, nil
+	}
+	return echoReader(q.PosArgs), -1, nil
+}
+
+func nullTypedReader() array.RecordReader {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "v", Type: arrow.Null, Nullable: true}}, nil)
+	arr := array.NewNull(1)
+	defer arr.Release()
+	rec := array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
+	defer rec.Release()
+	rdr, err := array.NewRecordReader(schema, []arrow.RecordBatch{rec})
+	if err != nil {
+		panic(err)
+	}
+	return rdr
+}
+
+func TestExecuteRejectsRowsWithDifferentResultSchemas(t *testing.T) {
+	ctx := context.Background()
+	st := &statementImpl{cnxn: &connectionImpl{client: &typedClient{}}}
+	require.NoError(t, st.SetSqlQuery(ctx, "SELECT ? AS v"))
+	require.NoError(t, st.Bind(ctx, nullableInt64Batch(t, `[null, 8]`)))
+
+	rdr, _, err := st.ExecuteQuery(ctx)
+	require.NoError(t, err)
+	defer rdr.Release()
+	// The first row is read with the schema the statement advertised.
+	require.True(t, rdr.Next())
+	require.False(t, rdr.Next())
+	err = rdr.Err()
+	requireAdbcCode(t, err, adbc.StatusInvalidArgument)
+	require.ErrorContains(t, err, "parameter row 1")
+	require.ErrorContains(t, err, "row 0 returned")
+}
+
+func TestExecuteWithTypedNullsKeepsResultSchema(t *testing.T) {
+	ctx := context.Background()
+	st, client := newParamsStatement(t, "SELECT ? AS v")
+	require.NoError(t, st.Bind(ctx, int64Batch(t, []string{"v"}, []int64{7, 8})))
+	rdr, _, err := st.ExecuteQuery(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []int64{7, 8}, readValues(t, rdr))
+	require.Len(t, client.executions, 2)
+}
+
+// nullableInt64Batch is a one-column int64 record with the given JSON values.
+func nullableInt64Batch(t *testing.T, values string) arrow.RecordBatch {
+	t.Helper()
+	col := arrayFromJSON(t, arrow.PrimitiveTypes.Int64, values)
+	schema := arrow.NewSchema([]arrow.Field{{Name: "v", Type: arrow.PrimitiveTypes.Int64, Nullable: true}}, nil)
+	rec := array.NewRecordBatch(schema, []arrow.Array{col}, int64(col.Len()))
+	t.Cleanup(rec.Release)
+	return rec
+}
+
+// columnReader returns a one-row int64 result with the given nullability.
+func columnReader(nullable bool) array.RecordReader {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "v", Type: arrow.PrimitiveTypes.Int64, Nullable: nullable}}, nil)
+	bldr := array.NewInt64Builder(memory.DefaultAllocator)
+	defer bldr.Release()
+	bldr.Append(1)
+	arr := bldr.NewArray()
+	defer arr.Release()
+	rec := array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
+	defer rec.Release()
+	rdr, err := array.NewRecordReader(schema, []arrow.RecordBatch{rec})
+	if err != nil {
+		panic(err)
+	}
+	return rdr
+}
+
+func TestRowsReaderAcceptsNullabilityDifferences(t *testing.T) {
+	// Row 0 is nullable, as a null row is, and row 1 holds no null.
+	opened := 0
+	r, err := newRowsReader(func(args []*connectpb.Expression_Literal) (array.RecordReader, error) {
+		opened++
+		return columnReader(opened == 1), nil
+	}, [][]*connectpb.Expression_Literal{{}, {}})
+	require.NoError(t, err)
+	defer r.Release()
+	count := 0
+	for r.Next() {
+		count++
+	}
+	require.NoError(t, r.Err())
+	require.Equal(t, 2, count)
 }

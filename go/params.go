@@ -111,6 +111,9 @@ func countParameterMarkers(sql string) int {
 	count := 0
 	for i := 0; i < len(sql); i++ {
 		switch c := sql[i]; {
+		case (c == 'r' || c == 'R') && i+1 < len(sql) && isQuote(sql[i+1]) && !afterIdentifier(sql, i):
+			// A raw string, R'...' or R"...", has no backslash escapes.
+			i = skipRaw(sql, i+1)
 		case c == '\'' || c == '"' || c == '`':
 			i = skipQuoted(sql, i)
 		case c == '-' && i+1 < len(sql) && sql[i+1] == '-':
@@ -124,6 +127,36 @@ func countParameterMarkers(sql string) int {
 		}
 	}
 	return count
+}
+
+func isQuote(c byte) bool {
+	return c == '\'' || c == '"'
+}
+
+// afterIdentifier reports whether the byte before position i could continue an
+// identifier, in which case the character at i is part of that identifier and
+// not a string prefix. Spark's lexer matches identifiers greedily, so
+// colr'...' is an identifier followed by a string.
+func afterIdentifier(sql string, i int) bool {
+	if i == 0 {
+		return false
+	}
+	c := sql[i-1]
+	return c == '_' || c == '$' || c >= 0x80 ||
+		('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9')
+}
+
+// skipRaw returns the index of the quote that closes the raw string whose
+// opening quote is at start. A raw string has no escapes, so the first matching
+// quote closes it. An unterminated string runs to the end of the statement.
+func skipRaw(sql string, start int) int {
+	quote := sql[start]
+	for j := start + 1; j < len(sql); j++ {
+		if sql[j] == quote {
+			return j
+		}
+	}
+	return len(sql) - 1
 }
 
 // skipQuoted returns the index of the quote that closes the literal or
@@ -168,7 +201,7 @@ func skipBracketedComment(sql string, start int) int {
 // Connect SQL literal. Unsupported Arrow types return StatusNotImplemented.
 func columnToLiteral(col arrow.Array, row int) (*connectpb.Expression_Literal, error) {
 	if col.IsNull(row) {
-		return nullLiteral(), nil
+		return typedNullLiteral(col.DataType())
 	}
 
 	lit := &connectpb.Expression_Literal{}
@@ -303,12 +336,82 @@ func columnToLiteral(col arrow.Array, row int) (*connectpb.Expression_Literal, e
 	return lit, nil
 }
 
-// nullLiteral returns a null literal of Spark's NULL type. Spark rejects a null
-// literal without a type, and the NULL type coerces to the context it's used in.
+// nullLiteral returns a null literal of Spark's NULL type. It's the type of a
+// column that is itself the Arrow null type, which has no value to type it by.
 func nullLiteral() *connectpb.Expression_Literal {
 	return &connectpb.Expression_Literal{LiteralType: &connectpb.Expression_Literal_Null{
 		Null: &connectpb.DataType{Kind: &connectpb.DataType_Null{Null: &connectpb.DataType_NULL{}}},
 	}}
+}
+
+// typedNullLiteral returns a null of the Spark type that the Arrow type maps to,
+// so every row of a column has the same type, including the null rows. A null
+// of the Arrow null type stays untyped.
+func typedNullLiteral(dt arrow.DataType) (*connectpb.Expression_Literal, error) {
+	if dt.ID() == arrow.NULL {
+		return nullLiteral(), nil
+	}
+	sparkType, err := sparkDataType(dt)
+	if err != nil {
+		return nil, err
+	}
+	return &connectpb.Expression_Literal{LiteralType: &connectpb.Expression_Literal_Null{Null: sparkType}}, nil
+}
+
+// sparkDataType maps an Arrow type to the Spark type of the literal columnToLiteral
+// makes for its values.
+func sparkDataType(dt arrow.DataType) (*connectpb.DataType, error) {
+	switch t := dt.(type) {
+	case *arrow.BooleanType:
+		return &connectpb.DataType{Kind: &connectpb.DataType_Boolean_{Boolean: &connectpb.DataType_Boolean{}}}, nil
+	case *arrow.Int8Type:
+		return &connectpb.DataType{Kind: &connectpb.DataType_Byte_{Byte: &connectpb.DataType_Byte{}}}, nil
+	case *arrow.Int16Type, *arrow.Uint8Type:
+		return &connectpb.DataType{Kind: &connectpb.DataType_Short_{Short: &connectpb.DataType_Short{}}}, nil
+	case *arrow.Int32Type, *arrow.Uint16Type:
+		return &connectpb.DataType{Kind: &connectpb.DataType_Integer_{Integer: &connectpb.DataType_Integer{}}}, nil
+	case *arrow.Int64Type, *arrow.Uint32Type, *arrow.Uint64Type:
+		return &connectpb.DataType{Kind: &connectpb.DataType_Long_{Long: &connectpb.DataType_Long{}}}, nil
+	case *arrow.Float16Type, *arrow.Float32Type:
+		return &connectpb.DataType{Kind: &connectpb.DataType_Float_{Float: &connectpb.DataType_Float{}}}, nil
+	case *arrow.Float64Type:
+		return &connectpb.DataType{Kind: &connectpb.DataType_Double_{Double: &connectpb.DataType_Double{}}}, nil
+	case *arrow.StringType, *arrow.LargeStringType, *arrow.StringViewType:
+		return &connectpb.DataType{Kind: &connectpb.DataType_String_{String_: &connectpb.DataType_String{}}}, nil
+	case *arrow.BinaryType, *arrow.LargeBinaryType, *arrow.FixedSizeBinaryType, *arrow.BinaryViewType:
+		return &connectpb.DataType{Kind: &connectpb.DataType_Binary_{Binary: &connectpb.DataType_Binary{}}}, nil
+	case *arrow.Date32Type, *arrow.Date64Type:
+		return &connectpb.DataType{Kind: &connectpb.DataType_Date_{Date: &connectpb.DataType_Date{}}}, nil
+	case *arrow.TimestampType:
+		if t.TimeZone != "" {
+			return &connectpb.DataType{Kind: &connectpb.DataType_Timestamp_{Timestamp: &connectpb.DataType_Timestamp{}}}, nil
+		}
+		return &connectpb.DataType{Kind: &connectpb.DataType_TimestampNtz{TimestampNtz: &connectpb.DataType_TimestampNTZ{}}}, nil
+	case *arrow.Decimal128Type:
+		prec, scale := t.Precision, t.Scale
+		return &connectpb.DataType{Kind: &connectpb.DataType_Decimal_{Decimal: &connectpb.DataType_Decimal{Precision: &prec, Scale: &scale}}}, nil
+	case *arrow.Decimal256Type:
+		prec, scale := t.Precision, t.Scale
+		return &connectpb.DataType{Kind: &connectpb.DataType_Decimal_{Decimal: &connectpb.DataType_Decimal{Precision: &prec, Scale: &scale}}}, nil
+	case *arrow.Time32Type:
+		_, precision, err := timeToNanos(0, t.Unit)
+		if err != nil {
+			return nil, err
+		}
+		return &connectpb.DataType{Kind: &connectpb.DataType_Time_{Time: &connectpb.DataType_Time{Precision: &precision}}}, nil
+	case *arrow.Time64Type:
+		_, precision, err := timeToNanos(0, t.Unit)
+		if err != nil {
+			return nil, err
+		}
+		return &connectpb.DataType{Kind: &connectpb.DataType_Time_{Time: &connectpb.DataType_Time{Precision: &precision}}}, nil
+	case *arrow.DictionaryType:
+		return sparkDataType(t.ValueType)
+	}
+	return nil, adbc.Error{
+		Msg:  fmt.Sprintf("[spark] cannot bind null parameter of Arrow type %s", dt),
+		Code: adbc.StatusNotImplemented,
+	}
 }
 
 // timeToNanos converts an Arrow time value to nanoseconds since midnight, and
@@ -359,9 +462,29 @@ type rowsReader struct {
 	open   func(args []*connectpb.Expression_Literal) (array.RecordReader, error)
 	rows   [][]*connectpb.Expression_Literal
 	schema *arrow.Schema
-	cur    array.RecordReader
-	err    error
-	refs   int64
+	// index is the row whose execution is current. Row 0 is the first.
+	index int
+	cur   array.RecordReader
+	err   error
+	refs  int64
+}
+
+// sameColumnTypes reports whether two result schemas have the same number of
+// columns and the same column types. Two things are left out. Nullability: Spark
+// marks a column that holds no null as not nullable, and a non-nullable column
+// still fits the advertised schema. Names: Spark names an unaliased expression
+// after its literal values, so "1 + ?" is named "(1 + 1)" for one value and
+// "(1 + 2)" for another. The advertised names are the first row's.
+func sameColumnTypes(a, b *arrow.Schema) bool {
+	if len(a.Fields()) != len(b.Fields()) {
+		return false
+	}
+	for i, f := range a.Fields() {
+		if !arrow.TypeEqual(f.Type, b.Field(i).Type) {
+			return false
+		}
+	}
+	return true
 }
 
 // newRowsReader executes the first row, to learn the schema, and returns a
@@ -414,9 +537,23 @@ func (r *rowsReader) Next() bool {
 		}
 		args := r.rows[0]
 		r.rows = r.rows[1:]
+		r.index++
 		rdr, err := r.open(args)
 		if err != nil {
 			r.err = err
+			return false
+		}
+		// The result schema is advertised from the first row, so a later row
+		// whose type differs can't be streamed as part of it. That happens when
+		// the query's result type depends on the bound values.
+		if r.schema != nil && rdr != nil && !sameColumnTypes(rdr.Schema(), r.schema) {
+			r.err = adbc.Error{
+				Code: adbc.StatusInvalidArgument,
+				Msg: fmt.Sprintf("[spark] parameter row %d returned result schema %s, but row 0 returned %s; "+
+					"the query's result type depends on the bound values, so the rows can't be combined into one result",
+					r.index, rdr.Schema(), r.schema),
+			}
+			rdr.Release()
 			return false
 		}
 		r.cur = rdr
