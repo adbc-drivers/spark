@@ -116,7 +116,7 @@ func (d *databaseImpl) Open(ctx context.Context) (adbc.ConnectionWithContext, er
 	return driverbase.NewConnectionBuilder(conn).
 		WithAutocommitSetter(conn).
 		WithCurrentNamespacer(conn).
-		WithTableTypeLister(guard).
+		WithTableTypeLister(conn).
 		WithDriverInfoPreparer(conn).
 		WithDbObjectsEnumerator(guard).
 		Connection(), nil

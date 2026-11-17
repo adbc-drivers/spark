@@ -22,11 +22,9 @@ import (
 )
 
 // errConnectionClosed reports use of a connection after Close.
-func errConnectionClosed() error {
-	return adbc.Error{
-		Code: adbc.StatusInvalidState,
-		Msg:  "[spark] connection is closed",
-	}
+var errConnectionClosed = adbc.Error{
+	Code: adbc.StatusInvalidState,
+	Msg:  "[spark] connection is closed",
 }
 
 // closedGuard rejects metadata calls after the connection is closed. Close
@@ -39,29 +37,21 @@ type closedGuard struct {
 
 func (g *closedGuard) GetCatalogs(ctx context.Context, catalogFilter *string) ([]string, error) {
 	if g.conn.client == nil {
-		return nil, errConnectionClosed()
+		return nil, errConnectionClosed
 	}
 	return g.objects.GetCatalogs(ctx, catalogFilter)
 }
 
 func (g *closedGuard) GetDBSchemasForCatalog(ctx context.Context, catalog string, schemaFilter *string) ([]string, error) {
 	if g.conn.client == nil {
-		return nil, errConnectionClosed()
+		return nil, errConnectionClosed
 	}
 	return g.objects.GetDBSchemasForCatalog(ctx, catalog, schemaFilter)
 }
 
 func (g *closedGuard) GetTablesForDBSchema(ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string, includeColumns bool) ([]driverbase.TableInfo, error) {
 	if g.conn.client == nil {
-		return nil, errConnectionClosed()
+		return nil, errConnectionClosed
 	}
 	return g.objects.GetTablesForDBSchema(ctx, catalog, schema, tableFilter, columnFilter, includeColumns)
-}
-
-// ListTableTypes is the driverbase TableTypeLister, so GetTableTypes is guarded too.
-func (g *closedGuard) ListTableTypes(ctx context.Context) ([]string, error) {
-	if g.conn.client == nil {
-		return nil, errConnectionClosed()
-	}
-	return g.conn.ListTableTypes(ctx)
 }
