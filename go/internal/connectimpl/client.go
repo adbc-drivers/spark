@@ -38,6 +38,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	pb "google.golang.org/protobuf/proto"
 )
 
 type AuthType uint8
@@ -76,7 +77,7 @@ const (
 	interruptTimeout = 5 * time.Second
 )
 
-type connectClient struct {
+type ConnectClient struct {
 	sparkbase.CallHeaders
 	conn           *grpc.ClientConn
 	service        proto.SparkConnectServiceClient
@@ -87,7 +88,7 @@ type connectClient struct {
 	releaseSession bool
 }
 
-func (c *connectClient) BackendName() string {
+func (c *ConnectClient) BackendName() string {
 	return "Spark Connect"
 }
 
@@ -114,7 +115,7 @@ func NewClient(ctx context.Context, opts ConnectionOpts, sessionConfig map[strin
 	return c, nil
 }
 
-func newConnectClient(opts ConnectionOpts) (*connectClient, error) {
+func newConnectClient(opts ConnectionOpts) (*ConnectClient, error) {
 	host, port, err := splitHostPort(opts.Host)
 	if err != nil {
 		return nil, err
@@ -148,7 +149,7 @@ func newConnectClient(opts ConnectionOpts) (*connectClient, error) {
 	if opts.AwsProxyAuth != "" {
 		headers.Set("x-aws-proxy-auth", opts.AwsProxyAuth)
 	}
-	return &connectClient{
+	return &ConnectClient{
 		conn:           conn,
 		service:        proto.NewSparkConnectServiceClient(conn),
 		sessionID:      sessionID,
@@ -218,12 +219,12 @@ func clientType() string {
 	return fmt.Sprintf("adbc-driver-spark os/%s go/%s driver/%s", runtime.GOOS, runtime.Version(), driverbase.DriverVersion())
 }
 
-func (c *connectClient) outgoing(ctx context.Context) context.Context {
+func (c *ConnectClient) outgoing(ctx context.Context) context.Context {
 	existing, _ := metadata.FromOutgoingContext(ctx)
 	return metadata.NewOutgoingContext(ctx, metadata.Join(existing, c.headers, c.Snapshot()))
 }
 
-func (c *connectClient) setConfig(ctx context.Context, key, value string) error {
+func (c *ConnectClient) setConfig(ctx context.Context, key, value string) error {
 	_, err := c.service.Config(c.outgoing(ctx), &proto.ConfigRequest{
 		SessionId:   c.sessionID,
 		UserContext: c.userContext,
@@ -242,7 +243,7 @@ func (c *connectClient) setConfig(ctx context.Context, key, value string) error 
 	return nil
 }
 
-func (c *connectClient) Close(ctx context.Context) error {
+func (c *ConnectClient) Close(ctx context.Context) error {
 	if c.conn == nil {
 		return nil
 	}
@@ -267,27 +268,40 @@ func (c *connectClient) Close(ctx context.Context) error {
 	return nil
 }
 
-func (c *connectClient) executePlan(ctx context.Context, q sparkbase.QueryContext, plan *proto.Plan) (*resultReader, error) {
-	operationID := uuid.New().String()
+func (c *ConnectClient) ExecutePlanRaw(ctx context.Context, request *proto.ExecutePlanRequest) (context.Context, string, context.CancelFunc, proto.SparkConnectService_ExecutePlanClient, error) {
+	request = pb.Clone(request).(*proto.ExecutePlanRequest)
+	operationID := request.GetOperationId()
+	if operationID == "" {
+		operationID = uuid.New().String()
+	}
+	request.ClientObservedServerSideSessionId = nil
 	// The stream outlives this call; the reader cancels it on Release.
 	streamCtx, cancel := context.WithCancel(c.outgoing(ctx))
-	stream, err := c.service.ExecutePlan(streamCtx, &proto.ExecutePlanRequest{
-		SessionId:   c.sessionID,
-		UserContext: c.userContext,
-		ClientType:  &c.clientType,
-		OperationId: &operationID,
-		Plan:        plan,
-	})
+	request.SessionId = c.sessionID
+	request.UserContext = c.userContext
+	request.OperationId = &operationID
+	stream, err := c.service.ExecutePlan(streamCtx, request)
 	if err != nil {
 		cancel()
-		return nil, NewSparkError(err)
+		return nil, "", cancel, nil, NewSparkError(err)
+	}
+	return streamCtx, operationID, cancel, stream, nil
+}
+
+func (c *ConnectClient) executePlan(ctx context.Context, q sparkbase.QueryContext, plan *proto.Plan) (*resultReader, error) {
+	streamCtx, operationID, cancel, stream, err := c.ExecutePlanRaw(ctx, &proto.ExecutePlanRequest{
+		ClientType: &c.clientType,
+		Plan:       plan,
+	})
+	if err != nil {
+		return nil, err
 	}
 	interrupt := func() { c.interruptOperation(operationID) }
 	return newResultReader(streamCtx, stream, cancel, interrupt, q.Mem)
 }
 
 // executeSQL runs a query as a single ExecutePlan with a SQL relation root.
-func (c *connectClient) executeSQL(ctx context.Context, q sparkbase.QueryContext) (*resultReader, error) {
+func (c *ConnectClient) executeSQL(ctx context.Context, q sparkbase.QueryContext) (*resultReader, error) {
 	plan := &proto.Plan{OpType: &proto.Plan_Root{Root: &proto.Relation{
 		RelType: &proto.Relation_Sql{Sql: &proto.SQL{Query: q.Query}},
 	}}}
@@ -296,7 +310,7 @@ func (c *connectClient) executeSQL(ctx context.Context, q sparkbase.QueryContext
 
 // interruptOperation stops an operation whose results are no longer wanted.
 // Cancelling the RPC alone leaves the job running on the server.
-func (c *connectClient) interruptOperation(operationID string) {
+func (c *ConnectClient) interruptOperation(operationID string) {
 	ctx, cancel := context.WithTimeout(c.outgoing(context.Background()), interruptTimeout)
 	defer cancel()
 	_, _ = c.service.Interrupt(ctx, &proto.InterruptRequest{
@@ -308,7 +322,7 @@ func (c *connectClient) interruptOperation(operationID string) {
 	})
 }
 
-func (c *connectClient) ExecuteQuery(ctx context.Context, q sparkbase.QueryContext) (array.RecordReader, int64, error) {
+func (c *ConnectClient) ExecuteQuery(ctx context.Context, q sparkbase.QueryContext) (array.RecordReader, int64, error) {
 	rdr, err := c.executeSQL(ctx, q)
 	if err != nil {
 		return nil, -1, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute query")
@@ -317,7 +331,7 @@ func (c *connectClient) ExecuteQuery(ctx context.Context, q sparkbase.QueryConte
 	return rdr, -1, nil
 }
 
-func (c *connectClient) ExecuteUpdate(ctx context.Context, q sparkbase.QueryContext) (int64, error) {
+func (c *ConnectClient) ExecuteUpdate(ctx context.Context, q sparkbase.QueryContext) (int64, error) {
 	rdr, err := c.executeSQL(ctx, q)
 	if err != nil {
 		return -1, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute update")
@@ -329,7 +343,7 @@ func (c *connectClient) ExecuteUpdate(ctx context.Context, q sparkbase.QueryCont
 	return -1, rdr.Err()
 }
 
-func (c *connectClient) ExecuteLogicalPlan(ctx context.Context, q sparkbase.QueryContext, plan *proto.Plan) (array.RecordReader, error) {
+func (c *ConnectClient) ExecuteLogicalPlan(ctx context.Context, q sparkbase.QueryContext, plan *proto.Plan) (array.RecordReader, error) {
 	rdr, err := c.executePlan(ctx, q, plan)
 	if err != nil {
 		return nil, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "execute logical plan")
@@ -337,39 +351,39 @@ func (c *connectClient) ExecuteLogicalPlan(ctx context.Context, q sparkbase.Quer
 	return rdr, nil
 }
 
-func (c *connectClient) VendorVersion(ctx context.Context, mem memory.Allocator) (string, error) {
+func (c *ConnectClient) VendorVersion(ctx context.Context, mem memory.Allocator) (string, error) {
 	return sparkbase.DefaultVendorVersionImpl(c, ctx, mem)
 }
 
-func (c *connectClient) CurrentCatalog(ctx context.Context, mem memory.Allocator) (string, error) {
+func (c *ConnectClient) CurrentCatalog(ctx context.Context, mem memory.Allocator) (string, error) {
 	return sparkbase.DefaultCurrentCatalogImpl(c, ctx, mem)
 }
 
-func (c *connectClient) SetCurrentCatalog(ctx context.Context, mem memory.Allocator, catalog string) error {
+func (c *ConnectClient) SetCurrentCatalog(ctx context.Context, mem memory.Allocator, catalog string) error {
 	return sparkbase.DefaultSetCurrentCatalogImpl(c, ctx, mem, catalog)
 }
 
-func (c *connectClient) CurrentSchema(ctx context.Context, mem memory.Allocator) (string, error) {
+func (c *ConnectClient) CurrentSchema(ctx context.Context, mem memory.Allocator) (string, error) {
 	return sparkbase.DefaultCurrentSchemaImpl(c, ctx, mem)
 }
 
-func (c *connectClient) SetCurrentSchema(ctx context.Context, mem memory.Allocator, schema string) error {
+func (c *ConnectClient) SetCurrentSchema(ctx context.Context, mem memory.Allocator, schema string) error {
 	return sparkbase.DefaultSetCurrentSchemaImpl(c, ctx, mem, schema)
 }
 
-func (c *connectClient) GetCatalogs(ctx context.Context, catalogFilter *string) ([]string, error) {
+func (c *ConnectClient) GetCatalogs(ctx context.Context, catalogFilter *string) ([]string, error) {
 	return sparkbase.DefaultGetCatalogsImpl(c, ctx, catalogFilter)
 }
 
-func (c *connectClient) GetDBSchemasForCatalog(ctx context.Context, catalog string, schemaFilter *string) ([]string, error) {
+func (c *ConnectClient) GetDBSchemasForCatalog(ctx context.Context, catalog string, schemaFilter *string) ([]string, error) {
 	return sparkbase.DefaultGetDBSchemasForCatalogImpl(c, ctx, catalog, schemaFilter)
 }
 
-func (c *connectClient) GetTablesForDBSchema(ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string, includeColumns bool) ([]driverbase.TableInfo, error) {
+func (c *ConnectClient) GetTablesForDBSchema(ctx context.Context, catalog string, schema string, tableFilter *string, columnFilter *string, includeColumns bool) ([]driverbase.TableInfo, error) {
 	return sparkbase.DefaultGetTablesForDBSchemaImpl(c, ctx, catalog, schema, tableFilter, columnFilter, includeColumns)
 }
 
-func (c *connectClient) GetOption(_ context.Context, key string) (string, bool, error) {
+func (c *ConnectClient) GetOption(_ context.Context, key string) (string, bool, error) {
 	switch key {
 	case sparkutil.OptionConnectSessionId:
 		return c.sessionID, true, nil
@@ -378,8 +392,10 @@ func (c *connectClient) GetOption(_ context.Context, key string) (string, bool, 
 	}
 }
 
-func (c *connectClient) GetOptionInt(_ context.Context, _ string) (int64, bool, error) {
+func (c *ConnectClient) GetOptionInt(_ context.Context, _ string) (int64, bool, error) {
 	return 0, false, nil
 }
 
-var _ sparkbase.SparkClient = (*connectClient)(nil)
+var _ sparkbase.SparkClient = (*ConnectClient)(nil)
+
+func (c *ConnectClient) InterruptOperation(id string) { c.interruptOperation(id) }
