@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -67,6 +68,14 @@ func TestColumnToLiteral(t *testing.T) {
 		{"timestamp seconds", timestampArray(t, &arrow.TimestampType{Unit: arrow.Second, TimeZone: "UTC"}, 3), &connectpb.Expression_Literal{LiteralType: &connectpb.Expression_Literal_Timestamp{Timestamp: 3_000_000}}},
 		{"timestamp millis", timestampArray(t, &arrow.TimestampType{Unit: arrow.Millisecond}, 5), &connectpb.Expression_Literal{LiteralType: &connectpb.Expression_Literal_TimestampNtz{TimestampNtz: 5_000}}},
 		{"timestamp nanos truncate", timestampArray(t, &arrow.TimestampType{Unit: arrow.Nanosecond}, 1_999), &connectpb.Expression_Literal{LiteralType: &connectpb.Expression_Literal_TimestampNtz{TimestampNtz: 1}}},
+		{"time32 seconds", timeArray(t, arrow.FixedWidthTypes.Time32s, 3723), timeLiteral(3723*1_000_000_000, 0)},
+		{"time32 millis", timeArray(t, arrow.FixedWidthTypes.Time32ms, 1500), timeLiteral(1_500_000_000, 3)},
+		{"time64 micros", timeArray(t, arrow.FixedWidthTypes.Time64us, 7), timeLiteral(7_000, 6)},
+		{"time64 nanos truncate", timeArray(t, arrow.FixedWidthTypes.Time64ns, 1_999), timeLiteral(1_000, 6)},
+		{"fixed size binary", fixedBinaryArray(t, 2, []byte{4, 5}), &connectpb.Expression_Literal{LiteralType: &connectpb.Expression_Literal_Binary{Binary: []byte{4, 5}}}},
+		{"string view", stringViewArray(t, "view"), &connectpb.Expression_Literal{LiteralType: &connectpb.Expression_Literal_String_{String_: "view"}}},
+		{"binary view", binaryViewArray(t, []byte{9}), &connectpb.Expression_Literal{LiteralType: &connectpb.Expression_Literal_Binary{Binary: []byte{9}}}},
+		{"float16", float16Array(t, 1.5), &connectpb.Expression_Literal{LiteralType: &connectpb.Expression_Literal_Float{Float: 1.5}}},
 		{"decimal128", arrayFromJSON(t, &arrow.Decimal128Type{Precision: 10, Scale: 2}, `["123.45"]`), decimalLiteral("123.45", 10, 2)},
 		{"decimal256", arrayFromJSON(t, &arrow.Decimal256Type{Precision: 40, Scale: 3}, `["-0.125"]`), decimalLiteral("-0.125", 40, 3)},
 	} {
@@ -107,7 +116,7 @@ func TestColumnToLiteralNullAndErrors(t *testing.T) {
 	requireAdbcCode(t, err, adbc.StatusInvalidArgument)
 
 	// Types outside the supported set are rejected.
-	_, err = columnToLiteral(arrayFromJSON(t, arrow.FixedWidthTypes.Time32s, `[1]`), 0)
+	_, err = columnToLiteral(arrayFromJSON(t, arrow.ListOf(arrow.PrimitiveTypes.Int64), `[[1]]`), 0)
 	requireAdbcCode(t, err, adbc.StatusNotImplemented)
 }
 
@@ -142,7 +151,8 @@ func TestCountParameterMarkers(t *testing.T) {
 	}
 }
 
-// paramsClient records the arguments of each execution.
+// paramsClient records the arguments of each execution. Each query returns one
+// row holding the first argument's long value, so results can be checked.
 type paramsClient struct {
 	sparkbase.SparkClient
 	executions []sparkbase.QueryContext
@@ -150,12 +160,47 @@ type paramsClient struct {
 
 func (c *paramsClient) ExecuteQuery(_ context.Context, q sparkbase.QueryContext) (array.RecordReader, int64, error) {
 	c.executions = append(c.executions, q)
-	return nil, -1, nil
+	return echoReader(q.PosArgs), -1, nil
 }
 
 func (c *paramsClient) ExecuteUpdate(_ context.Context, q sparkbase.QueryContext) (int64, error) {
 	c.executions = append(c.executions, q)
 	return -1, nil
+}
+
+func echoReader(args []*connectpb.Expression_Literal) array.RecordReader {
+	schema := arrow.NewSchema([]arrow.Field{{Name: "v", Type: arrow.PrimitiveTypes.Int64}}, nil)
+	bldr := array.NewInt64Builder(memory.DefaultAllocator)
+	defer bldr.Release()
+	var v int64
+	if len(args) > 0 {
+		v = args[0].GetLong()
+	}
+	bldr.Append(v)
+	arr := bldr.NewArray()
+	defer arr.Release()
+	rec := array.NewRecordBatch(schema, []arrow.Array{arr}, 1)
+	defer rec.Release()
+	rdr, err := array.NewRecordReader(schema, []arrow.RecordBatch{rec})
+	if err != nil {
+		panic(err)
+	}
+	return rdr
+}
+
+// readValues returns the v column of every row of rdr.
+func readValues(t *testing.T, rdr array.RecordReader) []int64 {
+	t.Helper()
+	defer rdr.Release()
+	var values []int64
+	for rdr.Next() {
+		col := rdr.RecordBatch().Column(0).(*array.Int64)
+		for i := range col.Len() {
+			values = append(values, col.Value(i))
+		}
+	}
+	require.NoError(t, rdr.Err())
+	return values
 }
 
 func int64Batch(t *testing.T, names []string, values ...[]int64) arrow.RecordBatch {
@@ -257,18 +302,62 @@ func TestExecuteRejectsParameterMismatches(t *testing.T) {
 	_, _, err := st.ExecuteQuery(ctx)
 	requireAdbcCode(t, err, adbc.StatusInvalidArgument)
 	require.Empty(t, client.executions, "a mismatched query must not run")
+}
 
-	st, client = newParamsStatement(t, "SELECT ?")
-	require.NoError(t, st.Bind(ctx, int64Batch(t, []string{"a"}, []int64{1, 2})))
-	_, _, err = st.ExecuteQuery(ctx)
-	requireAdbcCode(t, err, adbc.StatusNotImplemented)
+func TestExecuteRunsOncePerBoundRow(t *testing.T) {
+	ctx := context.Background()
+
+	// ExecuteUpdate runs the query once for each row, in order.
+	st, client := newParamsStatement(t, "INSERT INTO t VALUES (?)")
+	require.NoError(t, st.Bind(ctx, int64Batch(t, []string{"a"}, []int64{5, 6, 7})))
+	_, err := st.ExecuteUpdate(ctx)
+	require.NoError(t, err)
+	require.Len(t, client.executions, 3)
+	for i, want := range []int64{5, 6, 7} {
+		require.True(t, proto.Equal(longLiteral(want), client.executions[i].PosArgs[0]))
+	}
+
+	// ExecuteQuery concatenates the results of the rows, in order.
+	st, client = newParamsStatement(t, "SELECT 1 + ?")
+	require.NoError(t, st.Bind(ctx, int64Batch(t, []string{"a"}, []int64{4, 5, 6, 7})))
+	rdr, _, err := st.ExecuteQuery(ctx)
+	require.NoError(t, err)
+	require.Len(t, client.executions, 1, "only the first row runs before the reader is read")
+	require.Equal(t, []int64{4, 5, 6, 7}, readValues(t, rdr))
+	require.Len(t, client.executions, 4)
+}
+
+func TestExecuteWithNoBoundRowsIsEmpty(t *testing.T) {
+	ctx := context.Background()
+
+	st, client := newParamsStatement(t, "INSERT INTO t VALUES (?)")
+	require.NoError(t, st.Bind(ctx, int64Batch(t, []string{"a"}, []int64{})))
+	_, err := st.ExecuteUpdate(ctx)
+	require.NoError(t, err)
 	require.Empty(t, client.executions)
 
+	// A query can't run for a result schema when no row is bound.
 	st, client = newParamsStatement(t, "SELECT ?")
 	require.NoError(t, st.Bind(ctx, int64Batch(t, []string{"a"}, []int64{})))
-	_, err = st.ExecuteUpdate(ctx)
+	_, _, err = st.ExecuteQuery(ctx)
 	requireAdbcCode(t, err, adbc.StatusInvalidArgument)
 	require.Empty(t, client.executions)
+}
+
+func TestDictionaryValuesBindAsTheirValues(t *testing.T) {
+	dict := array.NewDictionaryBuilder(memory.DefaultAllocator, &arrow.DictionaryType{IndexType: arrow.PrimitiveTypes.Int8, ValueType: arrow.BinaryTypes.String})
+	defer dict.Release()
+	b := dict.(*array.BinaryDictionaryBuilder)
+	require.NoError(t, b.AppendString("x"))
+	require.NoError(t, b.AppendString("y"))
+	require.NoError(t, b.AppendString("x"))
+	arr := dict.NewArray()
+	t.Cleanup(arr.Release)
+	for row, want := range []string{"x", "y", "x"} {
+		lit, err := columnToLiteral(arr, row)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(&connectpb.Expression_Literal{LiteralType: &connectpb.Expression_Literal_String_{String_: want}}, lit))
+	}
 }
 
 func TestBindStillAcceptsMultipleRowsForIngest(t *testing.T) {
@@ -293,4 +382,66 @@ func TestExecuteBindsStreamedRow(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, client.executions, 2)
 	require.True(t, proto.Equal(longLiteral(9), client.executions[1].PosArgs[0]))
+}
+
+func timeArray(t *testing.T, dt arrow.DataType, v int64) arrow.Array {
+	t.Helper()
+	bldr := array.NewBuilder(memory.DefaultAllocator, dt)
+	defer bldr.Release()
+	switch b := bldr.(type) {
+	case *array.Time32Builder:
+		b.Append(arrow.Time32(v))
+	case *array.Time64Builder:
+		b.Append(arrow.Time64(v))
+	}
+	arr := bldr.NewArray()
+	t.Cleanup(arr.Release)
+	return arr
+}
+
+func timeLiteral(nanos int64, precision int32) *connectpb.Expression_Literal {
+	return &connectpb.Expression_Literal{LiteralType: &connectpb.Expression_Literal_Time_{Time: &connectpb.Expression_Literal_Time{
+		Nano:      nanos,
+		Precision: &precision,
+	}}}
+}
+
+func fixedBinaryArray(t *testing.T, width int32, value []byte) arrow.Array {
+	t.Helper()
+	bldr := array.NewFixedSizeBinaryBuilder(memory.DefaultAllocator, &arrow.FixedSizeBinaryType{ByteWidth: int(width)})
+	defer bldr.Release()
+	bldr.Append(value)
+	arr := bldr.NewArray()
+	t.Cleanup(arr.Release)
+	return arr
+}
+
+func stringViewArray(t *testing.T, value string) arrow.Array {
+	t.Helper()
+	bldr := array.NewStringViewBuilder(memory.DefaultAllocator)
+	defer bldr.Release()
+	bldr.Append(value)
+	arr := bldr.NewArray()
+	t.Cleanup(arr.Release)
+	return arr
+}
+
+func binaryViewArray(t *testing.T, value []byte) arrow.Array {
+	t.Helper()
+	bldr := array.NewBinaryViewBuilder(memory.DefaultAllocator)
+	defer bldr.Release()
+	bldr.Append(value)
+	arr := bldr.NewArray()
+	t.Cleanup(arr.Release)
+	return arr
+}
+
+func float16Array(t *testing.T, value float32) arrow.Array {
+	t.Helper()
+	bldr := array.NewFloat16Builder(memory.DefaultAllocator)
+	defer bldr.Release()
+	bldr.Append(float16.New(value))
+	arr := bldr.NewArray()
+	t.Cleanup(arr.Release)
+	return arr
 }

@@ -190,16 +190,35 @@ func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, 
 			Code: adbc.StatusInvalidState,
 		}
 	}
-	posArgs, err := st.positionalArgs(st.query)
+	rows, err := st.positionalRows(st.query)
 	if err != nil {
 		return nil, -1, err
 	}
-	return st.cnxn.client.ExecuteQuery(ctx, sparkbase.QueryContext{
-		Mem:     st.cnxn.Alloc,
-		Log:     st.cnxn.Logger,
-		Query:   st.query,
-		PosArgs: posArgs,
-	})
+	query := func(args []*connectpb.Expression_Literal) sparkbase.QueryContext {
+		return sparkbase.QueryContext{
+			Mem:     st.cnxn.Alloc,
+			Log:     st.cnxn.Logger,
+			Query:   st.query,
+			PosArgs: args,
+		}
+	}
+	if rows == nil {
+		return st.cnxn.client.ExecuteQuery(ctx, query(nil))
+	}
+	if len(rows) == 0 {
+		return nil, -1, adbc.Error{
+			Msg:  "[spark] no parameter values are bound; the query can't run without a result schema",
+			Code: adbc.StatusInvalidArgument,
+		}
+	}
+	rdr, err := newRowsReader(func(args []*connectpb.Expression_Literal) (array.RecordReader, error) {
+		r, _, err := st.cnxn.client.ExecuteQuery(ctx, query(args))
+		return r, err
+	}, rows)
+	if err != nil {
+		return nil, -1, err
+	}
+	return rdr, -1, nil
 }
 
 func (st *statementImpl) ExecuteUpdate(ctx context.Context) (int64, error) {
@@ -218,16 +237,30 @@ func (st *statementImpl) ExecuteUpdate(ctx context.Context) (int64, error) {
 		}
 		return -1, rdr.Err()
 	}
-	posArgs, err := st.positionalArgs(st.query)
+	rows, err := st.positionalRows(st.query)
 	if err != nil {
 		return -1, err
 	}
-	return st.cnxn.client.ExecuteUpdate(ctx, sparkbase.QueryContext{
-		Mem:     st.cnxn.Alloc,
-		Log:     st.cnxn.Logger,
-		Query:   st.query,
-		PosArgs: posArgs,
-	})
+	if rows == nil {
+		return st.cnxn.client.ExecuteUpdate(ctx, sparkbase.QueryContext{
+			Mem:   st.cnxn.Alloc,
+			Log:   st.cnxn.Logger,
+			Query: st.query,
+		})
+	}
+	// Each bound row is a separate execution, as ADBC binds them. Spark
+	// Connect doesn't report a row count, so this reports -1.
+	for _, args := range rows {
+		if _, err := st.cnxn.client.ExecuteUpdate(ctx, sparkbase.QueryContext{
+			Mem:     st.cnxn.Alloc,
+			Log:     st.cnxn.Logger,
+			Query:   st.query,
+			PosArgs: args,
+		}); err != nil {
+			return -1, err
+		}
+	}
+	return -1, nil
 }
 
 func (st *statementImpl) ExecuteSchema(ctx context.Context) (*arrow.Schema, error) {

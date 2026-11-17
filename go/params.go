@@ -26,14 +26,15 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 )
 
-// positionalArgs returns the Spark Connect literals for the parameters bound to
-// a SQL query, one per '?' marker. It returns nil when nothing is bound or the
-// query has no markers, so queries that only have parameters bound run as they
-// did before binding was supported.
+// positionalRows returns the Spark Connect literals of each bound row, one list
+// per row, for a SQL query with '?' markers. The query runs once per row, as
+// ADBC binds it. It returns nil when nothing is bound or the query has no
+// markers, so the query runs once with no arguments, as it did before binding
+// was supported. A binding with no rows returns an empty, non-nil slice.
 //
 // The bound records are read and then rebound, so the statement can run again
 // with the same binding.
-func (st *statementImpl) positionalArgs(query string) ([]*connectpb.Expression_Literal, error) {
+func (st *statementImpl) positionalRows(query string) ([][]*connectpb.Expression_Literal, error) {
 	if st.params == nil {
 		return nil, nil
 	}
@@ -47,42 +48,30 @@ func (st *statementImpl) positionalArgs(query string) ([]*connectpb.Expression_L
 		return nil, err
 	}
 
-	var rows int64
-	var row arrow.RecordBatch
+	rows := make([][]*connectpb.Expression_Literal, 0)
 	for _, rec := range records {
-		rows += rec.NumRows()
-		if rec.NumRows() == 1 {
-			row = rec
+		if int(rec.NumCols()) != markers {
+			if rec.NumRows() == 0 {
+				continue
+			}
+			return nil, adbc.Error{
+				Msg:  fmt.Sprintf("[spark] query has %d parameter markers but %d values are bound", markers, rec.NumCols()),
+				Code: adbc.StatusInvalidArgument,
+			}
+		}
+		for row := range int(rec.NumRows()) {
+			literals := make([]*connectpb.Expression_Literal, 0, markers)
+			for col := range int(rec.NumCols()) {
+				lit, err := columnToLiteral(rec.Column(col), row)
+				if err != nil {
+					return nil, err
+				}
+				literals = append(literals, lit)
+			}
+			rows = append(rows, literals)
 		}
 	}
-	switch {
-	case rows == 0:
-		return nil, adbc.Error{
-			Msg:  fmt.Sprintf("[spark] query has %d parameter markers but no parameter values are bound", markers),
-			Code: adbc.StatusInvalidArgument,
-		}
-	case rows > 1:
-		return nil, adbc.Error{
-			Msg:  "[spark] binding more than one parameter row is not supported for queries; bind a single row",
-			Code: adbc.StatusNotImplemented,
-		}
-	}
-	if int(row.NumCols()) != markers {
-		return nil, adbc.Error{
-			Msg:  fmt.Sprintf("[spark] query has %d parameter markers but %d values are bound", markers, row.NumCols()),
-			Code: adbc.StatusInvalidArgument,
-		}
-	}
-
-	literals := make([]*connectpb.Expression_Literal, 0, markers)
-	for col := range int(row.NumCols()) {
-		lit, err := columnToLiteral(row.Column(col), 0)
-		if err != nil {
-			return nil, err
-		}
-		literals = append(literals, lit)
-	}
-	return literals, nil
+	return rows, nil
 }
 
 // rebindParams reads every bound record and binds the same records again, so
@@ -184,6 +173,9 @@ func columnToLiteral(col arrow.Array, row int) (*connectpb.Expression_Literal, e
 
 	lit := &connectpb.Expression_Literal{}
 	switch arr := col.(type) {
+	case *array.Dictionary:
+		// A dictionary-encoded value binds as the value it refers to.
+		return columnToLiteral(arr.Dictionary(), arr.GetValueIndex(row))
 	case *array.Null:
 		// The null type has no validity bitmap, so IsNull reports false. Every
 		// value of this type is null.
@@ -213,6 +205,9 @@ func columnToLiteral(col arrow.Array, row int) (*connectpb.Expression_Literal, e
 			}
 		}
 		lit.LiteralType = &connectpb.Expression_Literal_Long{Long: int64(v)}
+	case *array.Float16:
+		// Spark has no half-precision type, so a half float binds as a float.
+		lit.LiteralType = &connectpb.Expression_Literal_Float{Float: arr.Value(row).Float32()}
 	case *array.Float32:
 		lit.LiteralType = &connectpb.Expression_Literal_Float{Float: arr.Value(row)}
 	case *array.Float64:
@@ -227,6 +222,38 @@ func columnToLiteral(col arrow.Array, row int) (*connectpb.Expression_Literal, e
 		lit.LiteralType = &connectpb.Expression_Literal_Binary{Binary: bytes.Clone(arr.Value(row))}
 	case *array.LargeBinary:
 		lit.LiteralType = &connectpb.Expression_Literal_Binary{Binary: bytes.Clone(arr.Value(row))}
+	case *array.FixedSizeBinary:
+		lit.LiteralType = &connectpb.Expression_Literal_Binary{Binary: bytes.Clone(arr.Value(row))}
+	case *array.StringView:
+		lit.LiteralType = &connectpb.Expression_Literal_String_{String_: strings.Clone(arr.Value(row))}
+	case *array.BinaryView:
+		lit.LiteralType = &connectpb.Expression_Literal_Binary{Binary: bytes.Clone(arr.Value(row))}
+	case *array.Time32:
+		tt, ok := arr.DataType().(*arrow.Time32Type)
+		if !ok {
+			return nil, adbc.Error{Msg: "[spark] time column has no Time32Type", Code: adbc.StatusInternal}
+		}
+		nanos, precision, err := timeToNanos(int64(arr.Value(row)), tt.Unit)
+		if err != nil {
+			return nil, err
+		}
+		lit.LiteralType = &connectpb.Expression_Literal_Time_{Time: &connectpb.Expression_Literal_Time{
+			Nano:      nanos,
+			Precision: &precision,
+		}}
+	case *array.Time64:
+		tt, ok := arr.DataType().(*arrow.Time64Type)
+		if !ok {
+			return nil, adbc.Error{Msg: "[spark] time column has no Time64Type", Code: adbc.StatusInternal}
+		}
+		nanos, precision, err := timeToNanos(int64(arr.Value(row)), tt.Unit)
+		if err != nil {
+			return nil, err
+		}
+		lit.LiteralType = &connectpb.Expression_Literal_Time_{Time: &connectpb.Expression_Literal_Time{
+			Nano:      nanos,
+			Precision: &precision,
+		}}
 	case *array.Date32:
 		lit.LiteralType = &connectpb.Expression_Literal_Date{Date: int32(arr.Value(row))}
 	case *array.Date64:
@@ -284,6 +311,27 @@ func nullLiteral() *connectpb.Expression_Literal {
 	}}
 }
 
+// timeToNanos converts an Arrow time value to nanoseconds since midnight, and
+// gives the precision Spark stores it with. Spark's TIME keeps microseconds at
+// most, so nanoseconds are truncated to microseconds, as timestamps are.
+func timeToNanos(v int64, unit arrow.TimeUnit) (int64, int32, error) {
+	switch unit {
+	case arrow.Second:
+		return v * 1_000_000_000, 0, nil
+	case arrow.Millisecond:
+		return v * 1_000_000, 3, nil
+	case arrow.Microsecond:
+		return v * 1_000, 6, nil
+	case arrow.Nanosecond:
+		return v / 1_000 * 1_000, 6, nil
+	default:
+		return 0, 0, adbc.Error{
+			Msg:  fmt.Sprintf("[spark] unsupported time unit %v", unit),
+			Code: adbc.StatusNotImplemented,
+		}
+	}
+}
+
 // timestampToMicros converts an Arrow timestamp value to microseconds since the
 // epoch, the unit of Spark Connect timestamp literals. Nanoseconds are
 // truncated to microseconds, as Spark stores them.
@@ -303,4 +351,90 @@ func timestampToMicros(v int64, unit arrow.TimeUnit) (int64, error) {
 			Code: adbc.StatusNotImplemented,
 		}
 	}
+}
+
+// rowsReader concatenates the results of one execution per bound row. Rows are
+// executed as the reader is consumed, so their results stream like one query.
+type rowsReader struct {
+	open   func(args []*connectpb.Expression_Literal) (array.RecordReader, error)
+	rows   [][]*connectpb.Expression_Literal
+	schema *arrow.Schema
+	cur    array.RecordReader
+	err    error
+	refs   int64
+}
+
+// newRowsReader executes the first row, to learn the schema, and returns a
+// reader over all rows. rows must not be empty.
+func newRowsReader(open func([]*connectpb.Expression_Literal) (array.RecordReader, error), rows [][]*connectpb.Expression_Literal) (array.RecordReader, error) {
+	first, err := open(rows[0])
+	if err != nil {
+		return nil, err
+	}
+	r := &rowsReader{open: open, rows: rows[1:], cur: first, refs: 1}
+	if first != nil {
+		r.schema = first.Schema()
+	}
+	return r, nil
+}
+
+func (r *rowsReader) Retain() {
+	r.refs++
+}
+
+func (r *rowsReader) Release() {
+	r.refs--
+	if r.refs == 0 && r.cur != nil {
+		r.cur.Release()
+		r.cur = nil
+	}
+}
+
+func (r *rowsReader) Schema() *arrow.Schema {
+	return r.schema
+}
+
+func (r *rowsReader) Next() bool {
+	for {
+		if r.cur != nil {
+			if r.cur.Next() {
+				return true
+			}
+			if err := r.cur.Err(); err != nil {
+				r.err = err
+				r.cur.Release()
+				r.cur = nil
+				return false
+			}
+			r.cur.Release()
+			r.cur = nil
+		}
+		if len(r.rows) == 0 || r.err != nil {
+			return false
+		}
+		args := r.rows[0]
+		r.rows = r.rows[1:]
+		rdr, err := r.open(args)
+		if err != nil {
+			r.err = err
+			return false
+		}
+		r.cur = rdr
+	}
+}
+
+func (r *rowsReader) RecordBatch() arrow.RecordBatch {
+	if r.cur == nil {
+		return nil
+	}
+	return r.cur.RecordBatch()
+}
+
+// Record is deprecated in arrow-go; it's RecordBatch.
+func (r *rowsReader) Record() arrow.RecordBatch {
+	return r.RecordBatch()
+}
+
+func (r *rowsReader) Err() error {
+	return r.err
 }
