@@ -547,20 +547,9 @@ func withNullableFields(s *arrow.Schema) *arrow.Schema {
 func formatColumns(s *arrow.Schema) string {
 	parts := make([]string, 0, len(s.Fields()))
 	for _, f := range s.Fields() {
-		parts = append(parts, f.Name+": "+formatType(f.Type))
+		parts = append(parts, f.Name+": "+f.Type.String())
 	}
 	return "(" + strings.Join(parts, ", ") + ")"
-}
-
-// formatType writes a type the way Spark writes it. Decimals are decimal(p, s).
-func formatType(dt arrow.DataType) string {
-	switch t := dt.(type) {
-	case *arrow.Decimal128Type:
-		return fmt.Sprintf("decimal(%d, %d)", t.Precision, t.Scale)
-	case *arrow.Decimal256Type:
-		return fmt.Sprintf("decimal(%d, %d)", t.Precision, t.Scale)
-	}
-	return dt.String()
 }
 
 // newRowsReader executes the first row, to learn the schema, and returns a
