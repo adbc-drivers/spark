@@ -57,6 +57,9 @@ type ConnectionOpts struct {
 	// Token is the OAuth2 bearer token used when AuthType is AuthTypeToken.
 	Token string
 
+	// UserAgent, when set, replaces the default client type reported to the server.
+	UserAgent string
+
 	Tls                       bool
 	ValidateServerCertificate bool
 	AwsProxyAuth              string
@@ -153,7 +156,7 @@ func newConnectClient(opts ConnectionOpts) (*connectClient, error) {
 		service:        proto.NewSparkConnectServiceClient(conn),
 		sessionID:      sessionID,
 		userContext:    &proto.UserContext{UserId: userID(opts.Username)},
-		clientType:     clientType(),
+		clientType:     clientTypeOrDefault(opts.UserAgent),
 		headers:        headers,
 		releaseSession: opts.ReleaseSession,
 	}, nil
@@ -211,6 +214,14 @@ func userID(username string) string {
 		return user
 	}
 	return "na"
+}
+
+// clientTypeOrDefault returns userAgent if it is set, and the driver's client type otherwise.
+func clientTypeOrDefault(userAgent string) string {
+	if userAgent != "" {
+		return userAgent
+	}
+	return clientType()
 }
 
 // clientType identifies the driver, with spark-connect-go's os/go suffix.

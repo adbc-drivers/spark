@@ -57,8 +57,27 @@ Note: The example above is for Python using the [adbc-driver-manager](https://py
 - If not specified, the `api` defaults to `thrift+binary` (URI-encoded: `thrift%2Bbinary`).
 - Options can be specified as query parameters or as driver options.
 
+For Spark Connect, the standard connection string also works:
+
+```
+sc://localhost:15002/;token=abc123;use_ssl=true;user_id=alice
+```
+
+- The URI scheme is "sc://" and the path must start with `/;`.
+- The parameters are separated by `;` and are `key=value` pairs:
+  - `token` sets bearer-token authentication (`auth_type=token`) and is sent as the password.
+  - `use_ssl` sets `spark.tls`. TLS remains on unless `use_ssl=false` is set.
+  - `user_id` sets the user (`username`).
+  - `user_agent` sets the client type reported to the server (`spark.connect.user_agent`).
+  - `session_id` sets `spark.connect.session_id`.
+  - Any other key is sent as a gRPC call header, as `spark.connect.call_header.<key>`.
+- A parameter that sets an option already set elsewhere in the URI, to a different value, is an error.
+- Parameters are not PySpark's defaults. PySpark's `sc://` is plaintext by default; here TLS is on by default, so set `use_ssl=false` for a plaintext server. Authentication still needs `auth_type` when there is no `token`: use `auth_type=none`.
+
 :::{note}
-Reserved characters in URI elements must be URI-encoded. For example, `@` becomes `%40` and `+` becomes `%2B`.
+Reserved characters in URI elements must be URI-encoded. For example, `@` becomes `%40`, and `;`, `?`, and `#` inside a parameter value must be encoded as `%3B`, `%3F`, and `%23`.
+
+In query parameters, a literal `+` is kept as `+`. `%2B` also decodes to `+`. Previously a literal `+` became a space.
 :::
 
 ### Connection Options
@@ -106,6 +125,11 @@ These parameters can be specified in the URI as query parameters, or as connecti
 : **Type**: string. **Scope**: database and connection.
 
   Only supported for Spark Connect. Add arbitrary HTTP headers to be sent on requests. Binary headers are not currently supported.
+
+`spark.connect.user_agent` (query parameter: `connect.user_agent`)
+: **Type**: string.
+
+  For the Spark Connect backend, the client type reported to the server. It replaces the driver's default.
 
 `spark.connect.session_id` (query parameter: `connect.session_id`)
 : **Type**: string.

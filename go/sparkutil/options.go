@@ -145,6 +145,11 @@ const (
 	// OptionConnectCallHeaderPrefix configures textual metadata at database and connection scope.
 	OptionConnectCallHeaderPrefix = "spark.connect.call_header."
 
+	// OptionConnectUserAgent sets the client type reported to the Spark Connect
+	// server, replacing the driver's default. Set from the user_agent parameter
+	// of a Spark Connect connection string.
+	OptionConnectUserAgent = "spark.connect.user_agent"
+
 	// OptionConnectReleaseSession specifies whether to release the Spark Connect session when closed
 	OptionConnectReleaseSession = "spark.connect.release_session"
 

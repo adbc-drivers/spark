@@ -16,6 +16,7 @@ package spark
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/spark/go/internal/connectimpl"
@@ -58,7 +59,7 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 		}
 	}
 
-	queryValues, err := url.ParseQuery(uri.RawQuery)
+	queryValues, err := parseURIQuery(uri.RawQuery)
 	if err != nil {
 		return sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI query")
 	}
@@ -113,10 +114,126 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 		options[sparkutil.OptionApi] = scheme
 	}
 
+	// Spark Connect's standard form, sc://host:port/;key=value;key=value,
+	// carries its parameters in the path. Any other path keeps its meaning
+	// as the Livy base URL.
+	if scheme == "sc" && strings.HasPrefix(uri.EscapedPath(), "/;") {
+		return parseSparkConnectParams(uri.EscapedPath()[len("/;"):], options)
+	}
+
 	if uri.Path != "" && uri.Path != "/" {
 		options[sparkutil.OptionLivyBaseURL] = uri.Path
 	}
 
+	return nil
+}
+
+// parseURIQuery splits a raw query the way url.ParseQuery does, except that
+// it decodes with PathUnescape. A literal '+' stays '+' instead of becoming a
+// space, which keeps bearer tokens and base64 secrets intact. %2B still
+// decodes to '+', and other escapes work as before.
+func parseURIQuery(rawQuery string) (url.Values, error) {
+	if strings.Contains(rawQuery, ";") {
+		return nil, errors.New("invalid semicolon separator in query")
+	}
+	values := url.Values{}
+	for part := range strings.SplitSeq(rawQuery, "&") {
+		if part == "" {
+			continue
+		}
+		rawKey, rawValue, _ := strings.Cut(part, "=")
+		key, err := url.PathUnescape(rawKey)
+		if err != nil {
+			return nil, errors.New("invalid URL escape in query key")
+		}
+		if key == "" {
+			continue
+		}
+		value, err := url.PathUnescape(rawValue)
+		if err != nil {
+			// Don't echo the value: it may be a secret.
+			return nil, fmt.Errorf("invalid URL escape in query value of %q", key)
+		}
+		values[key] = append(values[key], value)
+	}
+	return values, nil
+}
+
+// parseSparkConnectParams reads the parameters of a Spark Connect connection
+// string, sc://host:port/;key=value;key=value. The keys match PySpark's
+// ChannelBuilder: token, use_ssl, user_id, user_agent and session_id map onto
+// the existing connect options. Any other key is sent as a gRPC call header,
+// as the Spark clients do.
+//
+// A parameter that sets an option already set by the URI, to a different
+// value, is an error. Nothing is overridden silently.
+func parseSparkConnectParams(params string, options map[string]string) error {
+	for kv := range strings.SplitSeq(params, ";") {
+		if kv == "" {
+			continue
+		}
+		rawKey, rawValue, found := strings.Cut(kv, "=")
+		if !found {
+			// Don't echo the parameter: it may be a secret.
+			return adbc.Error{
+				Code: adbc.StatusInvalidArgument,
+				Msg:  "[spark] connection string parameter is missing '='",
+			}
+		}
+		key := strings.ToLower(rawKey)
+		// PathUnescape keeps a literal '+', which bearer tokens and base64
+		// secrets contain. QueryUnescape would turn it into a space.
+		value, err := url.PathUnescape(rawValue)
+		if err != nil {
+			return adbc.Error{
+				Code: adbc.StatusInvalidArgument,
+				Msg:  fmt.Sprintf("[spark] invalid URL escape in connection string parameter %q", key),
+			}
+		}
+
+		switch key {
+		case "token":
+			if err := setURIOption(options, sparkutil.OptionAuthType, sparkutil.OptionValueAuthTypeToken); err != nil {
+				return err
+			}
+			if err := setURIOption(options, adbc.OptionKeyPassword, value); err != nil {
+				return err
+			}
+		case "use_ssl":
+			if err := setURIOption(options, sparkutil.OptionUseTls, value); err != nil {
+				return err
+			}
+		case "user_id":
+			if err := setURIOption(options, adbc.OptionKeyUsername, value); err != nil {
+				return err
+			}
+		case "user_agent":
+			if err := setURIOption(options, sparkutil.OptionConnectUserAgent, value); err != nil {
+				return err
+			}
+		case "session_id":
+			if err := setURIOption(options, sparkutil.OptionConnectSessionId, value); err != nil {
+				return err
+			}
+		default:
+			if err := setURIOption(options, sparkutil.OptionConnectCallHeaderPrefix+key, value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// setURIOption sets a URI-derived option. It is an error if the option already
+// has a different value.
+func setURIOption(options map[string]string, key, value string) error {
+	if existing, ok := options[key]; ok && existing != value {
+		return adbc.Error{
+			Code: adbc.StatusInvalidArgument,
+			Msg:  fmt.Sprintf("[spark] conflicting values for %s in connection string", key),
+		}
+	}
+	options[key] = value
 	return nil
 }
 
@@ -364,6 +481,11 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 	if sessionID, ok := options[sparkutil.OptionConnectSessionId]; ok {
 		connectOpts.SessionID = sessionID
 		delete(options, sparkutil.OptionConnectSessionId)
+	}
+
+	if userAgent, ok := options[sparkutil.OptionConnectUserAgent]; ok {
+		connectOpts.UserAgent = userAgent
+		delete(options, sparkutil.OptionConnectUserAgent)
 	}
 
 	releaseSession, err := parseBoolOption(sparkutil.OptionConnectReleaseSession, options, true)

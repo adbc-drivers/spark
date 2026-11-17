@@ -21,6 +21,7 @@ import (
 
 	"github.com/adbc-drivers/spark/go/internal/connectimpl"
 	"github.com/adbc-drivers/spark/go/internal/livyimpl"
+	"github.com/adbc-drivers/spark/go/internal/sparkbase"
 	"github.com/adbc-drivers/spark/go/internal/thriftimpl"
 	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
@@ -540,4 +541,251 @@ func TestParseOptionsFromUriInvalid(t *testing.T) {
 		require.ErrorAs(t, err, &adbcErr, "expected error parsing invalid URI %s", uri)
 		require.Equal(t, adbc.StatusInvalidArgument, adbcErr.Code, "expected invalid argument error parsing URI %s", uri)
 	}
+}
+
+// Existing URI forms must keep their meaning. These pin the current behavior
+// next to the Spark Connect parameter tests below.
+func TestParseOptionsFromUriExistingForms(t *testing.T) {
+	type testCase struct {
+		uri     string
+		options map[string]string
+	}
+	for _, tc := range []testCase{
+		{
+			uri: "sc://localhost:15002/",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.port": "15002",
+				"spark.api":  "connect",
+			},
+		},
+		{
+			// A path other than "/;" is still the Livy base URL. For sc, that
+			// fails later as an unknown option, as it does today.
+			uri: "sc://localhost:15002/foo",
+			options: map[string]string{
+				"spark.host":          "localhost",
+				"spark.port":          "15002",
+				"spark.api":           "connect",
+				"spark.livy.base_url": "/foo",
+			},
+		},
+		{
+			uri: "livy://localhost:10000/gateway",
+			options: map[string]string{
+				"spark.host":          "localhost",
+				"spark.port":          "10000",
+				"spark.api":           "livy",
+				"spark.livy.base_url": "/gateway",
+			},
+		},
+		{
+			// Percent-encoded spaces still decode.
+			uri: "sc://localhost:15002?api=connect&connect.session_id=a%20b",
+			options: map[string]string{
+				"spark.host":               "localhost",
+				"spark.port":               "15002",
+				"spark.api":                "connect",
+				"spark.connect.session_id": "a b",
+			},
+		},
+	} {
+		u, err := url.Parse(tc.uri)
+		require.NoError(t, err)
+		options := map[string]string{}
+		err = parseOptionsFromUri(u, options)
+		require.NoError(t, err, "failed to parse options from URI %s", tc.uri)
+		require.Equal(t, tc.options, options, "unexpected options for URI %s", tc.uri)
+	}
+}
+
+// A literal '+' in a query value is kept, so tokens and base64 secrets survive.
+// %2B still decodes to '+'.
+func TestParseOptionsFromUriKeepsPlusInQuery(t *testing.T) {
+	for _, tc := range []struct {
+		uri     string
+		session string
+	}{
+		{"sc://localhost:15002?api=connect&connect.session_id=abc+def/ghi==", "abc+def/ghi=="},
+		{"sc://localhost:15002?api=connect&connect.session_id=abc%2Bdef", "abc+def"},
+		{"spark://localhost:10000?api=connect&auth_type=none&connect.session_id=a+b%2Bc", "a+b+c"},
+	} {
+		u, err := url.Parse(tc.uri)
+		require.NoError(t, err)
+		options := map[string]string{}
+		require.NoError(t, parseOptionsFromUri(u, options), "URI %s", tc.uri)
+		require.Equal(t, tc.session, options[sparkutil.OptionConnectSessionId], "URI %s", tc.uri)
+	}
+}
+
+func TestParseSparkConnectParams(t *testing.T) {
+	type testCase struct {
+		uri     string
+		options map[string]string
+		conn    connectimpl.ConnectionOpts
+	}
+	for _, tc := range []testCase{
+		{
+			uri: "sc://localhost:15002/;token=abc;use_ssl=true",
+			options: map[string]string{
+				"spark.host":      "localhost",
+				"spark.port":      "15002",
+				"spark.api":       "connect",
+				"spark.auth_type": "token",
+				"password":        "abc",
+				"spark.tls":       "true",
+			},
+			conn: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeToken,
+				Token:                     "abc",
+				Tls:                       true,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			// A literal '+' and '/' survive, and %2F and %3B decode to '/' and ';'.
+			uri: "sc://localhost/;token=ab+c/d==%2F;x=p%3Bq",
+			options: map[string]string{
+				"spark.host":                  "localhost",
+				"spark.api":                   "connect",
+				"spark.auth_type":             "token",
+				"password":                    "ab+c/d==/",
+				"spark.connect.call_header.x": "p;q",
+			},
+			conn: connectimpl.ConnectionOpts{
+				Host:                      "localhost",
+				AuthType:                  connectimpl.AuthTypeToken,
+				Token:                     "ab+c/d==/",
+				Tls:                       true,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			uri: "sc://localhost:15002/;TOKEN=abc;user_id=alice;user_agent=my-app/1.0;session_id=s-1;use_ssl=false;x-trace-id=t1",
+			options: map[string]string{
+				"spark.host":                           "localhost",
+				"spark.port":                           "15002",
+				"spark.api":                            "connect",
+				"spark.auth_type":                      "token",
+				"password":                             "abc",
+				"username":                             "alice",
+				"spark.connect.user_agent":             "my-app/1.0",
+				"spark.connect.session_id":             "s-1",
+				"spark.tls":                            "false",
+				"spark.connect.call_header.x-trace-id": "t1",
+			},
+			conn: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeToken,
+				Username:                  "alice",
+				Token:                     "abc",
+				UserAgent:                 "my-app/1.0",
+				SessionID:                 "s-1",
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			// Repeating a parameter with the same value is harmless.
+			uri: "sc://user:abc@localhost:15002/;token=abc;user_id=user;token=abc",
+			options: map[string]string{
+				"spark.host":      "localhost",
+				"spark.port":      "15002",
+				"spark.api":       "connect",
+				"spark.auth_type": "token",
+				"password":        "abc",
+				"username":        "user",
+			},
+			conn: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeToken,
+				Username:                  "user",
+				Token:                     "abc",
+				Tls:                       true,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			// An empty parameter list adds nothing.
+			uri: "sc://localhost:15002/;",
+			options: map[string]string{
+				"spark.host": "localhost",
+				"spark.port": "15002",
+				"spark.api":  "connect",
+			},
+		},
+	} {
+		u, err := url.Parse(tc.uri)
+		require.NoError(t, err)
+		options := map[string]string{}
+		require.NoError(t, parseOptionsFromUri(u, options), "failed to parse URI %s", tc.uri)
+		require.Equal(t, tc.options, options, "unexpected options for URI %s", tc.uri)
+		if tc.conn.Host == "" {
+			continue
+		}
+		parsed, err := connectOptsFromOptions(options)
+		require.NoError(t, err, "failed to parse Connect options from URI %s", tc.uri)
+		require.Equal(t, tc.conn, parsed, "unexpected Connect options for URI %s", tc.uri)
+	}
+}
+
+func TestParseSparkConnectParamsRejectsConflicts(t *testing.T) {
+	const secret = "sc-secret-sentinel"
+	for _, uri := range []string{
+		"sc://localhost/;token=" + secret + ";token=other",
+		"sc://localhost/;token=" + secret + "?auth_type=none",
+		"sc://localhost/;token=" + secret + "?auth_type=basic",
+		"sc://user:other@localhost/;token=" + secret,
+		"sc://localhost/;use_ssl=true?tls=false",
+		"sc://user:other@localhost/;user_id=alice",
+		"sc://localhost/;token=" + secret + ";session_id=s1?connect.session_id=s2",
+		"sc://localhost/;x-trace=1;x-trace=2",
+		"sc://localhost/;token=" + secret + "?api=thrift+binary",
+		"sc://localhost/;token",
+	} {
+		u, err := url.Parse(uri)
+		require.NoError(t, err, "URI %s", uri)
+		options := map[string]string{}
+		err = parseOptionsFromUri(u, options)
+		var adbcErr adbc.Error
+		require.ErrorAs(t, err, &adbcErr, "expected error parsing URI %s", uri)
+		require.Equal(t, adbc.StatusInvalidArgument, adbcErr.Code, "URI %s", uri)
+		require.NotContains(t, err.Error(), secret, "error for URI %s leaks the token", uri)
+	}
+}
+
+func TestParseSparkConnectParamsRejectsInvalidValues(t *testing.T) {
+	const secret = "sc-secret-sentinel"
+	// use_ssl must be a boolean. The bad value isn't a secret, but it is
+	// reported the same way as other invalid options.
+	u, err := url.Parse("sc://localhost/;token=" + secret + ";use_ssl=maybe")
+	require.NoError(t, err)
+	options := map[string]string{}
+	require.NoError(t, parseOptionsFromUri(u, options))
+	_, err = connectOptsFromOptions(options)
+	require.Error(t, err)
+
+	// A bad escape in a parameter is reported without the value, through the
+	// same path a database URI takes.
+	options = map[string]string{adbc.OptionKeyURI: "sc://localhost/;token=" + secret + "%zz"}
+	err = parseDatabaseURI(options)
+	var adbcErr adbc.Error
+	require.Error(t, err)
+	require.ErrorAs(t, err, &adbcErr)
+	require.Equal(t, adbc.StatusInvalidArgument, adbcErr.Code)
+	require.NotContains(t, err.Error(), secret)
+
+	// Header names must be valid. This check runs when the factory is built.
+	u, err = url.Parse("sc://localhost/;token=" + secret + ";bad%20name=x")
+	require.NoError(t, err)
+	options = map[string]string{}
+	require.NoError(t, parseOptionsFromUri(u, options))
+	_, err = newSparkClientFactory(context.Background(), options, &sparkbase.CallHeaders{})
+	require.ErrorAs(t, err, &adbcErr)
+	require.Equal(t, adbc.StatusInvalidArgument, adbcErr.Code)
+	require.NotContains(t, err.Error(), secret)
 }
