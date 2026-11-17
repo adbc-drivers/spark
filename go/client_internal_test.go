@@ -583,17 +583,6 @@ func TestParseOptionsFromUriExistingForms(t *testing.T) {
 				"spark.livy.base_url": "/gateway",
 			},
 		},
-		{
-			// Percent-encoded spaces still decode.
-			uri: "sc://localhost:15002?api=connect&connect.session_id=a%20b",
-			options: map[string]string{
-				"spark.host":               "localhost",
-				"spark.port":               "15002",
-				"spark.api":                "connect",
-				"spark.auth_type":          "none",
-				"spark.connect.session_id": "a b",
-			},
-		},
 	} {
 		u, err := url.Parse(tc.uri)
 		require.NoError(t, err)
@@ -601,25 +590,6 @@ func TestParseOptionsFromUriExistingForms(t *testing.T) {
 		err = parseOptionsFromUri(u, options)
 		require.NoError(t, err, "failed to parse options from URI %s", tc.uri)
 		require.Equal(t, tc.options, options, "unexpected options for URI %s", tc.uri)
-	}
-}
-
-// A literal '+' in a query value is kept, so tokens and base64 secrets survive.
-// %2B still decodes to '+'.
-func TestParseOptionsFromUriKeepsPlusInQuery(t *testing.T) {
-	for _, tc := range []struct {
-		uri     string
-		session string
-	}{
-		{"sc://localhost:15002?api=connect&connect.session_id=abc+def/ghi==", "abc+def/ghi=="},
-		{"sc://localhost:15002?api=connect&connect.session_id=abc%2Bdef", "abc+def"},
-		{"spark://localhost:10000?api=connect&auth_type=none&connect.session_id=a+b%2Bc", "a+b+c"},
-	} {
-		u, err := url.Parse(tc.uri)
-		require.NoError(t, err)
-		options := map[string]string{}
-		require.NoError(t, parseOptionsFromUri(u, options), "URI %s", tc.uri)
-		require.Equal(t, tc.session, options[sparkutil.OptionConnectSessionId], "URI %s", tc.uri)
 	}
 }
 
@@ -750,7 +720,7 @@ func TestParseSparkConnectParamsRejectsConflicts(t *testing.T) {
 		"sc://user:other@localhost/;user_id=alice",
 		"sc://localhost/;token=" + secret + ";session_id=s1?connect.session_id=s2",
 		"sc://localhost/;x-trace=1;x-trace=2",
-		"sc://localhost/;token=" + secret + "?api=thrift+binary",
+		"sc://localhost/;token=" + secret + "?api=thrift%2Bbinary",
 		"sc://localhost/;token",
 	} {
 		u, err := url.Parse(uri)

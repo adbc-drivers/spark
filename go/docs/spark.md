@@ -76,9 +76,7 @@ sc://localhost:15002/;token=abc123;use_ssl=true;user_id=alice
 - TLS is on by default for Spark Connect, unlike PySpark's `sc://`, which is plaintext by default. Set `use_ssl=false` for a plaintext server.
 
 :::{note}
-Reserved characters in URI elements must be URI-encoded. For example, `@` becomes `%40`, and `;`, `?`, and `#` inside a parameter value must be encoded as `%3B`, `%3F`, and `%23`.
-
-In query parameters, a literal `+` is kept as `+`. `%2B` also decodes to `+`. Previously a literal `+` became a space.
+Reserved characters in URI elements must be URI-encoded. For example, `@` becomes `%40` and `+` becomes `%2B`. In a `/;key=value` parameter, `;`, `?`, and `#` inside a value must be encoded as `%3B`, `%3F`, and `%23`.
 :::
 
 ### Connection Options

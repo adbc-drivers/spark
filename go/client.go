@@ -16,7 +16,6 @@ package spark
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/adbc-drivers/driverbase-go/driverbase"
 	"github.com/adbc-drivers/spark/go/internal/connectimpl"
@@ -59,7 +58,7 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 		}
 	}
 
-	queryValues, err := parseURIQuery(uri.RawQuery)
+	queryValues, err := url.ParseQuery(uri.RawQuery)
 	if err != nil {
 		return sparkbase.ErrToAdbcErr(adbc.StatusInvalidArgument, err, "parse URI query")
 	}
@@ -146,37 +145,6 @@ func defaultSparkConnectAuthType(options map[string]string) {
 	options[sparkutil.OptionAuthType] = sparkutil.OptionValueAuthTypeNone
 }
 
-// parseURIQuery splits a raw query the way url.ParseQuery does, except that
-// it decodes with PathUnescape. A literal '+' stays '+' instead of becoming a
-// space, which keeps bearer tokens and base64 secrets intact. %2B still
-// decodes to '+', and other escapes work as before.
-func parseURIQuery(rawQuery string) (url.Values, error) {
-	if strings.Contains(rawQuery, ";") {
-		return nil, errors.New("invalid semicolon separator in query")
-	}
-	values := url.Values{}
-	for part := range strings.SplitSeq(rawQuery, "&") {
-		if part == "" {
-			continue
-		}
-		rawKey, rawValue, _ := strings.Cut(part, "=")
-		key, err := url.PathUnescape(rawKey)
-		if err != nil {
-			return nil, errors.New("invalid URL escape in query key")
-		}
-		if key == "" {
-			continue
-		}
-		value, err := url.PathUnescape(rawValue)
-		if err != nil {
-			// Don't echo the value: it may be a secret.
-			return nil, fmt.Errorf("invalid URL escape in query value of %q", key)
-		}
-		values[key] = append(values[key], value)
-	}
-	return values, nil
-}
-
 // parseSparkConnectParams reads the parameters of a Spark Connect connection
 // string, sc://host:port/;key=value;key=value. The keys match PySpark's
 // ChannelBuilder: token, use_ssl, user_id, user_agent and session_id map onto
@@ -199,8 +167,9 @@ func parseSparkConnectParams(params string, options map[string]string) error {
 			}
 		}
 		key := strings.ToLower(rawKey)
-		// PathUnescape keeps a literal '+', which bearer tokens and base64
-		// secrets contain. QueryUnescape would turn it into a space.
+		// The parameters are part of the path, so they decode as a path does,
+		// as in PySpark (urllib.parse.unquote) and the Scala client
+		// (URI.getPath): '+' stays '+', and %2B also decodes to '+'.
 		value, err := url.PathUnescape(rawValue)
 		if err != nil {
 			return adbc.Error{
