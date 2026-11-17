@@ -754,3 +754,25 @@ func TestNestedNullabilityChangeFails(t *testing.T) {
 	require.NoError(t, st.Close(context.Background()))
 	bind.Release()
 }
+
+func TestLaterRowsDontReachTheConnectionsClient(t *testing.T) {
+	ctx := context.Background()
+	mem := memory.NewCheckedAllocator(memory.NewGoAllocator())
+	defer mem.AssertSize(t, 0)
+
+	st := &statementImpl{cnxn: &connectionImpl{client: &resultClient{mem: mem, result: int64Result("v")}}}
+	require.NoError(t, st.SetSqlQuery(ctx, "SELECT ? AS v"))
+	bind := checkedInt64Batch(t, mem, `[1, 2, 3]`)
+	require.NoError(t, st.Bind(ctx, bind))
+
+	rdr, _, err := st.ExecuteQuery(ctx)
+	require.NoError(t, err)
+	// Close clears the connection's client while rows 1 and 2 are unread.
+	st.cnxn.client = nil
+	var values []*int64
+	require.NotPanics(t, func() { values = readNullableValues(t, rdr) })
+	require.Len(t, values, 3)
+	rdr.Release()
+	require.NoError(t, st.Close(ctx))
+	bind.Release()
+}

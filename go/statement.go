@@ -211,8 +211,12 @@ func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, 
 			Code: adbc.StatusInvalidArgument,
 		}
 	}
+	// Later rows run as the reader is consumed. They use this client, which
+	// Close doesn't clear, so closing the connection mid-read fails the read
+	// instead of reaching a nil client.
+	client := st.cnxn.client
 	rdr, err := newRowsReader(func(args []*connectpb.Expression_Literal) (array.RecordReader, error) {
-		r, _, err := st.cnxn.client.ExecuteQuery(ctx, query(args))
+		r, _, err := client.ExecuteQuery(ctx, query(args))
 		return r, err
 	}, rows)
 	if err != nil {
