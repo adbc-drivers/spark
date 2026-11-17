@@ -63,6 +63,26 @@ class TestStatement(adbc_drivers_validation.tests.statement.TestStatement):
             cur.execute("SELECT ? AS x, '?' AS y", parameters=[42])
             assert cur.fetchall() == [(42, "?")]
 
+        # A raw string has no backslash escapes, so its quote closes at the
+        # backslash, and the marker after it counts.
+        with conn.cursor() as cur:
+            cur.execute("SELECT r'abc\\' AS s, ? AS v", parameters=[42])
+            assert cur.fetchall() == [("abc\\", 42)]
+
+        # A null of a typed column stays typed, so every row has the column's
+        # type, and the null row isn't a null-typed result.
+        with conn.cursor() as cur:
+            batch = pyarrow.record_batch(
+                [pyarrow.array([None, 42], type=pyarrow.int64())], names=["v"]
+            )
+            cur.adbc_statement.bind(batch)
+            cur.adbc_statement.set_sql_query("SELECT ? AS v")
+            handle, _ = cur.adbc_statement.execute_query()
+            with pyarrow.RecordBatchReader._import_from_c(handle.address) as reader:
+                result = reader.read_all()
+            assert result.schema.field(0).type == pyarrow.int64()
+            assert result.column(0).to_pylist() == [None, 42]
+
         # A uint64 above the signed maximum is rejected, not wrapped.
         with conn.cursor() as cur:
             batch = pyarrow.record_batch(
