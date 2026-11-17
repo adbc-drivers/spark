@@ -114,3 +114,111 @@ class TestStatement(adbc_drivers_validation.tests.statement.TestStatement):
         assert tables
         result = pyarrow.concat_tables(tables)
         assert result.to_pydict() == {"id": [5, 6, 7, 8, 9]}
+
+    def test_analyze_plan_passthrough(self, unary_relay):
+        from pyspark.sql.connect import proto
+
+        response = unary_relay(
+            "analyze_plan",
+            proto.AnalyzePlanRequest(
+                spark_version=proto.AnalyzePlanRequest.SparkVersion()
+            ),
+            proto.AnalyzePlanResponse,
+        )
+        assert response.spark_version.version.startswith("4.")
+
+    def test_config_passthrough(self, unary_relay):
+        from pyspark.sql.connect import proto
+
+        key = "adbc.d2.test"
+
+        def config(operation):
+            return unary_relay(
+                "config", proto.ConfigRequest(operation=operation), proto.ConfigResponse
+            )
+
+        try:
+            config(
+                proto.ConfigRequest.Operation(
+                    set=proto.ConfigRequest.Set(
+                        pairs=[proto.KeyValue(key=key, value="")]
+                    )
+                )
+            )
+            response = config(
+                proto.ConfigRequest.Operation(get=proto.ConfigRequest.Get(keys=[key]))
+            )
+            assert response.pairs[0].HasField("value")
+            assert response.pairs[0].value == ""
+        finally:
+            config(
+                proto.ConfigRequest.Operation(
+                    unset=proto.ConfigRequest.Unset(keys=[key])
+                )
+            )
+        response = config(
+            proto.ConfigRequest.Operation(
+                get_option=proto.ConfigRequest.GetOption(keys=[key])
+            )
+        )
+        assert not response.pairs[0].HasField("value")
+
+    def test_artifact_status_passthrough(self, unary_relay):
+        from pyspark.sql.connect import proto
+
+        names = ["cache/adbc-d2-missing-a", "cache/adbc-d2-missing-b"]
+        response = unary_relay(
+            "artifact_status",
+            proto.ArtifactStatusesRequest(names=names),
+            proto.ArtifactStatusesResponse,
+        )
+        assert set(response.statuses) == set(names)
+        assert all(not status.exists for status in response.statuses.values())
+
+    def test_interrupt_passthrough(self, unary_relay):
+        from pyspark.sql.connect import proto
+
+        for kind, target in [
+            (1, {}),
+            (2, {"operation_tag": "adbc-d2-missing"}),
+            (3, {"operation_id": "00000000-0000-0000-0000-000000000000"}),
+        ]:
+            response = unary_relay(
+                "interrupt",
+                proto.InterruptRequest(interrupt_type=kind, **target),
+                proto.InterruptResponse,
+            )
+            assert not response.interrupted_ids
+
+
+@pytest.fixture
+def unary_relay(driver, conn):
+    if not (
+        driver.short_version.startswith("4.")
+        and driver.short_version.endswith("-connect")
+    ):
+        pytest.skip("unary passthrough requires Spark 4.x Connect")
+
+    def relay(action, request, response_type):
+        schema = pyarrow.schema(
+            [pyarrow.field("request", pyarrow.binary(), nullable=False)]
+        )
+        batch = pyarrow.RecordBatch.from_arrays(
+            [pyarrow.array([request.SerializeToString()], type=pyarrow.binary())],
+            schema=schema,
+        )
+        with conn.cursor() as cur:
+            cur.adbc_statement.set_options(**{"adbc.action": "spark.connect." + action})
+            cur.adbc_statement.bind_stream(
+                pyarrow.RecordBatchReader.from_batches(schema, [batch])
+            )
+            handle, _ = cur.adbc_statement.execute_query()
+            with pyarrow.RecordBatchReader._import_from_c(handle.address) as reader:
+                assert reader.schema == pyarrow.schema(
+                    [pyarrow.field("response", pyarrow.binary(), nullable=False)]
+                )
+                table = reader.read_all()
+            assert table.num_rows == 1
+            return response_type.FromString(table.column(0)[0].as_py())
+
+    return relay

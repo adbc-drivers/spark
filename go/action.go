@@ -197,7 +197,11 @@ func (q *executePlanQuery) getClient(impl any) (*connectimpl.ConnectClient, erro
 
 var (
 	supportedActions SupportedActions = map[string]Action{
-		"spark.connect.execute_plan": executePlanAction{},
+		"spark.connect.execute_plan":    executePlanAction{},
+		"spark.connect.analyze_plan":    unaryAction{name: "analyze_plan", request: func() pb.Message { return &proto.AnalyzePlanRequest{} }},
+		"spark.connect.config":          unaryAction{name: "config", request: func() pb.Message { return &proto.ConfigRequest{} }},
+		"spark.connect.artifact_status": unaryAction{name: "artifact_status", request: func() pb.Message { return &proto.ArtifactStatusesRequest{} }},
+		"spark.connect.interrupt":       unaryAction{name: "interrupt", request: func() pb.Message { return &proto.InterruptRequest{} }},
 	}
 )
 
@@ -274,3 +278,75 @@ func (r *relayReader) Next() bool {
 func (r *relayReader) RecordBatch() arrow.RecordBatch { return r.current }
 func (r *relayReader) Record() arrow.RecordBatch      { return r.current }
 func (r *relayReader) Err() error                     { return r.err }
+
+// unaryAction relays a single Spark protocol request without interpreting its payload.
+type unaryAction struct {
+	name    string
+	request func() pb.Message
+}
+
+func (a unaryAction) Name() string    { return "spark.connect." + a.name }
+func (a unaryAction) Remarks() string { return "Relay Spark Connect " + a.name }
+func (a unaryAction) Init(eh driverbase.ErrorHelper) ActionQuery {
+	return &unaryQuery{eh: eh, action: a}
+}
+
+type unaryQuery struct {
+	executePlanQuery
+	action  unaryAction
+	message pb.Message
+}
+
+func (q *unaryQuery) BindStream(ctx context.Context, params array.RecordReader) error {
+	q.message = nil
+	if params == nil || !params.Schema().Equal(q.ParameterSchema()) {
+		return q.eh.InvalidArgument("expected one non-null binary request column")
+	}
+	var message pb.Message
+	for params.Next() {
+		values := params.RecordBatch().Column(0).(*array.Binary)
+		for i := range values.Len() {
+			if message != nil || values.IsNull(i) {
+				return q.eh.InvalidArgument("expected exactly one non-null request")
+			}
+			message = q.action.request()
+			if err := pb.Unmarshal(values.Value(i), message); err != nil {
+				return q.eh.InvalidArgument("invalid %s request: %s", q.action.name, err)
+			}
+		}
+	}
+	if err := params.Err(); err != nil {
+		return err
+	}
+	if message == nil {
+		return q.eh.InvalidArgument("expected exactly one request")
+	}
+	q.message = message
+	return nil
+}
+func (q *unaryQuery) ExecuteQuery(ctx context.Context, impl any) (array.RecordReader, int64, error) {
+	client, err := q.getClient(impl)
+	if err != nil {
+		return nil, -1, err
+	}
+	if q.message == nil {
+		return nil, -1, q.eh.InvalidState("bind a request before execution")
+	}
+	request := q.message
+	q.message = nil
+	response, err := client.UnaryRaw(ctx, request)
+	if err != nil {
+		return nil, -1, sparkbase.ErrToAdbcErr(adbc.StatusIO, err, "relay %s", q.action.name)
+	}
+	data, err := pb.Marshal(response)
+	if err != nil {
+		return nil, -1, q.eh.InvalidArgument("serialize response: %s", err)
+	}
+	builder := array.NewRecordBuilder(impl.(*statementImpl).cnxn.Alloc, q.Schema())
+	defer builder.Release()
+	builder.Field(0).(*array.BinaryBuilder).Append(data)
+	batch := builder.NewRecordBatch()
+	defer batch.Release()
+	reader, err := array.NewRecordReader(q.Schema(), []arrow.RecordBatch{batch})
+	return reader, -1, err
+}
