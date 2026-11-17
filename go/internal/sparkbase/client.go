@@ -410,7 +410,7 @@ func tableTypeOf(information string, temporary bool) string {
 	if temporary {
 		return TableTypeView
 	}
-	for _, line := range strings.Split(information, "\n") {
+	for line := range strings.SplitSeq(information, "\n") {
 		if value, ok := strings.CutPrefix(line, "Type: "); ok {
 			if value = strings.TrimSpace(value); value != "" {
 				return value
