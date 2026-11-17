@@ -133,8 +133,20 @@ class TestConnection(adbc_drivers_validation.tests.connection.TestConnection):
                 has_external = True
             except adbc_driver_manager.dbapi.Error:
                 has_external = False
+
+        def catalog_type(name):
+            # The type Spark's catalog records for a table. A plain CREATE TABLE
+            # is MANAGED, or EXTERNAL where the metastore makes managed tables
+            # external, as Hive 3 and later do.
+            with conn.cursor() as cursor:
+                cursor.execute(f"DESCRIBE TABLE EXTENDED {qualified(name)}")
+                for row in cursor.fetchall():
+                    if row[0] == "Type":
+                        return row[1]
+            raise AssertionError(f"DESCRIBE TABLE EXTENDED {name} has no Type")
+
         expected = {
-            managed: "MANAGED",
+            managed: catalog_type(managed),
             view: "VIEW",
             temp_view: "VIEW",
         }
@@ -166,15 +178,14 @@ class TestConnection(adbc_drivers_validation.tests.connection.TestConnection):
 
             # Every table is listed with its type, temporary views included.
             assert names_and_types() == sorted(expected.items())
-            assert names_and_types(["MANAGED"]) == [(managed, "MANAGED")]
-            assert names_and_types(["VIEW"]) == sorted(
-                (n, "VIEW") for n in (view, temp_view)
-            )
-            if has_external:
-                assert names_and_types(["EXTERNAL"]) == [(external, "EXTERNAL")]
+            # Filtering by a type lists exactly the tables of that type.
+            for kind in sorted(set(expected.values())):
+                assert names_and_types([kind]) == sorted(
+                    (name, t) for name, t in expected.items() if t == kind
+                )
             # TEMPORARY isn't a type, so GetTableTypes doesn't list it.
             types = conn.adbc_get_table_types()
-            assert {"MANAGED", "VIEW"} <= set(types)
+            assert {"MANAGED", "EXTERNAL", "VIEW"} <= set(types)
             assert "TEMPORARY" not in types
             # At depth ALL, temporary views list their columns too.
             columns = {name: cols for name, _, cols in listed(depth="all")}
