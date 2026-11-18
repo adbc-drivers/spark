@@ -71,7 +71,7 @@ func (c *connectionImpl) PrepareDriverInfo(ctx context.Context, infoCodes []adbc
 func (*connectionImpl) ListTableTypes(ctx context.Context) ([]string, error) {
 	return []string{
 		sparkbase.TableTypeTable,
-		"VIEW",
+		sparkbase.TableTypeView,
 		"FOREIGN",
 		"MANAGED",
 		"STREAMING_TABLE",
