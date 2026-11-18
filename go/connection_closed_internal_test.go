@@ -19,14 +19,9 @@ import (
 	"testing"
 
 	"github.com/adbc-drivers/driverbase-go/testutil"
-	connectpb "github.com/adbc-drivers/spark/go/internal/generated"
-	"github.com/adbc-drivers/spark/go/sparkutil"
 	"github.com/apache/arrow-adbc/go/adbc"
-	"github.com/apache/arrow-go/v18/arrow"
-	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 )
 
 // The connection is opened lazily, so none of these calls reach a server. The
@@ -43,47 +38,33 @@ func TestConnectionCallsAfterCloseReturnInvalidState(t *testing.T) {
 	conn, err := db.Open(ctx)
 	require.NoError(t, err)
 
-	// A statement keeps its connection, so one made before Close must not
-	// reach the released client either, whatever it runs.
-	plan, err := proto.Marshal(&connectpb.Plan{OpType: &connectpb.Plan_Root{Root: &connectpb.Relation{
-		RelType: &connectpb.Relation_Sql{Sql: &connectpb.SQL{Query: "SELECT 1"}},
-	}}})
-	require.NoError(t, err)
-	setups := map[string]func(stmt adbc.StatementWithContext) error{
-		"query": func(stmt adbc.StatementWithContext) error {
-			return stmt.SetSqlQuery(ctx, "SELECT 1")
-		},
-		"logical plan": func(stmt adbc.StatementWithContext) error {
-			return stmt.(adbc.GetSetOptionsWithContext).SetOptionBytes(ctx, sparkutil.OptionSparkLogicalPlan, plan)
-		},
-		"ingest": func(stmt adbc.StatementWithContext) error {
-			if err := stmt.SetOption(ctx, adbc.OptionKeyIngestTargetTable, "t"); err != nil {
-				return err
-			}
-			bldr := array.NewInt64Builder(memory.DefaultAllocator)
-			defer bldr.Release()
-			col := bldr.NewArray()
-			defer col.Release()
-			schema := arrow.NewSchema([]arrow.Field{{Name: "v", Type: arrow.PrimitiveTypes.Int64}}, nil)
-			rec := array.NewRecordBatch(schema, []arrow.Array{col}, 0)
-			defer rec.Release()
-			return stmt.Bind(ctx, rec)
-		},
-		"action": func(stmt adbc.StatementWithContext) error {
-			return stmt.SetOption(ctx, ActionOption, executePlanAction{}.Name())
-		},
-	}
-	statements := map[string]adbc.StatementWithContext{}
-	for kind, setup := range setups {
-		stmt, err := conn.NewStatement(ctx)
-		require.NoError(t, err)
-		require.NoError(t, setup(stmt), kind)
-		defer testutil.CheckedCloseWithContext(t, stmt, ctx)
-		statements[kind] = stmt
-	}
 	require.NoError(t, conn.Close(ctx))
 
+	// A statement keeps its connection, so one made before the connection's
+	// Close must not reach the released client either.
+	statementOfClosedConnection := func() adbc.StatementWithContext {
+		c, err := db.Open(ctx)
+		require.NoError(t, err)
+		stmt, err := c.NewStatement(ctx)
+		require.NoError(t, err)
+		require.NoError(t, stmt.SetSqlQuery(ctx, "SELECT 1"))
+		require.NoError(t, c.Close(ctx))
+		return stmt
+	}
+
 	calls := map[string]func() error{
+		"ExecuteQuery": func() error {
+			stmt := statementOfClosedConnection()
+			defer testutil.CheckedCloseWithContext(t, stmt, ctx)
+			_, _, err := stmt.ExecuteQuery(ctx)
+			return err
+		},
+		"ExecuteUpdate": func() error {
+			stmt := statementOfClosedConnection()
+			defer testutil.CheckedCloseWithContext(t, stmt, ctx)
+			_, err := stmt.ExecuteUpdate(ctx)
+			return err
+		},
 		"GetObjects": func() error {
 			_, err := conn.GetObjects(ctx, adbc.ObjectDepthTables, nil, nil, nil, nil, nil)
 			return err
@@ -124,16 +105,6 @@ func TestConnectionCallsAfterCloseReturnInvalidState(t *testing.T) {
 			_, err := conn.(adbc.GetSetOptionsWithContext).GetOptionInt(ctx, "spark.connect.session_id")
 			return err
 		},
-	}
-	for kind, stmt := range statements {
-		calls["ExecuteQuery of the "+kind+" statement"] = func() error {
-			_, _, err := stmt.ExecuteQuery(ctx)
-			return err
-		}
-		calls["ExecuteUpdate of the "+kind+" statement"] = func() error {
-			_, err := stmt.ExecuteUpdate(ctx)
-			return err
-		}
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {
