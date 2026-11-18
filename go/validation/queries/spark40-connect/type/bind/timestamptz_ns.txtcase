@@ -14,10 +14,45 @@
 
 // part: metadata
 
-skip = "Spark timestamps have microsecond precision, so TIMESTAMP(9) isn't a Spark type."
-
-[setup]
-drop = "test_timestamptz"
+# Spark's nanosecond timestamps are a preview, off by default in Spark 4.3, and
+# earlier versions have none, so these columns keep microseconds.
 
 [tags]
-sql-type-name = "TIMESTAMP(9) WITH TIME ZONE"
+caveats = [
+  "Nanoseconds are truncated to microseconds",
+]
+partial-support = true
+
+// part: setup_query
+
+CREATE TABLE test_timestamptz (
+    idx INT,
+    res TIMESTAMP,
+    res2 TIMESTAMP
+);
+
+// part: expected_schema
+
+{
+    "format": "+s",
+    "children": [
+        {
+            "name": "res",
+            "format": "tsu:Etc/UTC",
+            "flags": ["nullable"]
+        },
+        {
+            "name": "res2",
+            "format": "tsu:Etc/UTC",
+            "flags": ["nullable"]
+        }
+    ]
+}
+
+// part: expected
+
+{"res": null, "res2": null}
+{"res": -9223372036854775, "res2": -9223372036854775}
+{"res": 946684800000000, "res2": 946684800000000}
+{"res": 1684158330000000, "res2": 1684158330000000}
+{"res": 9223372036854775, "res2": 9223372036854775}
