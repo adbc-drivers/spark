@@ -14,10 +14,43 @@
 
 // part: metadata
 
-skip = "Spark's TIME type is nanosecond-based and reads back as time64[ns], not the unit of this case."
-
-[setup]
-drop = "test_time"
+# TIME(6) holds every case's values: Spark 4.3 can't insert a bound time into
+# TIME(0) or TIME(3), and only Spark 4.3 has TIME(9). Spark reads TIME back as
+# time64[ns].
 
 [tags]
-sql-type-name = "TIME"
+caveats = [
+  "Spark 4.1 to 4.3 support TIME only with spark.sql.timeType.enabled set to true",
+  "Nanoseconds are truncated to microseconds",
+]
+partial-support = true
+
+// part: setup_query
+
+SET spark.sql.timeType.enabled = true;
+
+CREATE TABLE test_time (
+    idx INT,
+    res TIME(6)
+);
+
+// part: expected_schema
+
+{
+    "format": "+s",
+    "children": [
+        {
+            "name": "res",
+            "format": "ttn",
+            "flags": ["nullable"]
+        }
+    ]
+}
+
+// part: expected
+
+{"res": 0}
+{"res": null}
+{"res": 49531123456000}
+{"res": 45045500000000}
+{"res": 86399999999000}

@@ -310,8 +310,9 @@ func sparkDataType(dt arrow.DataType) (*connectpb.DataType, error) {
 }
 
 // timeToNanos converts an Arrow time value to nanoseconds since midnight, and
-// gives the precision Spark stores it with. Spark's TIME keeps microseconds at
-// most, so nanoseconds are truncated to microseconds, as timestamps are.
+// gives the precision Spark stores it with. Before 4.3, Spark's TIME keeps
+// microseconds at most, so nanoseconds are truncated to microseconds, as
+// timestamps are.
 func timeToNanos(v int64, unit arrow.TimeUnit) (int64, int32, error) {
 	switch unit {
 	case arrow.Second:
