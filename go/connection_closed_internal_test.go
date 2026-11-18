@@ -18,6 +18,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/adbc-drivers/driverbase-go/testutil"
 	"github.com/apache/arrow-adbc/go/adbc"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/stretchr/testify/require"
@@ -36,9 +37,34 @@ func TestConnectionCallsAfterCloseReturnInvalidState(t *testing.T) {
 
 	conn, err := db.Open(ctx)
 	require.NoError(t, err)
+
 	require.NoError(t, conn.Close(ctx))
 
+	// A statement keeps its connection, so one made before the connection's
+	// Close must not reach the released client either.
+	statementOfClosedConnection := func() adbc.StatementWithContext {
+		c, err := db.Open(ctx)
+		require.NoError(t, err)
+		stmt, err := c.NewStatement(ctx)
+		require.NoError(t, err)
+		require.NoError(t, stmt.SetSqlQuery(ctx, "SELECT 1"))
+		require.NoError(t, c.Close(ctx))
+		return stmt
+	}
+
 	calls := map[string]func() error{
+		"ExecuteQuery": func() error {
+			stmt := statementOfClosedConnection()
+			defer testutil.CheckedCloseWithContext(t, stmt, ctx)
+			_, _, err := stmt.ExecuteQuery(ctx)
+			return err
+		},
+		"ExecuteUpdate": func() error {
+			stmt := statementOfClosedConnection()
+			defer testutil.CheckedCloseWithContext(t, stmt, ctx)
+			_, err := stmt.ExecuteUpdate(ctx)
+			return err
+		},
 		"GetObjects": func() error {
 			_, err := conn.GetObjects(ctx, adbc.ObjectDepthTables, nil, nil, nil, nil, nil)
 			return err
