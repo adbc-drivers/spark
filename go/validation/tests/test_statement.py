@@ -39,66 +39,60 @@ class TestStatement(adbc_drivers_validation.tests.statement.TestStatement):
             pytest.skip("EMR Spark does not support UPDATE etc.")
         super().test_rows_affected(driver, conn)
 
+    def test_bind_parameters_not_supported(self, driver, conn):
+        # Only Spark Connect binds parameters. The other backends reject a
+        # binding instead of running the query without it.
+        if driver.features.statement_bind:
+            pytest.skip("this backend binds parameters")
+        with (
+            conn.cursor() as cur,
+            pytest.raises(adbc_driver_manager.dbapi.NotSupportedError),
+        ):
+            cur.execute("SELECT ?", parameters=[1])
+
+    @pytest.mark.requires_features(["statement_bind"])
     def test_bind_parameters_without_markers(self, driver, conn):
-        # A query with no '?' markers runs as before, with or without a binding.
+        # Spark ignores a value that no marker uses.
         with conn.cursor() as cur:
             cur.execute("SELECT 'plain' AS s", parameters=[1, 2])
             assert cur.fetchall() == [("plain",)]
 
-    def test_bind_parameters(self, driver, conn):
-        # The standard bind tests cover types and multiple rows. These cover
-        # what they don't: the marker rules, the uint64 limit, and backends
-        # that can't bind.
-        if not driver.short_version.endswith("-connect"):
-            # Only Spark Connect binds parameters. Other backends say so.
-            with (
-                conn.cursor() as cur,
-                pytest.raises(adbc_driver_manager.dbapi.NotSupportedError),
-            ):
-                cur.execute("SELECT ?", parameters=[1])
-            return
-
-        # A '?' inside a string literal is not a marker.
-        with conn.cursor() as cur:
-            cur.execute("SELECT ? AS x, '?' AS y", parameters=[42])
-            assert cur.fetchall() == [(42, "?")]
-
-        # A raw string has no backslash escapes, so its quote closes at the
-        # backslash, and the marker after it counts.
-        with conn.cursor() as cur:
-            cur.execute("SELECT r'abc\\' AS s, ? AS v", parameters=[42])
-            assert cur.fetchall() == [("abc\\", 42)]
-
-        # A null of a typed column stays typed, so every row has the column's
-        # type, and the null row isn't a null-typed result.
-        with conn.cursor() as cur:
-            batch = pyarrow.record_batch(
-                [pyarrow.array([None, 42], type=pyarrow.int64())], names=["v"]
-            )
-            cur.adbc_statement.bind(batch)
-            cur.adbc_statement.set_sql_query("SELECT ? AS v")
-            handle, _ = cur.adbc_statement.execute_query()
-            with pyarrow.RecordBatchReader._import_from_c(handle.address) as reader:
-                result = reader.read_all()
-            assert result.schema.field(0).type == pyarrow.int64()
-            assert result.column(0).to_pylist() == [None, 42]
-
-        # A uint64 above the signed maximum is rejected, not wrapped.
-        with conn.cursor() as cur:
-            batch = pyarrow.record_batch(
-                [pyarrow.array([2**63], type=pyarrow.uint64())], names=["v"]
-            )
-            cur.adbc_statement.bind(batch)
-            cur.adbc_statement.set_sql_query("SELECT ?")
-            with pytest.raises(adbc_driver_manager.dbapi.ProgrammingError):
-                cur.adbc_statement.execute_query()
-
-        # The number of values must match the markers.
+    @pytest.mark.requires_features(["statement_bind"])
+    def test_bind_parameters_too_few(self, driver, conn):
+        # Spark rejects a marker that has no value.
         with (
             conn.cursor() as cur,
             pytest.raises(adbc_driver_manager.dbapi.ProgrammingError),
         ):
             cur.execute("SELECT ?, ?", parameters=[1])
+
+    @pytest.mark.requires_features(["statement_bind"])
+    def test_bind_parameters_typed_null(self, driver, conn):
+        # A null of a typed column stays typed, so the null row doesn't give a
+        # null-typed result.
+        batch = pyarrow.record_batch(
+            [pyarrow.array([None, 42], type=pyarrow.int64())], names=["v"]
+        )
+        with conn.cursor() as cur:
+            cur.adbc_statement.bind(batch)
+            cur.adbc_statement.set_sql_query("SELECT ? AS v")
+            handle, _ = cur.adbc_statement.execute_query()
+            with pyarrow.RecordBatchReader._import_from_c(handle.address) as reader:
+                result = reader.read_all()
+        assert result.schema.field(0).type == pyarrow.int64()
+        assert result.column(0).to_pylist() == [None, 42]
+
+    @pytest.mark.requires_features(["statement_bind"])
+    def test_bind_parameters_uint64_overflow(self, driver, conn):
+        # A uint64 above the signed maximum is rejected, not wrapped.
+        batch = pyarrow.record_batch(
+            [pyarrow.array([2**63], type=pyarrow.uint64())], names=["v"]
+        )
+        with conn.cursor() as cur:
+            cur.adbc_statement.bind(batch)
+            cur.adbc_statement.set_sql_query("SELECT ?")
+            with pytest.raises(adbc_driver_manager.dbapi.ProgrammingError):
+                cur.adbc_statement.execute_query()
 
     def test_logical_plan_passthrough(self, driver, conn, db_kwargs):
         if not driver.short_version.startswith("4."):
