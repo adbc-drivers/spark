@@ -27,19 +27,16 @@ import (
 )
 
 // positionalRows returns the Spark Connect literals of each bound row, one list
-// per row, for a SQL query with '?' markers. The query runs once per row, as
-// ADBC binds it. It returns nil when nothing is bound or the query has no
-// markers, so the query runs once with no arguments, as it did before binding
-// was supported. A binding with no rows returns an empty, non-nil slice.
+// per row. The query runs once per row, as ADBC binds it, with the row's values
+// as its positional arguments. Spark matches them to the query's '?' markers: a
+// marker with no value fails the query, and a value with no marker is unused.
+// It returns nil when nothing is bound, so the query runs once with no
+// arguments. A binding with no rows returns an empty, non-nil slice.
 //
 // The bound records are read and then rebound, so the statement can run again
 // with the same binding.
-func (st *statementImpl) positionalRows(query string) ([][]*connectpb.Expression_Literal, error) {
+func (st *statementImpl) positionalRows() ([][]*connectpb.Expression_Literal, error) {
 	if st.params == nil {
-		return nil, nil
-	}
-	markers := countParameterMarkers(query)
-	if markers == 0 {
 		return nil, nil
 	}
 
@@ -50,17 +47,8 @@ func (st *statementImpl) positionalRows(query string) ([][]*connectpb.Expression
 
 	rows := make([][]*connectpb.Expression_Literal, 0)
 	for _, rec := range records {
-		if int(rec.NumCols()) != markers {
-			if rec.NumRows() == 0 {
-				continue
-			}
-			return nil, adbc.Error{
-				Msg:  fmt.Sprintf("[spark] query has %d parameter markers but %d values are bound", markers, rec.NumCols()),
-				Code: adbc.StatusInvalidArgument,
-			}
-		}
 		for row := range int(rec.NumRows()) {
-			literals := make([]*connectpb.Expression_Literal, 0, markers)
+			literals := make([]*connectpb.Expression_Literal, 0, rec.NumCols())
 			for col := range int(rec.NumCols()) {
 				lit, err := columnToLiteral(rec.Column(col), row)
 				if err != nil {
@@ -102,155 +90,6 @@ func (st *statementImpl) rebindParams() ([]arrow.RecordBatch, error) {
 	}
 	st.params = rebound
 	return records, nil
-}
-
-// countParameterMarkers counts the positional '?' markers in a Spark SQL
-// statement. It skips every construct that hides a '?' in Spark's lexer
-// (SqlBaseLexer.g4): string literals, raw strings, quoted identifiers,
-// dollar-quoted strings, and comments. A hint, /*+ ... */, is not a comment,
-// so its contents are tokens and their markers count.
-func countParameterMarkers(sql string) int {
-	count := 0
-	for i := 0; i < len(sql); i++ {
-		c := sql[i]
-		next := byte(0)
-		if i+1 < len(sql) {
-			next = sql[i+1]
-		}
-		switch {
-		case c == '-' && next == '-':
-			i = skipLineComment(sql, i)
-		case c == '/' && next == '*' && i+2 < len(sql) && sql[i+2] == '+':
-			// A hint opens with /*+. Its contents are ordinary tokens.
-			i += 2
-		case c == '/' && next == '*':
-			i = skipBracketedComment(sql, i)
-		case (c == 'r' || c == 'R') && isQuote(next) && !afterIdentifier(sql, i):
-			// A raw string, R'...' or R"...", has no backslash escapes.
-			i = skipRaw(sql, i+1)
-		case c == '\'' || c == '"' || c == '`':
-			i = skipQuoted(sql, i)
-		case c == '$':
-			if end, ok := skipDollarQuoted(sql, i); ok {
-				i = end
-			}
-		case c == '?':
-			count++
-		}
-	}
-	return count
-}
-
-func isQuote(c byte) bool {
-	return c == '\'' || c == '"'
-}
-
-// afterIdentifier reports whether the byte before position i could continue an
-// identifier, in which case the character at i is part of that identifier and
-// not a string prefix. Spark's lexer matches identifiers greedily, so
-// colr'...' is an identifier followed by a string. An identifier is letters,
-// digits and underscores; a byte of 0x80 or more is part of a Unicode letter.
-// '$' is never part of an identifier.
-func afterIdentifier(sql string, i int) bool {
-	if i == 0 {
-		return false
-	}
-	c := sql[i-1]
-	return c == '_' || c >= 0x80 ||
-		('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9')
-}
-
-// skipLineComment returns the index of the last byte of the -- comment that
-// starts at start. Spark's comment continues past a backslash that ends a
-// line, so a '?' on the next line is part of the comment.
-func skipLineComment(sql string, start int) int {
-	for j := start + 2; j < len(sql); j++ {
-		switch {
-		case sql[j] == '\\' && j+1 < len(sql) && sql[j+1] == '\n':
-			j++
-		case sql[j] == '\r' || sql[j] == '\n':
-			return j - 1
-		}
-	}
-	return len(sql) - 1
-}
-
-// skipRaw returns the index of the quote that closes the raw string whose
-// opening quote is at start. A raw string has no escapes, so the first matching
-// quote closes it. An unterminated string runs to the end of the statement.
-func skipRaw(sql string, start int) int {
-	quote := sql[start]
-	for j := start + 1; j < len(sql); j++ {
-		if sql[j] == quote {
-			return j
-		}
-	}
-	return len(sql) - 1
-}
-
-// skipQuoted returns the index of the quote that closes the literal or
-// identifier starting at start. Spark's string literals take backslash escapes,
-// and a doubled quote doesn't end the literal. An unterminated literal runs to
-// the end of the statement.
-func skipQuoted(sql string, start int) int {
-	quote := sql[start]
-	for j := start + 1; j < len(sql); j++ {
-		if quote != '`' && sql[j] == '\\' {
-			j++
-			continue
-		}
-		if sql[j] == quote {
-			return j
-		}
-	}
-	return len(sql) - 1
-}
-
-// skipDollarQuoted handles a dollar-quoted string, $tag$ ... $tag$, where tag is
-// letters and may be empty. It reports the index of the last byte of the string
-// and whether sql has one at i. The string ends at the first occurrence of the
-// same tag text, compared case-sensitively, as Spark's lexer does. A '$' that
-// doesn't open a tag, such as $1, is not a string. An unterminated string runs
-// to the end of the statement.
-func skipDollarQuoted(sql string, start int) (int, bool) {
-	j := start + 1
-	for j < len(sql) && isASCIILetter(sql[j]) {
-		j++
-	}
-	if j >= len(sql) || sql[j] != '$' {
-		return 0, false
-	}
-	tag := sql[start : j+1]
-	body := j + 1
-	if k := strings.Index(sql[body:], tag); k >= 0 {
-		return body + k + len(tag) - 1, true
-	}
-	return len(sql) - 1, true
-}
-
-func isASCIILetter(c byte) bool {
-	return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
-}
-
-// skipBracketedComment returns the index of the '/' that ends the bracketed
-// comment starting at start. Comments nest. A '/*+' inside a comment is text,
-// not a nested comment, because a hint is never a comment.
-func skipBracketedComment(sql string, start int) int {
-	depth := 0
-	for j := start; j+1 < len(sql); j++ {
-		switch {
-		case sql[j] == '/' && sql[j+1] == '*' && (j+2 >= len(sql) || sql[j+2] != '+'):
-			depth++
-			j++
-		case sql[j] == '*' && sql[j+1] == '/':
-			depth--
-			j++
-			if depth == 0 {
-				return j
-			}
-		}
-	}
-	return len(sql) - 1
 }
 
 // columnToLiteral converts the value at row of an Arrow array into a Spark

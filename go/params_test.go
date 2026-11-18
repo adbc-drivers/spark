@@ -178,58 +178,6 @@ func dictNullArray(t *testing.T) arrow.Array {
 	return arr
 }
 
-func TestCountParameterMarkers(t *testing.T) {
-	for _, tc := range []struct {
-		sql  string
-		want int
-	}{
-		{"SELECT 1", 0},
-		{"SELECT ?", 1},
-		{"SELECT ?, ?", 2},
-		{"SELECT '?'", 0},
-		{`SELECT "?" `, 0},
-		{"SELECT `a?b`", 0},
-		{"SELECT 'it''s ?', ?", 1},
-		{`SELECT 'a\'?', ?`, 1},
-		{"-- ?\nSELECT ?", 1},
-		{"SELECT 1 -- ?", 0},
-		{"/* ? */ SELECT ?", 1},
-		{"/* outer /* inner ? */ ? */ SELECT ?", 1},
-		{"SELECT :named", 0},
-		{"SELECT '", 0},
-		// A raw string has no backslash escapes, so the quote after the
-		// backslash closes it, and the marker after it counts.
-		{`SELECT r'abc\' AS s, ? AS v`, 1},
-		{`SELECT R'abc\' AS s, ? AS v`, 1},
-		{`SELECT r"abc\" AS s, ? AS v`, 1},
-		{`SELECT R"abc\" AS s, ? AS v`, 1},
-		{`SELECT r'a' AS a, r'b\' AS b, ?`, 1},
-		// A raw prefix is only a token start: after an identifier, the r is part
-		// of the identifier, so the quote starts an ordinary string.
-		{`SELECT colr'\', ?`, 0},
-		{`SELECT 'r\'', ?`, 1},
-		// Dollar-quoted strings end at the same tag, compared exactly.
-		{"SELECT $$a?b$$, ?", 1},
-		{"SELECT $t$ ? $T$ $t$ ?", 1},
-		{"SELECT $t$ ? $t$ ?", 1},
-		{"SELECT $a$ ?", 0},
-		{"SELECT $1, ?", 1},
-		// $ is never part of an identifier, so a$b$ is a and a dollar-quoted string.
-		{"SELECT a$b$ ?", 0},
-		{`SELECT $r'\', ?`, 1},
-		// A backslash right before a newline continues a -- comment.
-		{"-- a\\\n? \nSELECT ?", 1},
-		{"-- x\n?", 1},
-		// A hint's markers count; a comment's don't.
-		{"/*+ ? */ SELECT 1", 1},
-		{"/*+ ? */ SELECT ?", 2},
-		{"/* /*+ ? */ ?", 1},
-		{"/* ? /* ? */ ? */ ?", 1},
-	} {
-		require.Equal(t, tc.want, countParameterMarkers(tc.sql), "SQL: %s", tc.sql)
-	}
-}
-
 // paramsClient records the arguments of each execution. Each query returns one
 // row holding the first argument's long value, so results can be checked.
 type paramsClient struct {
@@ -346,24 +294,6 @@ func TestExecuteUpdateBindsPositionalParameters(t *testing.T) {
 	require.Len(t, client.executions[0].PosArgs, 1)
 }
 
-func TestExecuteWithoutMarkersSendsNoArguments(t *testing.T) {
-	ctx := context.Background()
-	// A query with no markers runs as it did before binding was supported, even
-	// with a row bound. The extra values aren't sent.
-	st, client := newParamsStatement(t, "SELECT 1")
-	require.NoError(t, st.Bind(ctx, int64Batch(t, []string{"a", "b"}, []int64{1}, []int64{2})))
-	_, _, err := st.ExecuteQuery(ctx)
-	require.NoError(t, err)
-	require.Empty(t, client.executions[0].PosArgs)
-
-	// Multiple rows are fine for a query without markers, too.
-	st, client = newParamsStatement(t, "SELECT 1")
-	require.NoError(t, st.Bind(ctx, int64Batch(t, []string{"a"}, []int64{1, 2, 3})))
-	_, _, err = st.ExecuteQuery(ctx)
-	require.NoError(t, err)
-	require.Empty(t, client.executions[0].PosArgs)
-}
-
 func TestExecuteWithMarkersAndNoBindingKeepsSparkError(t *testing.T) {
 	// With no binding, the markers reach Spark unchanged, as before.
 	st, client := newParamsStatement(t, "SELECT ?")
@@ -371,16 +301,6 @@ func TestExecuteWithMarkersAndNoBindingKeepsSparkError(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, client.executions[0].PosArgs)
 	require.Equal(t, "SELECT ?", client.executions[0].Query)
-}
-
-func TestExecuteRejectsParameterMismatches(t *testing.T) {
-	ctx := context.Background()
-
-	st, client := newParamsStatement(t, "SELECT ?, ?")
-	require.NoError(t, st.Bind(ctx, int64Batch(t, []string{"a"}, []int64{1})))
-	_, _, err := st.ExecuteQuery(ctx)
-	requireAdbcCode(t, err, adbc.StatusInvalidArgument)
-	require.Empty(t, client.executions, "a mismatched query must not run")
 }
 
 func TestExecuteRunsOncePerBoundRow(t *testing.T) {

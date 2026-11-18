@@ -214,7 +214,7 @@ func (st *statementImpl) ExecuteQuery(ctx context.Context) (array.RecordReader, 
 			Code: adbc.StatusInvalidState,
 		}
 	}
-	rows, err := st.positionalRows(st.query)
+	rows, err := st.positionalRows()
 	if err != nil {
 		return nil, -1, err
 	}
@@ -268,7 +268,7 @@ func (st *statementImpl) ExecuteUpdate(ctx context.Context) (int64, error) {
 		}
 		return -1, rdr.Err()
 	}
-	rows, err := st.positionalRows(st.query)
+	rows, err := st.positionalRows()
 	if err != nil {
 		return -1, err
 	}
