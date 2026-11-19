@@ -124,25 +124,17 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 		options[sparkutil.OptionLivyBaseURL] = uri.Path
 	}
 
-	if scheme == "sc" {
-		defaultSparkConnectAuthType(options)
+	// An sc:// URI without an auth_type uses token auth if it has a token
+	// (/;token= or sc://:token@host), and none otherwise. An explicit
+	// auth_type is kept, so a conflict with it is an error.
+	if _, ok := options[sparkutil.OptionAuthType]; scheme == "sc" && !ok {
+		if _, ok := options[adbc.OptionKeyPassword]; ok {
+			options[sparkutil.OptionAuthType] = sparkutil.OptionValueAuthTypeToken
+		} else {
+			options[sparkutil.OptionAuthType] = sparkutil.OptionValueAuthTypeNone
+		}
 	}
 	return nil
-}
-
-// defaultSparkConnectAuthType sets the auth type of an sc:// URI that doesn't
-// give one. A URI with a token, as /;token= or a password in the userinfo
-// (sc://:token@host), uses token auth. Any other URI uses none. An explicit
-// auth_type is never changed, so a conflict with it is still an error.
-func defaultSparkConnectAuthType(options map[string]string) {
-	if _, ok := options[sparkutil.OptionAuthType]; ok {
-		return
-	}
-	if _, ok := options[adbc.OptionKeyPassword]; ok {
-		options[sparkutil.OptionAuthType] = sparkutil.OptionValueAuthTypeToken
-		return
-	}
-	options[sparkutil.OptionAuthType] = sparkutil.OptionValueAuthTypeNone
 }
 
 // parseSparkConnectParams reads the parameters of a Spark Connect connection

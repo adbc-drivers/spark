@@ -70,11 +70,110 @@ func TestParseOptionsFromUri(t *testing.T) {
 			},
 		},
 		{
+			uri: "sc://localhost:15002/",
+			options: map[string]string{
+				"spark.host":      "localhost",
+				"spark.port":      "15002",
+				"spark.api":       "connect",
+				"spark.auth_type": "none",
+			},
+		},
+		{
+			// A path that doesn't start with "/;" is the Livy base URL. For
+			// sc, that fails later as an unknown option.
+			uri: "sc://localhost:15002/foo",
+			options: map[string]string{
+				"spark.host":          "localhost",
+				"spark.port":          "15002",
+				"spark.api":           "connect",
+				"spark.auth_type":     "none",
+				"spark.livy.base_url": "/foo",
+			},
+		},
+		{
+			uri: "sc://localhost:15002/;token=abc;use_ssl=true",
+			options: map[string]string{
+				"spark.host":      "localhost",
+				"spark.port":      "15002",
+				"spark.api":       "connect",
+				"spark.auth_type": "token",
+				"password":        "abc",
+				"spark.tls":       "true",
+			},
+		},
+		{
+			// A literal '+' and '/' survive, and %2F and %3B decode to '/' and ';'.
+			uri: "sc://localhost/;token=ab+c/d==%2F;x=p%3Bq",
+			options: map[string]string{
+				"spark.host":                  "localhost",
+				"spark.api":                   "connect",
+				"spark.auth_type":             "token",
+				"password":                    "ab+c/d==/",
+				"spark.connect.call_header.x": "p;q",
+			},
+		},
+		{
+			uri: "sc://localhost:15002/;TOKEN=abc;user_id=alice;user_agent=my-app/1.0;session_id=s-1;use_ssl=false;x-trace-id=t1",
+			options: map[string]string{
+				"spark.host":                           "localhost",
+				"spark.port":                           "15002",
+				"spark.api":                            "connect",
+				"spark.auth_type":                      "token",
+				"password":                             "abc",
+				"username":                             "alice",
+				"spark.connect.user_agent":             "my-app/1.0",
+				"spark.connect.session_id":             "s-1",
+				"spark.tls":                            "false",
+				"spark.connect.call_header.x-trace-id": "t1",
+			},
+		},
+		{
+			// Repeating a parameter with the same value is harmless.
+			uri: "sc://user:abc@localhost:15002/;token=abc;user_id=user;token=abc",
+			options: map[string]string{
+				"spark.host":      "localhost",
+				"spark.port":      "15002",
+				"spark.api":       "connect",
+				"spark.auth_type": "token",
+				"password":        "abc",
+				"username":        "user",
+			},
+		},
+		{
+			// An empty parameter list adds nothing.
+			uri: "sc://localhost:15002/;",
+			options: map[string]string{
+				"spark.host":      "localhost",
+				"spark.port":      "15002",
+				"spark.api":       "connect",
+				"spark.auth_type": "none",
+			},
+		},
+		{
+			// An explicit auth_type is kept.
+			uri: "sc://localhost:15002?auth_type=token",
+			options: map[string]string{
+				"spark.host":      "localhost",
+				"spark.port":      "15002",
+				"spark.api":       "connect",
+				"spark.auth_type": "token",
+			},
+		},
+		{
 			uri: "livy://localhost:10000",
 			options: map[string]string{
 				"spark.host": "localhost",
 				"spark.port": "10000",
 				"spark.api":  "livy",
+			},
+		},
+		{
+			uri: "livy://localhost:10000/gateway",
+			options: map[string]string{
+				"spark.host":          "localhost",
+				"spark.port":          "10000",
+				"spark.api":           "livy",
+				"spark.livy.base_url": "/gateway",
 			},
 		},
 		{
@@ -363,6 +462,72 @@ func TestParseConnectOptionsFromUri(t *testing.T) {
 				ReleaseSession:            false,
 			},
 		},
+		{
+			uri: "sc://localhost:15002",
+			options: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeNone,
+				Tls:                       true,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			uri: "sc://localhost:15002/;use_ssl=false",
+			options: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeNone,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			uri: "sc://:abc@localhost:15002",
+			options: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeToken,
+				Token:                     "abc",
+				Tls:                       true,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			uri: "sc://localhost:15002/;token=abc",
+			options: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeToken,
+				Token:                     "abc",
+				Tls:                       true,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			// A user name alone isn't a token.
+			uri: "sc://alice@localhost:15002",
+			options: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeNone,
+				Username:                  "alice",
+				Tls:                       true,
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
+		{
+			uri: "sc://localhost:15002/;TOKEN=abc;user_id=alice;user_agent=my-app/1.0;session_id=s-1;use_ssl=false;x-trace-id=t1",
+			options: connectimpl.ConnectionOpts{
+				Host:                      "localhost:15002",
+				AuthType:                  connectimpl.AuthTypeToken,
+				Username:                  "alice",
+				Token:                     "abc",
+				UserAgent:                 "my-app/1.0",
+				SessionID:                 "s-1",
+				ValidateServerCertificate: true,
+				ReleaseSession:            true,
+			},
+		},
 	} {
 		u, err := url.Parse(tc.uri)
 		require.NoError(t, err)
@@ -530,188 +695,11 @@ func TestParseThriftOptionsFromUri(t *testing.T) {
 }
 
 func TestParseOptionsFromUriInvalid(t *testing.T) {
+	const secret = "sc-secret-sentinel"
 	for _, uri := range []string{
 		"livy://localhost:10000?api=thrift+binary",
 		"sc://localhost:10000?api=thrift+binary",
 		"sc://localhost:10000?api=connect&api=connect",
-	} {
-		u, err := url.Parse(uri)
-		require.NoError(t, err)
-		options := map[string]string{}
-		err = parseOptionsFromUri(u, options)
-		var adbcErr adbc.Error
-		require.ErrorAs(t, err, &adbcErr, "expected error parsing invalid URI %s", uri)
-		require.Equal(t, adbc.StatusInvalidArgument, adbcErr.Code, "expected invalid argument error parsing URI %s", uri)
-	}
-}
-
-// Existing URI forms must keep their meaning. These pin the current behavior
-// next to the Spark Connect parameter tests below.
-func TestParseOptionsFromUriExistingForms(t *testing.T) {
-	type testCase struct {
-		uri     string
-		options map[string]string
-	}
-	for _, tc := range []testCase{
-		{
-			uri: "sc://localhost:15002/",
-			options: map[string]string{
-				"spark.host":      "localhost",
-				"spark.port":      "15002",
-				"spark.api":       "connect",
-				"spark.auth_type": "none",
-			},
-		},
-		{
-			// A path other than "/;" is still the Livy base URL. For sc, that
-			// fails later as an unknown option, as it does today.
-			uri: "sc://localhost:15002/foo",
-			options: map[string]string{
-				"spark.host":          "localhost",
-				"spark.port":          "15002",
-				"spark.api":           "connect",
-				"spark.auth_type":     "none",
-				"spark.livy.base_url": "/foo",
-			},
-		},
-		{
-			uri: "livy://localhost:10000/gateway",
-			options: map[string]string{
-				"spark.host":          "localhost",
-				"spark.port":          "10000",
-				"spark.api":           "livy",
-				"spark.livy.base_url": "/gateway",
-			},
-		},
-	} {
-		u, err := url.Parse(tc.uri)
-		require.NoError(t, err)
-		options := map[string]string{}
-		err = parseOptionsFromUri(u, options)
-		require.NoError(t, err, "failed to parse options from URI %s", tc.uri)
-		require.Equal(t, tc.options, options, "unexpected options for URI %s", tc.uri)
-	}
-}
-
-func TestParseSparkConnectParams(t *testing.T) {
-	type testCase struct {
-		uri     string
-		options map[string]string
-		conn    connectimpl.ConnectionOpts
-	}
-	for _, tc := range []testCase{
-		{
-			uri: "sc://localhost:15002/;token=abc;use_ssl=true",
-			options: map[string]string{
-				"spark.host":      "localhost",
-				"spark.port":      "15002",
-				"spark.api":       "connect",
-				"spark.auth_type": "token",
-				"password":        "abc",
-				"spark.tls":       "true",
-			},
-			conn: connectimpl.ConnectionOpts{
-				Host:                      "localhost:15002",
-				AuthType:                  connectimpl.AuthTypeToken,
-				Token:                     "abc",
-				Tls:                       true,
-				ValidateServerCertificate: true,
-				ReleaseSession:            true,
-			},
-		},
-		{
-			// A literal '+' and '/' survive, and %2F and %3B decode to '/' and ';'.
-			uri: "sc://localhost/;token=ab+c/d==%2F;x=p%3Bq",
-			options: map[string]string{
-				"spark.host":                  "localhost",
-				"spark.api":                   "connect",
-				"spark.auth_type":             "token",
-				"password":                    "ab+c/d==/",
-				"spark.connect.call_header.x": "p;q",
-			},
-			conn: connectimpl.ConnectionOpts{
-				Host:                      "localhost",
-				AuthType:                  connectimpl.AuthTypeToken,
-				Token:                     "ab+c/d==/",
-				Tls:                       true,
-				ValidateServerCertificate: true,
-				ReleaseSession:            true,
-			},
-		},
-		{
-			uri: "sc://localhost:15002/;TOKEN=abc;user_id=alice;user_agent=my-app/1.0;session_id=s-1;use_ssl=false;x-trace-id=t1",
-			options: map[string]string{
-				"spark.host":                           "localhost",
-				"spark.port":                           "15002",
-				"spark.api":                            "connect",
-				"spark.auth_type":                      "token",
-				"password":                             "abc",
-				"username":                             "alice",
-				"spark.connect.user_agent":             "my-app/1.0",
-				"spark.connect.session_id":             "s-1",
-				"spark.tls":                            "false",
-				"spark.connect.call_header.x-trace-id": "t1",
-			},
-			conn: connectimpl.ConnectionOpts{
-				Host:                      "localhost:15002",
-				AuthType:                  connectimpl.AuthTypeToken,
-				Username:                  "alice",
-				Token:                     "abc",
-				UserAgent:                 "my-app/1.0",
-				SessionID:                 "s-1",
-				ValidateServerCertificate: true,
-				ReleaseSession:            true,
-			},
-		},
-		{
-			// Repeating a parameter with the same value is harmless.
-			uri: "sc://user:abc@localhost:15002/;token=abc;user_id=user;token=abc",
-			options: map[string]string{
-				"spark.host":      "localhost",
-				"spark.port":      "15002",
-				"spark.api":       "connect",
-				"spark.auth_type": "token",
-				"password":        "abc",
-				"username":        "user",
-			},
-			conn: connectimpl.ConnectionOpts{
-				Host:                      "localhost:15002",
-				AuthType:                  connectimpl.AuthTypeToken,
-				Username:                  "user",
-				Token:                     "abc",
-				Tls:                       true,
-				ValidateServerCertificate: true,
-				ReleaseSession:            true,
-			},
-		},
-		{
-			// An empty parameter list adds nothing.
-			uri: "sc://localhost:15002/;",
-			options: map[string]string{
-				"spark.host":      "localhost",
-				"spark.port":      "15002",
-				"spark.api":       "connect",
-				"spark.auth_type": "none",
-			},
-		},
-	} {
-		u, err := url.Parse(tc.uri)
-		require.NoError(t, err)
-		options := map[string]string{}
-		require.NoError(t, parseOptionsFromUri(u, options), "failed to parse URI %s", tc.uri)
-		require.Equal(t, tc.options, options, "unexpected options for URI %s", tc.uri)
-		if tc.conn.Host == "" {
-			continue
-		}
-		parsed, err := connectOptsFromOptions(options)
-		require.NoError(t, err, "failed to parse Connect options from URI %s", tc.uri)
-		require.Equal(t, tc.conn, parsed, "unexpected Connect options for URI %s", tc.uri)
-	}
-}
-
-func TestParseSparkConnectParamsRejectsConflicts(t *testing.T) {
-	const secret = "sc-secret-sentinel"
-	for _, uri := range []string{
 		"sc://localhost/;token=" + secret + ";token=other",
 		"sc://localhost/;token=" + secret + "?auth_type=none",
 		"sc://localhost/;token=" + secret + "?auth_type=basic",
@@ -724,12 +712,12 @@ func TestParseSparkConnectParamsRejectsConflicts(t *testing.T) {
 		"sc://localhost/;token",
 	} {
 		u, err := url.Parse(uri)
-		require.NoError(t, err, "URI %s", uri)
+		require.NoError(t, err)
 		options := map[string]string{}
 		err = parseOptionsFromUri(u, options)
 		var adbcErr adbc.Error
-		require.ErrorAs(t, err, &adbcErr, "expected error parsing URI %s", uri)
-		require.Equal(t, adbc.StatusInvalidArgument, adbcErr.Code, "URI %s", uri)
+		require.ErrorAs(t, err, &adbcErr, "expected error parsing invalid URI %s", uri)
+		require.Equal(t, adbc.StatusInvalidArgument, adbcErr.Code, "expected invalid argument error parsing URI %s", uri)
 		require.NotContains(t, err.Error(), secret, "error for URI %s leaks the token", uri)
 	}
 }
@@ -766,104 +754,12 @@ func TestParseSparkConnectParamsRejectsInvalidValues(t *testing.T) {
 	require.NotContains(t, err.Error(), secret)
 }
 
-// An sc:// URI without an auth_type defaults it: token when the URI has a token
-// or a password, and none otherwise. An explicit auth_type always wins.
-func TestSparkConnectDefaultAuthType(t *testing.T) {
-	for _, tc := range []struct {
-		uri      string
-		authType string
-		conn     connectimpl.ConnectionOpts
-	}{
-		{
-			uri:      "sc://localhost:15002",
-			authType: "none",
-			conn: connectimpl.ConnectionOpts{
-				Host:                      "localhost:15002",
-				AuthType:                  connectimpl.AuthTypeNone,
-				Tls:                       true,
-				ValidateServerCertificate: true,
-				ReleaseSession:            true,
-			},
-		},
-		{
-			uri:      "sc://localhost:15002/;use_ssl=false",
-			authType: "none",
-			conn: connectimpl.ConnectionOpts{
-				Host:                      "localhost:15002",
-				AuthType:                  connectimpl.AuthTypeNone,
-				ValidateServerCertificate: true,
-				ReleaseSession:            true,
-			},
-		},
-		{
-			uri:      "sc://:abc@localhost:15002",
-			authType: "token",
-			conn: connectimpl.ConnectionOpts{
-				Host:                      "localhost:15002",
-				AuthType:                  connectimpl.AuthTypeToken,
-				Token:                     "abc",
-				Tls:                       true,
-				ValidateServerCertificate: true,
-				ReleaseSession:            true,
-			},
-		},
-		{
-			uri:      "sc://localhost:15002/;token=abc",
-			authType: "token",
-			conn: connectimpl.ConnectionOpts{
-				Host:                      "localhost:15002",
-				AuthType:                  connectimpl.AuthTypeToken,
-				Token:                     "abc",
-				Tls:                       true,
-				ValidateServerCertificate: true,
-				ReleaseSession:            true,
-			},
-		},
-		{
-			// A user name alone isn't a token.
-			uri:      "sc://alice@localhost:15002",
-			authType: "none",
-			conn: connectimpl.ConnectionOpts{
-				Host:                      "localhost:15002",
-				AuthType:                  connectimpl.AuthTypeNone,
-				Username:                  "alice",
-				Tls:                       true,
-				ValidateServerCertificate: true,
-				ReleaseSession:            true,
-			},
-		},
-		{
-			// An explicit auth_type is kept.
-			uri:      "sc://localhost:15002?auth_type=token&password=x",
-			authType: "token",
-		},
-	} {
-		u, err := url.Parse(tc.uri)
-		require.NoError(t, err)
-		options := map[string]string{}
-		require.NoError(t, parseOptionsFromUri(u, options), "URI %s", tc.uri)
-		require.Equal(t, tc.authType, options[sparkutil.OptionAuthType], "auth type for %s", tc.uri)
-		if tc.conn.Host == "" {
-			continue
-		}
-		parsed, err := connectOptsFromOptions(options)
-		require.NoError(t, err, "URI %s", tc.uri)
-		require.Equal(t, tc.conn, parsed, "URI %s", tc.uri)
-	}
-}
-
 func TestSparkConnectExplicitAuthTypeConflicts(t *testing.T) {
-	// A password in the userinfo with auth_type=none is a conflict, as before.
+	// A password in the userinfo with auth_type=none is a conflict.
 	u, err := url.Parse("sc://:abc@localhost:15002?auth_type=none")
 	require.NoError(t, err)
 	options := map[string]string{}
 	require.NoError(t, parseOptionsFromUri(u, options))
 	_, err = connectOptsFromOptions(options)
 	require.Error(t, err)
-
-	// A token in the path with an explicit non-token auth_type is a conflict too.
-	u, err = url.Parse("sc://localhost:15002/;token=abc?auth_type=none")
-	require.NoError(t, err)
-	options = map[string]string{}
-	require.Error(t, parseOptionsFromUri(u, options))
 }

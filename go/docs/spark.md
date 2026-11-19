@@ -68,7 +68,7 @@ sc://localhost:15002/;token=abc123;use_ssl=true;user_id=alice
   - `token` sets bearer-token authentication (`auth_type=token`) and is sent as the password.
   - `use_ssl` sets `spark.tls`. TLS remains on unless `use_ssl=false` is set.
   - `user_id` sets the user (`username`).
-  - `user_agent` sets the client type reported to the server (`spark.connect.user_agent`).
+  - `user_agent` sets `spark.connect.user_agent`, which is appended to the client type reported to the server.
   - `session_id` sets `spark.connect.session_id`.
   - Any other key is sent as a gRPC call header, as `spark.connect.call_header.<key>`.
 - A parameter that sets an option already set elsewhere in the URI, to a different value, is an error.
@@ -128,7 +128,7 @@ These parameters can be specified in the URI as query parameters, or as connecti
 `spark.connect.user_agent` (query parameter: `connect.user_agent`)
 : **Type**: string.
 
-  For the Spark Connect backend, the client type reported to the server. It replaces the driver's default.
+  For the Spark Connect backend, append this to the client type that the driver reports to the server, separated by a space.
 
 `spark.connect.session_id` (query parameter: `connect.session_id`)
 : **Type**: string.
