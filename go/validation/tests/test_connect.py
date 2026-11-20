@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import re
+import urllib.parse
+import uuid
 
 import adbc_driver_manager.dbapi
 import pytest
@@ -61,6 +63,37 @@ def test_session_id(driver, conn, db_kwargs, driver_path):
             cur.execute("SELECT 1")
             result = cur.fetchall()
             assert result == [(1,)]
+
+
+def test_connection_string_parameters(driver, db_kwargs, driver_path):
+    # Spark Connect's sc://host:port/;key=value form, pointed at the server in
+    # the CI URI. The server's host and TLS setting carry over, and the rest of
+    # the parameters are the ones PySpark accepts.
+    uri = db_kwargs.get("uri")
+    if not uri:
+        pytest.skip("no server URI configured")
+    parsed = urllib.parse.urlsplit(uri)
+    query = urllib.parse.parse_qs(parsed.query)
+    if query.get("auth_type") != ["none"]:
+        pytest.skip("the test needs a server without authentication")
+    tls = query.get("tls", ["true"])[0]
+    session_id = str(uuid.uuid4())
+    sc_uri = (
+        f"sc://{parsed.hostname}:{parsed.port or 15002}/"
+        f";use_ssl={tls};user_id=validation;user_agent=adbc-validation"
+        f";session_id={session_id}"
+    )
+    with adbc_driver_manager.dbapi.connect(
+        driver_path,
+        db_kwargs={"uri": sc_uri, "spark.auth_type": "none"},
+        autocommit=True,
+    ) as conn2:
+        assert (
+            conn2.adbc_connection.get_option("spark.connect.session_id") == session_id
+        )
+        with conn2.cursor() as cur:
+            cur.execute("SELECT 1")
+            assert cur.fetchall() == [(1,)]
 
 
 def test_large_value(driver, conn):

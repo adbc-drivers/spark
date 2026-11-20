@@ -57,8 +57,26 @@ Note: The example above is for Python using the [adbc-driver-manager](https://py
 - If not specified, the `api` defaults to `thrift+binary` (URI-encoded: `thrift%2Bbinary`).
 - Options can be specified as query parameters or as driver options.
 
+For Spark Connect, the standard connection string also works:
+
+```
+sc://localhost:15002/;token=abc123;use_ssl=true;user_id=alice
+```
+
+- The URI scheme is "sc://" and the path must start with `/;`.
+- The parameters are separated by `;` and are `key=value` pairs:
+  - `token` sets bearer-token authentication (`auth_type=token`) and is sent as the password.
+  - `use_ssl` sets `spark.tls`. TLS remains on unless `use_ssl=false` is set.
+  - `user_id` sets the user (`username`).
+  - `user_agent` sets `spark.connect.user_agent`, which is appended to the client type reported to the server.
+  - `session_id` sets `spark.connect.session_id`.
+  - Any other key is sent as a gRPC call header, as `spark.connect.call_header.<key>`.
+- A parameter that sets an option already set elsewhere in the URI, to a different value, is an error.
+- `auth_type` defaults to `token` when the URI has a token or a password (`/;token=...` or `sc://:token@host`), and to `none` otherwise, so `sc://host:15002` works as is. Set `auth_type` explicitly to override the default. A conflict with an explicit `auth_type` is an error.
+- TLS is on by default for Spark Connect, unlike PySpark's `sc://`, which is plaintext by default. Set `use_ssl=false` for a plaintext server.
+
 :::{note}
-Reserved characters in URI elements must be URI-encoded. For example, `@` becomes `%40` and `+` becomes `%2B`.
+Reserved characters in URI elements must be URI-encoded. For example, `@` becomes `%40` and `+` becomes `%2B`. In a `/;key=value` parameter, `;`, `?`, and `#` inside a value must be encoded as `%3B`, `%3F`, and `%23`.
 :::
 
 ### Connection Options
@@ -106,6 +124,11 @@ These parameters can be specified in the URI as query parameters, or as connecti
 : **Type**: string. **Scope**: database and connection.
 
   Only supported for Spark Connect. Add arbitrary HTTP headers to be sent on requests. Binary headers are not currently supported.
+
+`spark.connect.user_agent` (query parameter: `connect.user_agent`)
+: **Type**: string.
+
+  For the Spark Connect backend, append this to the client type that the driver reports to the server, separated by a space.
 
 `spark.connect.session_id` (query parameter: `connect.session_id`)
 : **Type**: string.

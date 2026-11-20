@@ -113,10 +113,106 @@ func parseOptionsFromUri(uri *url.URL, options map[string]string) error {
 		options[sparkutil.OptionApi] = scheme
 	}
 
-	if uri.Path != "" && uri.Path != "/" {
+	// Spark Connect's standard form, sc://host:port/;key=value;key=value,
+	// carries its parameters in the path. Any other path keeps its meaning
+	// as the Livy base URL.
+	if scheme == "sc" && strings.HasPrefix(uri.EscapedPath(), "/;") {
+		if err := parseSparkConnectParams(uri.EscapedPath()[len("/;"):], options); err != nil {
+			return err
+		}
+	} else if uri.Path != "" && uri.Path != "/" {
 		options[sparkutil.OptionLivyBaseURL] = uri.Path
 	}
 
+	// An sc:// URI without an auth_type uses token auth if it has a token
+	// (/;token= or sc://:token@host), and none otherwise. An explicit
+	// auth_type is kept, so a conflict with it is an error.
+	if _, ok := options[sparkutil.OptionAuthType]; scheme == "sc" && !ok {
+		if _, ok := options[adbc.OptionKeyPassword]; ok {
+			options[sparkutil.OptionAuthType] = sparkutil.OptionValueAuthTypeToken
+		} else {
+			options[sparkutil.OptionAuthType] = sparkutil.OptionValueAuthTypeNone
+		}
+	}
+	return nil
+}
+
+// parseSparkConnectParams reads the parameters of a Spark Connect connection
+// string, sc://host:port/;key=value;key=value. The keys match PySpark's
+// ChannelBuilder: token, use_ssl, user_id, user_agent and session_id map onto
+// the existing connect options. Any other key is sent as a gRPC call header,
+// as the Spark clients do.
+//
+// A parameter that sets an option already set by the URI, to a different
+// value, is an error. Nothing is overridden silently.
+func parseSparkConnectParams(params string, options map[string]string) error {
+	for kv := range strings.SplitSeq(params, ";") {
+		if kv == "" {
+			continue
+		}
+		rawKey, rawValue, found := strings.Cut(kv, "=")
+		if !found {
+			// Don't echo the parameter: it may be a secret.
+			return adbc.Error{
+				Code: adbc.StatusInvalidArgument,
+				Msg:  "[spark] connection string parameter is missing '='",
+			}
+		}
+		key := strings.ToLower(rawKey)
+		// The parameters are part of the path, so they decode as a path does,
+		// as in PySpark (urllib.parse.unquote) and the Scala client
+		// (URI.getPath): '+' stays '+', and %2B also decodes to '+'.
+		value, err := url.PathUnescape(rawValue)
+		if err != nil {
+			return adbc.Error{
+				Code: adbc.StatusInvalidArgument,
+				Msg:  fmt.Sprintf("[spark] invalid URL escape in connection string parameter %q", key),
+			}
+		}
+
+		switch key {
+		case "token":
+			if err := setURIOption(options, sparkutil.OptionAuthType, sparkutil.OptionValueAuthTypeToken); err != nil {
+				return err
+			}
+			if err := setURIOption(options, adbc.OptionKeyPassword, value); err != nil {
+				return err
+			}
+		case "use_ssl":
+			if err := setURIOption(options, sparkutil.OptionUseTls, value); err != nil {
+				return err
+			}
+		case "user_id":
+			if err := setURIOption(options, adbc.OptionKeyUsername, value); err != nil {
+				return err
+			}
+		case "user_agent":
+			if err := setURIOption(options, sparkutil.OptionConnectUserAgent, value); err != nil {
+				return err
+			}
+		case "session_id":
+			if err := setURIOption(options, sparkutil.OptionConnectSessionId, value); err != nil {
+				return err
+			}
+		default:
+			if err := setURIOption(options, sparkutil.OptionConnectCallHeaderPrefix+key, value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// setURIOption sets a URI-derived option. It is an error if the option already
+// has a different value.
+func setURIOption(options map[string]string, key, value string) error {
+	if existing, ok := options[key]; ok && existing != value {
+		return adbc.Error{
+			Code: adbc.StatusInvalidArgument,
+			Msg:  fmt.Sprintf("[spark] conflicting values for %s in connection string", key),
+		}
+	}
+	options[key] = value
 	return nil
 }
 
@@ -364,6 +460,11 @@ func connectOptsFromOptions(options map[string]string) (connectimpl.ConnectionOp
 	if sessionID, ok := options[sparkutil.OptionConnectSessionId]; ok {
 		connectOpts.SessionID = sessionID
 		delete(options, sparkutil.OptionConnectSessionId)
+	}
+
+	if userAgent, ok := options[sparkutil.OptionConnectUserAgent]; ok {
+		connectOpts.UserAgent = userAgent
+		delete(options, sparkutil.OptionConnectUserAgent)
 	}
 
 	releaseSession, err := parseBoolOption(sparkutil.OptionConnectReleaseSession, options, true)

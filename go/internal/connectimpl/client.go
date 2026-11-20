@@ -59,6 +59,9 @@ type ConnectionOpts struct {
 	// Token is the OAuth2 bearer token used when AuthType is AuthTypeToken.
 	Token string
 
+	// UserAgent, when set, is appended to the client type reported to the server.
+	UserAgent string
+
 	Tls                       bool
 	ValidateServerCertificate bool
 	AwsProxyAuth              string
@@ -155,7 +158,7 @@ func newConnectClient(opts ConnectionOpts) (*ConnectClient, error) {
 		service:        proto.NewSparkConnectServiceClient(conn),
 		sessionID:      sessionID,
 		userContext:    &proto.UserContext{UserId: userID(opts.Username)},
-		clientType:     clientType(),
+		clientType:     clientType(opts.UserAgent),
 		headers:        headers,
 		releaseSession: opts.ReleaseSession,
 	}, nil
@@ -215,9 +218,14 @@ func userID(username string) string {
 	return "na"
 }
 
-// clientType identifies the driver, with spark-connect-go's os/go suffix.
-func clientType() string {
-	return fmt.Sprintf("adbc-driver-spark os/%s go/%s driver/%s", runtime.GOOS, runtime.Version(), driverbase.DriverVersion())
+// clientType identifies the driver, with spark-connect-go's os/go suffix,
+// followed by userAgent if it is set.
+func clientType(userAgent string) string {
+	s := fmt.Sprintf("adbc-driver-spark os/%s go/%s driver/%s", runtime.GOOS, runtime.Version(), driverbase.DriverVersion())
+	if userAgent != "" {
+		s += " " + userAgent
+	}
+	return s
 }
 
 func (c *ConnectClient) outgoing(ctx context.Context) context.Context {

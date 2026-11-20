@@ -83,7 +83,8 @@ func TestUserIDAndClientTypeDefaults(t *testing.T) {
 	t.Setenv("USER", "")
 	require.Equal(t, "na", userID(""))
 
-	require.True(t, strings.HasPrefix(clientType(), "adbc-driver-spark os/"), clientType())
+	require.True(t, strings.HasPrefix(clientType(""), "adbc-driver-spark os/"), clientType(""))
+	require.Equal(t, clientType("")+" my-app/1.0", clientType("my-app/1.0"))
 }
 
 func TestPlaintextToken(t *testing.T) {
