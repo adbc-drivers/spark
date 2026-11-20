@@ -77,7 +77,8 @@ func (c *connectionImpl) ListTableTypes(ctx context.Context) ([]string, error) {
 		return nil, errConnectionClosed
 	}
 	return []string{
-		"VIEW",
+		sparkbase.TableTypeTable,
+		sparkbase.TableTypeView,
 		"FOREIGN",
 		"MANAGED",
 		"STREAMING_TABLE",

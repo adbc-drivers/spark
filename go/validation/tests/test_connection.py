@@ -98,6 +98,157 @@ class TestConnection(adbc_drivers_validation.tests.connection.TestConnection):
                     f"DROP VIEW IF EXISTS {driver.quote_one_identifier(view)}"
                 )
 
+    def test_get_objects_table_types(self, driver, conn) -> None:
+        if driver.short_version.endswith(("-thrift", "-thrifthttp")):
+            # Spark's Thrift GetTables reports types of its own. This test
+            # covers SHOW TABLE EXTENDED.
+            pytest.skip("Thrift lists tables with GetTables")
+        if driver.short_version.startswith("emr-"):
+            pytest.skip("EMR tables need an S3 location")
+        if driver.name == "spark4iceberg":
+            # Without Iceberg's SQL extensions, Spark creates views only in the
+            # session catalog.
+            pytest.skip("the Iceberg catalog can't create views")
+        catalog = driver.features.current_catalog
+        schema = driver.features.current_schema
+        suffix = uuid.uuid4().hex[:8]
+        managed = f"types_managed_{suffix}"
+        external = f"types_external_{suffix}"
+        view = f"types_view_{suffix}"
+        temp_view = f"types_temp_{suffix}"
+
+        def listed(types_filter=None):
+            objects = conn.adbc_get_objects(
+                depth="tables",
+                catalog_filter=catalog,
+                db_schema_filter=schema,
+                table_name_filter=f"%{suffix}",
+                table_types_filter=types_filter,
+            )
+            return sorted(
+                (t["table_name"], t["table_type"])
+                for obj in objects.read_all().to_pylist()
+                for s in obj["catalog_db_schemas"]
+                for t in s["db_schema_tables"]
+            )
+
+        def catalog_type(name):
+            # A plain CREATE TABLE is MANAGED, or EXTERNAL where the metastore
+            # makes managed tables external, as Hive 3 and later do.
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"DESCRIBE TABLE EXTENDED {driver.quote_identifier(catalog, schema, name)}"
+                )
+                return {row[0]: row[1] for row in cursor.fetchall()}["Type"]
+
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"CREATE TABLE {driver.quote_identifier(catalog, schema, managed)} (id INT)"
+                )
+                cursor.execute(
+                    f"CREATE TABLE {driver.quote_identifier(catalog, schema, external)} "
+                    f"(id INT) USING parquet LOCATION '/tmp/adbc_types_{suffix}'"
+                )
+                cursor.execute(
+                    f"CREATE VIEW {driver.quote_identifier(catalog, schema, view)} AS SELECT 1 AS id"
+                )
+                cursor.execute(
+                    f"CREATE TEMPORARY VIEW {driver.quote_identifier(temp_view)} AS SELECT 1 AS id"
+                )
+            expected = sorted(
+                [
+                    (managed, catalog_type(managed)),
+                    (external, "EXTERNAL"),
+                    (view, "VIEW"),
+                    (temp_view, "VIEW"),
+                ]
+            )
+            # Every table is listed with its type, temporary views included.
+            assert listed() == expected
+            # GetTableTypes lists each type, and filtering by a type lists
+            # exactly the tables of that type.
+            table_types = conn.adbc_get_table_types()
+            for kind in sorted({k for _, k in expected}):
+                assert kind in table_types
+                assert listed([kind]) == [(n, k) for n, k in expected if k == kind]
+            # At depth ALL, temporary views list their columns too.
+            objects = conn.adbc_get_objects(
+                depth="all",
+                catalog_filter=catalog,
+                db_schema_filter=schema,
+                table_name_filter=temp_view,
+            )
+            columns = [
+                c["column_name"]
+                for obj in objects.read_all().to_pylist()
+                for s in obj["catalog_db_schemas"]
+                for t in s["db_schema_tables"]
+                for c in t["table_columns"]
+            ]
+            assert columns == ["id"]
+        finally:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"DROP VIEW IF EXISTS {driver.quote_identifier(temp_view)}"
+                )
+                cursor.execute(
+                    f"DROP VIEW IF EXISTS {driver.quote_identifier(catalog, schema, view)}"
+                )
+                for table in (managed, external):
+                    cursor.execute(
+                        driver.drop_table(
+                            table_name=table, schema_name=schema, catalog_name=catalog
+                        )
+                    )
+
+    @pytest.mark.requires_features(
+        ["get_objects", "secondary_catalog", "secondary_catalog_schema"]
+    )
+    def test_get_objects_secondary_catalog(self, driver, conn) -> None:
+        # A V2 catalog, such as Iceberg, rejects SHOW TABLE EXTENDED on Spark
+        # 3.5, so its schema is listed with SHOW TABLES there. An unfiltered
+        # call reaches the catalog too.
+        if driver.short_version.endswith(("-thrift", "-thrifthttp")):
+            pytest.skip("Thrift lists tables with GetTables")
+        if driver.short_version.startswith("emr-"):
+            pytest.skip("EMR tables need an S3 location")
+        catalog = driver.features.secondary_catalog
+        schema = driver.features.secondary_catalog_schema
+        table = f"v2_table_{uuid.uuid4().hex[:8]}"
+        qualified = driver.quote_identifier(catalog, schema, table)
+        with conn.cursor() as cursor:
+            cursor.execute(f"CREATE TABLE {qualified} (id INT)")
+        try:
+            objects = conn.adbc_get_objects(
+                depth="tables",
+                catalog_filter=catalog,
+                db_schema_filter=schema,
+                table_name_filter=table,
+            )
+            types = [
+                t["table_type"]
+                for obj in objects.read_all().to_pylist()
+                for s in obj["catalog_db_schemas"]
+                for t in s["db_schema_tables"]
+                if t["table_name"] == table
+            ]
+            assert len(types) == 1
+            assert types[0] in conn.adbc_get_table_types()
+
+            # An unfiltered call succeeds, and it lists the table too.
+            objects = conn.adbc_get_objects(depth="tables")
+            names = [
+                t["table_name"]
+                for obj in objects.read_all().to_pylist()
+                for s in obj["catalog_db_schemas"]
+                for t in s["db_schema_tables"]
+            ]
+            assert table in names
+        finally:
+            with conn.cursor() as cursor:
+                cursor.execute(f"DROP TABLE IF EXISTS {qualified}")
+
     def test_get_objects_name_patterns(self, driver, conn) -> None:
         if driver.short_version.startswith("emr-"):
             pytest.skip("EMR tables need an S3 location")
