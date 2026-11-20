@@ -1,0 +1,55 @@
+// Copyright (c) 2026 ADBC Drivers Contributors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//         http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// part: metadata
+
+# TIME(6) holds every case's values: Spark 4.3 can't insert a bound time into
+# TIME(0) or TIME(3), and only Spark 4.3 has TIME(9). Spark reads TIME back as
+# time64[ns].
+
+[tags]
+caveats = [
+  "Spark 4.1 to 4.3 support TIME only with spark.sql.timeType.enabled set to true",
+  "Spark 4.3 binds a time as TIME(6), which a TIME column of lower precision rejects",
+]
+
+// part: setup_query
+
+SET spark.sql.timeType.enabled = true;
+
+CREATE TABLE test_time (
+    idx INT,
+    res TIME(6)
+);
+
+// part: expected_schema
+
+{
+    "format": "+s",
+    "children": [
+        {
+            "name": "res",
+            "format": "ttn",
+            "flags": ["nullable"]
+        }
+    ]
+}
+
+// part: expected
+
+{"res": 0}
+{"res": null}
+{"res": 49531000000000}
+{"res": 45045000000000}
+{"res": 86399000000000}

@@ -123,7 +123,7 @@ func statusFromSQLState(defaultStatus adbc.Status, sqlState string) adbc.Status 
 		return adbc.StatusAlreadyExists
 	case "22003":
 		return adbc.StatusInvalidData
-	case "22546", "42000", "42601", "42702", "42710", "42846":
+	case "22546", "42000", "42601", "42702", "42710", "42846", "42P02":
 		return adbc.StatusInvalidArgument
 	case "42K03", "42P01", "42704":
 		return adbc.StatusNotFound

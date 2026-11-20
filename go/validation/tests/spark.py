@@ -76,6 +76,7 @@ class Spark3ThriftQuirks(model.DriverQuirks):
         if context in (
             "TestConnection.test_get_table_schema_catalog",
             "TestConnection.test_get_table_schema_schema",
+            "TestStatement.sample_table",
         ):
             return default.replace("VARCHAR", "STRING")
         return default
@@ -147,6 +148,13 @@ class Spark4ThriftHttpQuirks(Spark4ThriftQuirks):
 class Spark4ConnectQuirks(Spark4ThriftQuirks):
     vendor_version = re.compile(r"4\.0\.\d+.*\(Spark Connect\)")
     short_version = "4.0-connect"
+    # Spark Connect binds parameters, which the Thrift quirks don't. Spark SQL
+    # has no $1 markers, so the positional marker is '?'.
+    features = Spark4ThriftQuirks.features.with_values(statement_bind=True)
+
+    def bind_parameter(self, index: int) -> str:
+        return "?"
+
     setup = model.DriverSetup(
         database={
             "uri": model.FromEnv("SPARK_CONNECT_URI"),
@@ -164,6 +172,7 @@ class Spark4ConnectQuirks(Spark4ThriftQuirks):
             Path(__file__).parent.parent / "queries/base",
             Path(__file__).parent.parent / "queries/spark40",
             Path(__file__).parent.parent / "queries/spark40-connect",
+            Path(__file__).parent.parent / "queries/spark40-connect-only",
         )
 
 
@@ -181,8 +190,17 @@ class Spark41ConnectQuirks(Spark4ConnectQuirks):
         },
     )
 
+    @property
+    def queries_paths(self) -> tuple[Path]:
+        # Spark 4.0's own overrides don't apply, such as its lack of TIME.
+        return (
+            Path(__file__).parent.parent / "queries/base",
+            Path(__file__).parent.parent / "queries/spark40",
+            Path(__file__).parent.parent / "queries/spark40-connect",
+        )
 
-class Spark42ConnectQuirks(Spark4ConnectQuirks):
+
+class Spark42ConnectQuirks(Spark41ConnectQuirks):
     vendor_version = re.compile(r"4\.2\.\d+.*\(Spark Connect\)")
     short_version = "4.2-connect"
     features = Spark4ConnectQuirks.features.with_values(
@@ -201,7 +219,7 @@ class Spark42ConnectQuirks(Spark4ConnectQuirks):
     )
 
 
-class Spark43ConnectQuirks(Spark4ConnectQuirks):
+class Spark43ConnectQuirks(Spark41ConnectQuirks):
     vendor_version = re.compile(r"4\.3\.\d+.*\(Spark Connect\)")
     short_version = "4.3-connect"
     features = Spark4ConnectQuirks.features.with_values(
@@ -274,6 +292,7 @@ class SparkEmr8ConnectQuirks(Spark4ConnectQuirks):
             Path(__file__).parent.parent / "queries/base",
             Path(__file__).parent.parent / "queries/spark40",
             Path(__file__).parent.parent / "queries/spark40-connect",
+            Path(__file__).parent.parent / "queries/spark40-connect-only",
             Path(__file__).parent.parent / "queries/emr-spark8",
         )
 

@@ -303,8 +303,11 @@ func (c *ConnectClient) executePlan(ctx context.Context, q sparkbase.QueryContex
 
 // executeSQL runs a query as a single ExecutePlan with a SQL relation root.
 func (c *ConnectClient) executeSQL(ctx context.Context, q sparkbase.QueryContext) (*resultReader, error) {
+	// PosArgs is marked deprecated in the protos we pin. It's the positional
+	// field that the user's driver sends, and Spark 4.3 reads it alongside
+	// PosArguments.
 	plan := &proto.Plan{OpType: &proto.Plan_Root{Root: &proto.Relation{
-		RelType: &proto.Relation_Sql{Sql: &proto.SQL{Query: q.Query}},
+		RelType: &proto.Relation_Sql{Sql: &proto.SQL{Query: q.Query, PosArgs: q.PosArgs}}, //nolint:staticcheck
 	}}}
 	return c.executePlan(ctx, q, plan)
 }
