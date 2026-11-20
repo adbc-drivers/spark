@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync/atomic"
 
 	connectpb "github.com/adbc-drivers/spark/go/internal/generated"
 	"github.com/apache/arrow-adbc/go/adbc"
@@ -403,7 +404,8 @@ func newRowsReader(open func([]*connectpb.Expression_Literal) (array.RecordReade
 	if err != nil {
 		return nil, err
 	}
-	r := &rowsReader{open: open, rows: rows[1:], cur: first, refs: 1}
+	r := &rowsReader{open: open, rows: rows[1:], cur: first}
+	r.refs.Store(1)
 	if first != nil {
 		r.rowSchema = first.Schema()
 		r.schema = r.rowSchema
@@ -431,16 +433,15 @@ type rowsReader struct {
 	// batch's own schema differs. It's released by the next Next or by Release.
 	wrapped arrow.RecordBatch
 	err     error
-	refs    int64
+	refs    atomic.Int64
 }
 
 func (r *rowsReader) Retain() {
-	r.refs++
+	r.refs.Add(1)
 }
 
 func (r *rowsReader) Release() {
-	r.refs--
-	if r.refs == 0 {
+	if r.refs.Add(-1) == 0 {
 		r.dropWrapped()
 		if r.cur != nil {
 			r.cur.Release()
